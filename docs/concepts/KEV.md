@@ -104,7 +104,7 @@ If you tap **Not now**, or just close the sheet, nothing is lost: "Kept in To so
 
 ## 3. Tablet / desktop adaptation
 
-- **Tablet:** the Kev sheet opens from the right as a side sheet (about 40% width), leaving Today or Forward visible and tappable. Cited items highlight in the main view when tapped.
+- **Tablet:** the same bottom-sheet behaviour as phones — half height when opened from something on screen, full height from the bar. Today is not squeezed beside a panel (ADR 0002).
 - **Desktop:** Kev is a persistent right-hand panel. Selecting something in Today/Forward sets Kev's focus line automatically ("About: Thursday 15"); typing is always one click away.
 - The conversation layout is the same everywhere; only the container changes. (That same independence is what makes voice a later adapter, not a redesign.)
 

@@ -67,7 +67,7 @@ Scenario date: **Wednesday 14 October 2026**, 7:03am, Pacific/Auckland.
 - **Sheets, not pages, for detail.** Tapping an event, insight or person opens a sheet over the current screen; dismiss it and you're exactly where you were.
 - **Kev as a sheet.** Tapping the Kev bar raises a sheet over the current screen (≈70% height), drag up for full screen. Kev knows what you were looking at (`focus`).
 - **Landing:** HOME always opens on Today.
-- **Tablet (≥768px):** same model; content gains a second column; Kev opens as a side sheet.
+- **Tablet (≥768px):** same model; content gains a second column. Kev uses the same bottom-sheet behaviour as phones (half height from context, full height from the bar) — Today is never squeezed beside a panel (ADR 0002).
 - **Desktop (≥1200px):** the ⌂ menu becomes a slim left rail listing every place (primary ones first); Kev becomes a persistent right-hand panel; the current place fills the middle.
 
 ```
@@ -92,6 +92,14 @@ Desktop ≥1200px
 6. **Tablet bar is a real input** — typing starts immediately and the panel follows.
 7. **Compound capture rule** — split / keep together / keep unstructured / ask (see KEV-AGENT-MODEL.md).
 8. **No artificial latency.**
+
+## Final decisions (ADR 0002)
+
+1. **Tablet Kev:** bottom sheet at tablet/portrait widths; side-by-side only where there is genuinely room (desktop ≥1200px).
+2. **Clashes:** shown on the affected run/commitment; the corrective action (**Who?**, **Sort it**) outranks the clash label visually.
+3. **Insight counts:** "+ N more" counts only genuine insights, never on-object problems.
+
+M0 is complete.
 
 ## Design test (used to judge the M0.5 prototype)
 

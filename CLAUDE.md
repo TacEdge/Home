@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0.5 and M0.6 prototype passes complete (`/prototype`, throwaway). **Next: M1 — awaiting the go-ahead.** Do not write application code (M1+) until told to start. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **Current milestone: M1 — Foundations**, defined exactly by `docs/m1/M1-BUILD-CONTRACT.md` (technical choices in ADR 0003). Build only what the contract lists, in its order; stop at its definition of done for review. Then milestone by milestone per `docs/ROADMAP.md`.
 
 ## Read first
 
@@ -35,6 +35,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 | `docs/ROADMAP.md` | For milestone order and the "Not yet" list. |
 | `docs/concepts/` | Before building any screen — the agreed experience concepts. |
 | `docs/decisions/` | ADRs; check before revisiting a settled decision. |
+| `docs/m1/` (and later `docs/mN/`) | The build contract for the current milestone. |
 
 If a request conflicts with these docs, stop and say so. Don't silently diverge; propose a doc change instead.
 
@@ -53,7 +54,7 @@ If a request conflicts with these docs, stop and say so. Don't silently diverge;
 11. **Nothing clinical, nothing scored.** No child tracking, relationship metrics, streaks or gamification. No storing inferences about emotions, health, behaviour or relationships. Person profiles are lightweight context, never development records.
 12. **Kev is channel-agnostic.** All conversation goes through `kev.handle()` in `src/kev/orchestrator.ts`, which emits structured `KevEvent`s. No UI, HTTP or audio concerns inside Kev; no Kev logic inside UI code. Voice will be an adapter, not a rewrite.
 13. **Integrations sit behind HOME-defined interfaces.** Calendar access goes through `CalendarProvider`; ICS is one adapter. Never let a provider's shape leak into domain entities.
-14. **`/prototype` is throwaway.** It must never import from `src/`, be imported by `src/`, or gain a database, auth, API, AI or integration. Delete it once M1's real screens exist.
+14. **`/prototype` is reference only.** It must never import from `src/`, be imported by `src/`, be built, linted or deployed, or gain a database, auth, API, AI or integration. Never copy its code into `src/`. Delete it in M6; tag `m0.6-prototype` keeps it.
 15. **Insights are derived, not stored.** Detectors in `src/domain/engines/insights/` are pure and tested; every insight carries its source facts and template text. Kev may rephrase and reorder, never invent. Only dismissals persist (`insight_response`). Screens never wait on the LLM.
 16. **This household only.** Don't build or prepare multi-household/SaaS structures.
 

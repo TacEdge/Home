@@ -185,7 +185,7 @@ Two ways Kev appears, one conversation underneath:
 
 | | Opened from | Presentation | Purpose |
 |---|---|---|---|
-| **Kev as assistant** | Something on screen — an insight, a run, a task, an event, *Sort it* | Alongside the thing (a half-height sheet on phones; a side panel on tablet) so the subject stays visible | Help with *this* |
+| **Kev as assistant** | Something on screen — an insight, a run, a task, an event, *Sort it* | Alongside the thing (a half-height bottom sheet on phones and tablets; a side panel only on wide screens) so the subject stays visible | Help with *this* |
 | **Kev as destination** | The Ask/Tell bar | The full conversation | Ask or tell anything |
 
 The assistant form can always expand into the destination. The channel-agnostic orchestrator doesn't know the difference; only the adapter does.
