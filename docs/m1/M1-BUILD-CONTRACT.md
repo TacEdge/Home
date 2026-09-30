@@ -54,7 +54,7 @@ Each step is small, independently verifiable and ends green (`pnpm lint && pnpm 
 
 | # | Step | Verify by | PR |
 |---|---|---|---|
-| 1 | **Repo hygiene** — confirm `main` exists and is the base; `.nvmrc`/`engines`, `packageManager` (pnpm), `.gitignore` (incl. `.env*` except `.env.example`), `.editorconfig`, README skeleton. | Clean install on a fresh clone. | A |
+| 1 | **Repo hygiene** — confirm `main` exists and is the base; confirm tag `m0.6-prototype` exists on the remote at commit `3d58390` (create it in GitHub if missing); `.nvmrc`/`engines`, `packageManager` (pnpm), `.gitignore` (incl. `.env*` except `.env.example`), `.editorconfig`, README skeleton. | Clean install on a fresh clone. | A |
 | 2 | **Scaffold** — Next.js App Router + TS strict + Tailwind; delete scaffold boilerplate; root layout with tokens and fonts; calm `error.tsx`, `not-found.tsx`, `global-error.tsx`; security headers in `next.config` (§5.6); `robots` disallow + `X-Robots-Tag: noindex`. | `pnpm build` passes; headers present on `pnpm start`. | A |
 | 3 | **Lint and boundaries** — ESLint (flat config) + Prettier; `no-restricted-imports` per layer (§7); `server-only` in every module under `src/db`, `src/trust`, `src/lib/env.ts`, `src/lib/log.ts`; rule forbidding `process.env` outside `src/lib/env.ts`. | A deliberate bad import fails lint (verify locally, then remove). | A |
 | 4 | **Config and logging** — `src/lib/env.ts` (Zod schema, parse once, typed export); `src/lib/log.ts` (JSON lines, levels, redaction of `email`, `token`, `url`, `text`, `body`, `name`, `cookie`, `authorization`). Unit tests for both. | Missing/invalid env fails fast with a clear message naming the variable, never its value. | A |
