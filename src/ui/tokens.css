@@ -1,0 +1,46 @@
+/*
+  HOME design tokens — derived from the M0 experience direction
+  (docs/concepts/README.md): warm paper, ink, one terracotta accent reserved
+  for "needs you", soft person colours, a serif for the single headline and a
+  sans for everything else. No red, no badges.
+*/
+
+:root {
+  --paper: #f7f3ec;
+  --paper-2: #efe9df;
+  --ink: #2b2723;
+  --ink-2: #5d564e;
+  --muted: #8f867b;
+  --line: #e3dccf;
+  --accent: #b8613a;
+  --accent-soft: #f1dfd4;
+  --ok: #7a8b6f;
+
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #221f1b;
+    --paper-2: #2b2723;
+    --ink: #efe9df;
+    --ink-2: #cdc4b6;
+    --muted: #8f867b;
+    --line: #3a3530;
+    --accent: #d98559;
+    --accent-soft: #3d2a20;
+    --ok: #98a98b;
+  }
+}

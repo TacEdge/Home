@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+@import '../ui/tokens.css';
+
+/* Expose tokens to Tailwind utilities (bg-paper, text-ink, font-serif, …). */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --font-serif: var(--font-serif);
+  --font-sans: var(--font-sans);
+  --radius-home: var(--radius);
+  --radius-home-sm: var(--radius-sm);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}

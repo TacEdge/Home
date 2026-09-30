@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+pnpm-lock.yaml
+prototype
+coverage
+test-results
+playwright-report
+src/db/migrations/meta
+*.md
+docs
