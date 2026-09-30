@@ -16,6 +16,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // `next dev` would otherwise append its own block to CLAUDE.md. That file is
+  // HOME's operating instructions and is edited only deliberately.
+  agentRules: false,
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

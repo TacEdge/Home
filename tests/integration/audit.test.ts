@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { auditLog } from '@/db/schema';
 import { listAudit, recordAudit } from '@/trust/audit';
 import { systemActor, type UserActor } from '@/trust/actor';
@@ -27,14 +27,6 @@ const sam: UserActor = {
 };
 
 describe('audit_log', () => {
-  beforeAll(async () => {
-    // Trigger blocks DELETE; truncate is also blocked, so start from a fresh table.
-    await db.execute(sql`drop table if exists audit_log cascade`);
-    const { migrate } = await import('drizzle-orm/node-postgres/migrator');
-    await db.execute(sql`drop schema if exists drizzle cascade`);
-    await migrate(db, { migrationsFolder: 'src/db/migrations' });
-  });
-
   it('records an entry for a user actor', async () => {
     const row = await recordAudit(sam, { event: 'test.user', summary: 'hello' }, { db });
     expect(row.actorUserId).toBe('u-sam');

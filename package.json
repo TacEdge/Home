@@ -2,7 +2,7 @@
   "name": "home",
   "version": "0.1.0",
   "private": true,
-  "description": "HOME \u2014 a private family operating system, powered by Kev.",
+  "description": "HOME — a private family operating system, powered by Kev.",
   "engines": {
     "node": ">=22 <23",
     "pnpm": ">=10"
@@ -24,6 +24,7 @@
     "db:reset:test": "node scripts/db-reset-test.mjs"
   },
   "dependencies": {
+    "better-auth": "^1.7.7",
     "drizzle-orm": "^0.45.3",
     "next": "16.3.8",
     "pg": "^8.23.1",

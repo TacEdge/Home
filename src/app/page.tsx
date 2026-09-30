@@ -1,11 +1,6 @@
-import { Headline, Page, Quiet } from '@/ui/calm';
+import { redirect } from 'next/navigation';
 
-// Placeholder root. Step 9 makes this redirect to /today behind sign-in.
+// HOME always opens on Today. The (home) layout handles sign-in.
 export default function RootPage() {
-  return (
-    <Page>
-      <Headline>HOME</Headline>
-      <Quiet>Quiet for now.</Quiet>
-    </Page>
-  );
+  redirect('/today');
 }
