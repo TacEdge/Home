@@ -14,12 +14,13 @@ Two companion principles:
 
 - **Code computes; Kev explains.** Deterministic engines calculate time, availability, conflicts, weather windows and permissions. The LLM reasons over their results and communicates. It never invents them.
 - **Capture first; organise second.** What people tell HOME is stored verbatim immediately; structure is proposed afterwards and approved.
+- **Insight, not interruption.** HOME notices useful things and shows them when someone looks. Insights are derived deterministically; Kev explains and prioritises. No push notifications without an explicit decision.
 
 When designing any agent behaviour, identify which step of the trust model it belongs to. If it would act without human approval, it needs an explicit, documented decision first (see autonomy tiers in `docs/KEV-AGENT-MODEL.md`).
 
 ## Status
 
-**Architecture phase. Do not write application code until the architecture is approved** — see the open decisions in `docs/V0.1-SCOPE.md` §6. Once approved, start with M0 (screen concepts, no code), then build strictly milestone by milestone per `docs/ROADMAP.md`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). **Current milestone: M0 — experience concepts** (`docs/concepts/`). Do not write application code until the M0 concepts are approved. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
 
 ## Read first
 
@@ -32,6 +33,8 @@ When designing any agent behaviour, identify which step of the trust model it be
 | `docs/KEV-AGENT-MODEL.md` | Before changing prompts, tools, context assembly or memory. |
 | `docs/V0.1-SCOPE.md` | Before starting any feature — check it's in scope. |
 | `docs/ROADMAP.md` | For milestone order and the "Not yet" list. |
+| `docs/concepts/` | Before building any screen — the agreed experience concepts. |
+| `docs/decisions/` | ADRs; check before revisiting a settled decision. |
 
 If a request conflicts with these docs, stop and say so. Don't silently diverge; propose a doc change instead.
 
@@ -45,18 +48,20 @@ If a request conflicts with these docs, stop and say so. Don't silently diverge;
 6. **No hidden memory.** Kev knows structured data and approved `Context` records only. Context is dated, sourced and can go stale — never treat it as permanently true. `sensitive` context is never auto-included in Kev's context and never proposed by Kev. No embeddings, no vector stores, no auto-saved inferences — unless a docs change approves it.
 7. **External content is untrusted.** Text from calendars, weather or any integration is labelled as data in Kev's context and never treated as instructions.
 8. **Every write is audited** (`src/trust/audit.ts`), including who approved Kev proposals.
-9. **Never use real family data** in tests, fixtures, seeds, evals, examples, commit messages or logs. Use the synthetic fixture family in `tests/fixtures/`.
+9. **Never use real family data** in docs, tests, fixtures, seeds, evals, examples, screenshots, commit messages or logs. Use the synthetic fixture family (defined in `docs/concepts/README.md`, later `tests/fixtures/`). Real household data exists only in the database and private configuration.
 10. **Never commit secrets** — API keys, ICS URLs, home coordinates, emails. Use environment config; keep `.env*` out of git.
 11. **Nothing clinical, nothing scored.** No child tracking, relationship metrics, streaks or gamification. No storing inferences about emotions, health, behaviour or relationships. Person profiles are lightweight context, never development records.
 12. **Kev is channel-agnostic.** All conversation goes through `kev.handle()` in `src/kev/orchestrator.ts`, which emits structured `KevEvent`s. No UI, HTTP or audio concerns inside Kev; no Kev logic inside UI code. Voice will be an adapter, not a rewrite.
 13. **Integrations sit behind HOME-defined interfaces.** Calendar access goes through `CalendarProvider`; ICS is one adapter. Never let a provider's shape leak into domain entities.
+14. **Insights are derived, not stored.** Detectors in `src/domain/engines/insights/` are pure and tested; every insight carries its source facts and template text. Kev may rephrase and reorder, never invent. Only dismissals persist (`insight_response`). Screens never wait on the LLM.
+15. **This household only.** Don't build or prepare multi-household/SaaS structures.
 
 ## Architecture in one screen
 
 ```
 src/app           Experience layer (Next.js routes, screens)
 src/ui            Presentational components + design tokens
-src/domain        Family Knowledge layer: services + engines (agenda, conflicts, windows, stage, staleness)
+src/domain        Family Knowledge layer: services + engines (agenda, conflicts, windows, profile, staleness, insights)
 src/kev           Kev: orchestrator, router, providers, prompts, context assembly, tools, evals
 src/integrations  calendar (CalendarProvider + ics adapter), weather — read-only
 src/trust         auth, actor, visibility/sensitivity, audit, usage, retention
@@ -80,7 +85,7 @@ Do not add dependencies casually. Prefer the platform and what's already here. A
 - **Generic entities over bespoke tables.** Add a `domain` tag before adding a new table. Adding a table requires updating `docs/FAMILY-DATA-MODEL.md`.
 - **Naming:** domain language (person, event, task, project, note, context, capture, proposal) — not generic CRUD names.
 - **Organised records** keep `origin_capture_id` when they came from a capture.
-- **Copy and Kev tone:** warm, plain, brief, NZ English. No emoji, no exclamation marks, no nagging.
+- **Copy and Kev tone:** warm, calm, concise, natural NZ English. Kev is perceptive, understated and occasionally playful — never nagging, corporate or over-enthusiastic. Emoji extremely sparingly; exclamation marks rarely. See the personality spec in `docs/KEV-AGENT-MODEL.md`.
 - **UI:** mobile first, generous whitespace, one column, few colours. If a screen feels like a dashboard, simplify it.
 
 ## Kev specifics

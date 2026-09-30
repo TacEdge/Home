@@ -1,6 +1,6 @@
 # HOME — Roadmap
 
-Status: **Proposed.** Only V0.1 is committed. Everything after it is a direction, re-prioritised after each release's retrospective.
+Status: **V0.1 approved.** Only V0.1 is committed. Everything after it is a direction, re-prioritised after each release's retrospective.
 
 ## V0.1 — Coordination core (committed, pending approval)
 
@@ -16,13 +16,13 @@ Each milestone ends deployed (from M1), usable and tested. No milestone starts u
 |---|---|---|
 | **M0** | **Experience concepts** (no code) | Information architecture and wireframes for **Today, Forward and Kev** in `docs/concepts/`, including the 7am five-second test, the capture/To sort flow and proposal cards. Agreed before any UI is built. |
 | **M1** | **Foundations** | Scaffold (Next.js, TS strict, Tailwind, Drizzle, Vitest, Playwright), lint rules incl. layer boundaries, CI, deploy to Sydney hosting, magic-link auth with allowlist, empty authenticated shell with base design tokens from M0. |
-| **M2** | **Knowledge core** | Schema + migrations: Person (profile fields), User, CalendarConnection/Source, Event, EventPerson, Task, Project, Note, **Capture**, **Context**, Proposal, Conversation/Message, AuditLog, KevUsage. Actor (with channel), visibility + sensitivity filtering, audit. `stage` and `staleness` engines. Tests proving private and sensitive records never leak. Synthetic fixture family + seed. |
+| **M2** | **Knowledge core** | Schema + migrations: Person (profile fields), User, CalendarConnection/Source, Event, EventPerson, Task, Project, Note, **Capture**, **Context**, Proposal, Conversation/Message, AuditLog, KevUsage, InsightResponse. Actor (with channel), visibility + sensitivity filtering, audit. `profile` and `staleness` engines. Tests proving private and sensitive records never leak. Synthetic fixture family + seed. |
 | **M3** | **Manual family data + capture** | Calm UI for people/profiles, manual events (recurrence), tasks, projects, notes, context. **Capture input and To sort list working without any LLM** (manual organise). Settings. JSON export. Backups + tested restore. |
 | **M4** | **Calendar sync** | `CalendarProvider` interface + ICS adapter (encrypted credentials, lazy refresh, freshness, deletions), recurrence + time-zone handling, annotations on synced events. Contract tests any future provider must pass. Exhaustive tests for all-day, DST, RRULE exceptions. |
-| **M5** | **Today** | Today per the M0 concept: per-person day, pickups/drop-offs, tasks, weather line, To sort count; person profile screens. |
-| **M6** | **Forward + conflicts** | 7/30/90-day horizon, conflict engine, quiet conflict surfacing on Today and Forward. |
-| **M7** | **Weather + free windows** | Open-Meteo adapter; `windows` engine (people × calendar × daylight × weather × duration). |
-| **M8** | **Kev: orchestrator + read** | `kev.handle()` orchestrator emitting `KevEvent`s; web channel adapter (streaming, dictation-friendly); model router (fast/deep + escalate) and provider adapter; context assembly incl. profiles and staleness; read tools; citations; limits, usage log and spend cap; first evals in CI against both tiers. |
+| **M5** | **Today** | Today per the M0 concept: day headline, getting-there (drop-offs/pickups), per-person day, tasks, weather line, To sort count; insights engine skeleton with `coordination_gap`, `busy_day`, `preparation`, `data_health` detectors and template text; person profile screens. |
+| **M6** | **Forward + conflicts** | Forward per the M0 concept (week / month / season); conflict engine and `conflict` insights on Today and Forward; dismiss / not useful. |
+| **M7** | **Weather + free windows** | Open-Meteo adapter; `windows` engine (people × calendar × daylight × weather × duration); `free_window`, `weather_effect`, `alignment` insights. |
+| **M8** | **Kev: orchestrator + read** | `kev.handle()` orchestrator emitting `KevEvent`s; web channel adapter (streaming, dictation-friendly); model router (fast/deep + escalate) and provider adapter; context assembly incl. profiles and staleness; read tools incl. `get_insights`; cached Kev phrasing and prioritising of Today's insights; citations; limits, usage log and spend cap; first evals in CI against both tiers. |
 | **M9** | **Kev: capture + propose** | `capture` tool; capture triage on the fast tier; proposal tools and approval cards; *What Kev knows* with confirm/retire; privacy, sensitivity, injection and capture evals. |
 | **M10** | **Week Ahead + trial** | Week Ahead on the deep tier; design and tone polish; PWA install; 3–4 week family trial and retrospective. |
 
@@ -44,6 +44,7 @@ Each milestone ends deployed (from M1), usable and tested. No milestone starts u
 ## V0.4 — Kev looks ahead (scheduled observation)
 
 - Sunday Week Ahead generated automatically; one gentle notification.
+- Any notification is an insight judged important enough to interrupt for — each kind opted into explicitly.
 - Proactive but quiet findings: upcoming renewals, birthdays needing a gift, unassigned pickups, good weather windows for waiting projects.
 - Notification design principles: few, batched, dismissible, never nagging.
 
@@ -72,7 +73,9 @@ These are excluded on purpose. Revisiting any of them is a decision, not drift.
 - **Any autonomous action** — every change is proposed and approved.
 - **Writes to external systems** (calendars, email, messaging, bookings, payments).
 - **Email/inbox ingestion** — biggest privacy and injection risk; later and carefully.
-- **Notifications and background jobs** — V0.1 is pull-only.
+- **Push notifications and background jobs** — V0.1 is pull-only; insights wait until someone looks.
+- **A persistent insight subsystem** — insights are derived on read; only dismissals are stored.
+- **School-year inference** — age only.
 - **Native mobile apps** — PWA is enough.
 - **Custom voice stack** — use phone dictation; the orchestrator is voice-ready.
 - **Children as users; child development tracking of any kind.**

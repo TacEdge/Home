@@ -1,6 +1,6 @@
 # HOME — System Architecture
 
-Status: **Direction approved; amendments (rev 2) awaiting review.** Items marked **[DECISION]** need sign-off before implementation.
+Status: **Approved (rev 3).** Decisions are recorded in `docs/decisions/0001-v0.1-decisions.md`.
 
 ## 1. Architectural stance
 
@@ -35,7 +35,8 @@ Three foundational rules shape everything below:
 │    captures, proposals)      │  │    Context assembly         │
 │    Deterministic engines     │  │    Tool registry            │
 │    (agenda, conflicts,       │  │    Proposals                │
-│    windows, stage)           │  └──────────────▲──────────────┘
+│    windows, profile,         │
+│    staleness, insights)      │  └──────────────▲──────────────┘
 └───────────────▲──────────────┘                 │
                 │                                │
 ┌───────────────┴────────────────────────────────┴─────────────┐
@@ -70,8 +71,9 @@ The structured truth of HOME. Plain domain services (TypeScript modules) over Po
   - `agenda` — merges manual and synced events, expands recurrence, resolves time zones, returns a day/range view.
   - `conflicts` — detects overlaps involving the same person, double-booked responsibilities (e.g. two pickups at once), unassigned responsibilities, and "both adults away" situations.
   - `windows` — finds free windows of a given duration for given people, optionally constrained by daylight and dry-weather forecast.
-  - `stage` — derives age and NZ school year/stage from date of birth; derives a person's "regular week" from their recurring events.
-  - `staleness` — decides whether a context record should be treated as possibly out of date.
+  - `profile` — derives age from date of birth and a person's "regular week" from their recurring events. (No school-year inference in V0.1.)
+  - `staleness` — decides whether a context record should be treated as possibly out of date. Staleness periods are heuristics: stale context is never expired or deleted, only treated cautiously.
+  - `insights` — runs a set of small detectors over the other engines' output and produces ranked **insight candidates** (see §2.6).
 
 ### 2.3 Kev intelligence layer
 See [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md). In short:
@@ -117,6 +119,45 @@ No background job infrastructure in V0.1: syncs happen lazily on read with a sta
 
 ### 2.5 Trust & permissions layer
 Cross-cutting. Detailed in §5.
+
+### 2.6 Insights (not notifications)
+
+**Notification = HOME interrupts me. Insight = HOME notices something useful when I choose to look.** V0.1 has insights and no push notifications.
+
+An insight is **derived on read**, not a persistent subsystem:
+
+```
+agenda · conflicts · windows · weather · tasks · projects · context
+            │
+            ▼  insights engine (deterministic detectors, per actor)
+   InsightCandidate { key, kind, when, subjects[], facts{}, priority, template_text, action? }
+            │
+            ├─► Today "Worth knowing" (top 3), Forward (per horizon), Kev tools
+            ▼
+   Kev (fast tier, optional) — phrases and orders the top candidates; cached per user per day + input hash
+```
+
+V0.1 detectors (each a small pure function with tests):
+
+| Kind | Fires when | Example |
+|---|---|---|
+| `conflict` | Conflicts engine reports an overlap or double responsibility | "Two places at 3:30 on Thursday." |
+| `coordination_gap` | A child's event needs an adult responsible and none is set | "Nobody's down for the 3:15 pickup." |
+| `busy_day` | A day's load for a person/household crosses a threshold | "Tomorrow's a full one." |
+| `free_window` | A notable free window meets an open task/project with an estimate | "Saturday morning's clear — enough for the fence." |
+| `weather_effect` | Forecast affects a task needing dry weather, or an outdoor event | "Rain Sunday afternoon; the painting's better Saturday." |
+| `preparation` | An upcoming event/birthday has an unfinished linked task, or nothing prepared | "Grandma's birthday is next Tuesday." |
+| `alignment` | Two schedules align in a way worth noticing (e.g. both adults free the same evening) | "You're both free Thursday evening." |
+| `data_health` | A calendar hasn't synced recently | "Alex's calendar hasn't updated since yesterday." |
+
+Rules:
+- Detectors are deterministic; **code computes, Kev explains**. Every insight carries the facts it was derived from and a template sentence, so Today renders fully even when Kev is unavailable.
+- Ranking is deterministic first (time proximity × kind priority); Kev may reorder within the top few and rewrite the wording, never invent new insights.
+- Insights respect visibility and sensitivity (they are computed per actor).
+- An insight may offer an action ("Sort it", "Plan it") which opens Kev and leads to a proposal — the trust model still applies.
+- The only persistence is a tiny `insight_response` record when a user dismisses or marks an insight "not useful", so it doesn't reappear. Nothing else is stored.
+
+**Today never waits for Kev.** The screen renders from deterministic data and template text immediately; Kev's phrasing is used when cached and fades in quietly when first generated.
 
 ## 3. Technology stack
 
@@ -192,7 +233,7 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   ├── context/
 │   │   ├── captures/
 │   │   ├── proposals/
-│   │   └── engines/           # agenda, conflicts, windows, stage, staleness
+│   │   └── engines/           # agenda, conflicts, windows, profile, staleness, insights
 │   ├── kev/                   # Kev Intelligence layer
 │   │   ├── orchestrator.ts    # kev.handle(KevRequest) → KevEvent stream
 │   │   ├── router.ts          # tier selection + escalation

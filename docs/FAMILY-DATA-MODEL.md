@@ -1,6 +1,6 @@
 # HOME — Family Data Model
 
-Status: **Rev 2 — amendments awaiting review.** V0.1 entities are specified; later entities are sketched to show the model can grow without restructuring.
+Status: **Approved (rev 3).** V0.1 entities are specified; later entities are sketched to show the model can grow without restructuring.
 
 ## 1. Modelling principles
 
@@ -37,15 +37,15 @@ A member of the family (or the wider circle who appears in family life). Not nec
 | `role` | `parent` \| `child` \| `other` |
 | `relationship` | short free text, e.g. "Grandma (Dad's side)" |
 | `in_household` | lives at home? Grandparents may appear in events without being household |
-| `date_of_birth` | optional; drives age and stage |
-| `stage_note` | optional override/extra, e.g. "starting school in Feb" |
+| `date_of_birth` | optional; drives age |
+| `stage_note` | optional free text, e.g. "starting school in Feb" (no school year is inferred in V0.1) |
 | `colour` | soft UI colour |
 
 The **profile** Kev and the People screen see is mostly *derived*, not stored:
 
 | Profile section | Source |
 |---|---|
-| Age, NZ school year / stage | `stage` engine from `date_of_birth` (+ `stage_note`) |
+| Age | `profile` engine from `date_of_birth`; `stage_note` shown as written |
 | Regular week (recurring activities) | Recurring `Event`s where the person is attending/responsible |
 | Things to know (interests, preferences, practical details) | `Context` records with this person as subject |
 | Coming up | Agenda for this person; next birthday |
@@ -183,7 +183,7 @@ Replaces the earlier `Fact`. Family knowledge that isn't naturally an event, tas
 | `visibility` | `household` \| `private` |
 | `status` | `proposed` \| `active` \| `retired` |
 
-Staleness is **derived, not stored**: the `staleness` engine treats context as *possibly out of date* when past `valid_until`, or when `last_confirmed_at` is older than a per-category default (initial proposal: interest/preference 12 months, routine 6 months, intention 3 months, practical 12 months). Kev phrases stale context tentatively ("last I heard…") and never states it as current. Settings shows stale items for a quick confirm/retire.
+Staleness is a **heuristic, derived, not stored** — stale context is never expired or deleted: the `staleness` engine treats context as *possibly out of date* when past `valid_until`, or when `last_confirmed_at` is older than a per-category default (initial proposal: interest/preference 12 months, routine 6 months, intention 3 months, practical 12 months). Kev phrases stale context tentatively ("last I heard…") and never states it as current. Settings shows stale items for a quick confirm/retire.
 
 Rules:
 - Kev may **propose** `normal` context; it becomes `active` only on approval.
@@ -214,10 +214,22 @@ A change Kev wants to make, awaiting approval.
 
 ### AuditLog, KevUsage
 - `audit_log` — append-only record of writes and Kev tool calls.
-- `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap.
+- `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap (NZ$50/month initially) and the Usage view in Settings.
 
 ### WeatherCache
 Cached forecast (location, fetched_at, hourly JSON).
+
+### InsightResponse
+The only persisted part of insights. Insights themselves are derived on read (see SYSTEM-ARCHITECTURE §2.6).
+
+| Field | Notes |
+|---|---|
+| `user_id` | responses are per user |
+| `insight_key` | deterministic key: kind + subjects + date |
+| `response` | `dismissed` \| `not_useful` |
+| `responded_at` | |
+
+A dismissed insight doesn't reappear for that user. `not_useful` also feeds detector tuning (by us, deliberately) — never automatic inference.
 
 ## 4. Relationships (V0.1)
 
@@ -239,8 +251,9 @@ User ─< Capture ─< Proposal ──► (Task | Event | Project | Note | Conte
 | Horizon | `agenda` over 7/30/90 days | Forward |
 | Conflicts | `conflicts` | Today, Forward, Week Ahead |
 | Free windows | `windows` | "When could I get this done?", date-night finder |
-| Person profile | `stage` + recurring events + context + agenda | People screen, Kev context |
+| Person profile | `profile` + recurring events + context + agenda | People screen, Kev context |
 | Staleness | `staleness` | Kev phrasing, Settings review |
+| Insights | `insights` detectors over all engines, minus dismissed | Today "Worth knowing", Forward, Kev |
 | Week Ahead | Kev over all of the above | Weekly briefing |
 
 ## 6. Later entities (sketch — not built in V0.1)

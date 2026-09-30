@@ -22,7 +22,7 @@ The primary interface is conversation — typed today, spoken eventually. We sho
 
 **Capture first, organise second.** Anything we tell HOME is kept immediately, in our own words, even if nobody has decided yet whether it is a task, an event, a project, a note or something to remember about someone. Kev then suggests how it should be organised. Nothing is lost because it didn't fit a box.
 
-**People are at the centre.** HOME understands the people behind the calendar — who they are, their age and stage, their regular week, what they enjoy — not just the appointments attached to their names.
+**People are at the centre.** HOME understands the people behind the calendar — who they are, how old they are, their regular week, what they enjoy — not just the appointments attached to their names.
 
 > "Kev, what does our weekend look like?"
 > "Add fixing the garage light to the house."

@@ -64,15 +64,28 @@ Family, children and relationships are not datasets.
 
 The value of HOME is in *noticing* — the clash, the renewal, the free window, the birthday in three weeks. Not in maintaining lists. If a feature mostly creates data-entry work, it is probably wrong.
 
-## 8. Small, coherent, finished
+## 8. Insight, not interruption
+
+> **Notification** = HOME interrupts me.
+> **Insight** = HOME notices something useful when I choose to look.
+
+HOME's signature behaviour is noticing: a clash on Thursday, a clear dry Saturday morning when the fence needs painting, an evening when both parents are free, a birthday next week with nothing organised. These surface as **insights** when someone opens HOME — calmly, a few at a time, most important first.
+
+- V0.1 has **no push notifications**. Insights only.
+- Insights come from deterministic data and calculations; Kev explains and prioritises them.
+- An insight should feel like *Kev noticed something useful*, not like *the system generated an alert*.
+- Few, dismissible, never repeated once dismissed, never guilt-inducing.
+- Any future notification is an explicit decision: an insight important enough to interrupt for.
+
+## 9. Small, coherent, finished
 
 Each release is small and complete. A few things that work beautifully beat many that half-work. We deliberately leave things out and write down that we did.
 
-## 9. Boring technology, clean seams
+## 10. Boring technology, clean seams
 
 Use well-understood, widely-supported technology. Keep clear boundaries between layers so that the clever parts (Kev) can evolve without destabilising the reliable parts (data, auth, privacy).
 
-## 10. The family owns its data
+## 11. The family owns its data
 
 Everything is exportable in an open format. Everything is backed up. Deleting something deletes it. No lock-in to any vendor, including the AI provider.
 
@@ -80,7 +93,7 @@ Everything is exportable in an open format. Everything is backed up. Deleting so
 
 ## Design language (initial)
 
-- **Tone:** warm, plain, brief. Kev speaks like a thoughtful, capable friend — not a butler, not a coach, not a corporate assistant. No exclamation marks, no emoji by default, no filler.
+- **Tone:** warm, calm, concise, natural NZ English. Kev speaks like a perceptive, capable friend who has been paying attention — not a butler, not a coach, not a corporate assistant. Understated, occasionally playful. Emoji extremely sparingly; no filler. Full personality spec in [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md).
 - **Layout:** generous whitespace, one primary column, strong typographic hierarchy, few colours. Each person has a soft, consistent colour.
 - **Density:** Today fits on one phone screen in the common case.
 - **Motion:** minimal, purposeful.
