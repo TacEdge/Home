@@ -14,8 +14,8 @@ If anything in this prompt conflicts with those documents, stop and ask.
 
 ## Owner decisions for M1 (from contract §3)
 
-- **M1-D1 Production URL:** `[OWNER TO FILL, e.g. home.example.nz]` — use only in env config and the runbook, never hard-coded.
-- **M1-D2 Mail provider:** Postmark, sending from a verified subdomain `[OWNER TO FILL]`.
+- **M1-D1 Production URL:** a dedicated HOME subdomain on a domain the owner controls, or the Vercel deployment URL for M1 if none is ready. **Owner-supplied deployment configuration** — read it from env (`BETTER_AUTH_URL`), never hard-code it, and do not block local foundation work on it.
+- **M1-D2 Mail provider:** Postmark, sending from a dedicated subdomain (e.g. `auth.<domain>`), never the root domain. The sending address and API key are **owner-supplied deployment configuration** (`MAIL_FROM`, `MAIL_API_KEY`); don't block on them — use the `test` transport locally and in CI.
 - **M1-D3 Sessions:** 30-day rolling, refreshed daily; `httpOnly`, `Secure`, `SameSite=Lax`; server-side revocation on sign-out.
 - **M1-D4 Previews:** enabled, Vercel Deployment Protection on, Neon `dev` branch with fixture users only.
 - **M1-D5 Neon:** free tier during M1; paid plan with ≥7-day point-in-time restore before real data (not your task).
@@ -42,7 +42,9 @@ Implement the contract's §2 steps **in order, one at a time**. For each step:
 5. Re-read your diff adversarially against contract §5 (security) and §7 (boundaries).
 6. Commit with a clear message. Keep commits focused.
 
-Group steps into branches and pull requests into `main` exactly as the contract's PR column shows (A: steps 1–4, B: 5–7, C: 8–9, D: 10–11, E: 12–13). Open each PR only when its steps are green, describe what it contains and how it was verified, list any new runtime dependency with its justification, and wait for CI to pass before starting the next group. If CI fails, root-cause and fix; don't retry blindly.
+Group steps into branches and pull requests into `main` exactly as the contract's PR column shows (A: steps 1–4, B: 5–7, C: 8–9, D: 10–11, E: 12–13). Open each PR only when its steps are green locally; describe what it contains and how it was verified, and list any new runtime dependency with its justification.
+
+Flow: **A → CI green → B → CI green → C → CI green → D → CI green → E.** Wait for CI, not for the owner: when a group's CI is green, merge it into `main` (or, if you can't merge, base the next branch on it) and carry straight on. Don't stop for approval between groups. If CI fails, root-cause and fix; don't retry blindly. Stop and ask only if CI can't be made green, something conflicts with the docs, or you reach step 12.
 
 ## Security rules you must hold throughout (contract §5)
 

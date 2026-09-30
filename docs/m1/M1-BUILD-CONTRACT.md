@@ -1,6 +1,6 @@
 # M1 — Foundations: Build Contract
 
-Status: **Ready for implementation once the §3 decisions are confirmed.**
+Status: **Approved — ready for implementation.** §3 decisions confirmed by the owner, 2026-09-30.
 Implementer: Fable 5.1. Reviewer at completion: Opus (code + architecture review before M2).
 
 M1 is **foundations only**. It builds a boring, secure, maintainable production base. It does not build Today, Forward or Kev. At the end of M1, the two adults can sign in to a deployed HOME on their phones and see an empty, calm, correctly structured app — and everything underneath is ready for M2.
@@ -52,6 +52,8 @@ Authoritative references: `CLAUDE.md`, `docs/SYSTEM-ARCHITECTURE.md`, `docs/FAMI
 
 Each step is small, independently verifiable and ends green (`pnpm lint && pnpm typecheck && pnpm test`, plus integration/e2e once they exist). Group into PRs as shown; one concern per PR.
 
+**Flow:** A → CI green → B → CI green → C → CI green → D → CI green → E. The implementer proceeds to the next group as soon as CI is green, without waiting for owner approval. The only planned human handoff is step 12 (accounts, credentials, deployment settings). Stop early only if CI can't be made green, or something conflicts with the docs.
+
 | # | Step | Verify by | PR |
 |---|---|---|---|
 | 1 | **Repo hygiene** — confirm `main` exists and is the base; confirm tag `m0.6-prototype` exists on the remote at commit `3d58390` (create it in GitHub if missing); `.nvmrc`/`engines`, `packageManager` (pnpm), `.gitignore` (incl. `.env*` except `.env.example`), `.editorconfig`, README skeleton. | Clean install on a fresh clone. | A |
@@ -72,16 +74,16 @@ Each step is small, independently verifiable and ends green (`pnpm lint && pnpm 
 
 ## 3. Decisions required before implementation
 
-Everything not listed here is decided in ADR 0003. These need the owner:
+Everything not listed here is decided in ADR 0003. All six are now **approved**:
 
-| # | Decision | Recommendation |
+| # | Decision | Approved |
 |---|---|---|
-| **M1-D1** | **Production URL** (needed for auth base URL, cookies and email links). | A subdomain you control, e.g. `home.<your-domain>`. Keep it out of the repo; it lives in env config. |
-| **M1-D2** | **Magic-link email provider** and sending address. | **Postmark** (mature, transactional-only, good deliverability) from a verified subdomain such as `mail.<your-domain>`. Resend is an acceptable alternative. |
-| **M1-D3** | **Session lifetime.** | 30-day rolling sessions (refreshed daily with use), `httpOnly`, `Secure`, `SameSite=Lax`. Sign-out revokes the session server-side. A new magic link is needed after 30 days without use. |
-| **M1-D4** | **Preview deployments.** | Enabled, protected by Vercel Deployment Protection, connected **only** to a Neon `dev` branch seeded with fixture users. Never production data. |
-| **M1-D5** | **Neon plan / point-in-time restore.** | Free tier is fine during M1 (no real data). Move to a paid plan with ≥7 days of point-in-time restore **before** real family data arrives (M3/M4). |
-| **M1-D6** | **Git base branch.** | Create `main` from the current docs branch, make it the default, protect it (CI required, no force-push). Milestone work happens on branches merged into `main`. |
+| **M1-D1** | **Production URL** (needed for auth base URL, cookies and email links). | A dedicated HOME subdomain on a domain the owner already controls. If none is ready, M1 uses the Vercel deployment URL; the final domain is decided before real use. Owner-supplied config only — never in the repo, never blocking local work. |
+| **M1-D2** | **Magic-link email provider** and sending address. | **Postmark**, from a dedicated sending subdomain (e.g. `auth.<your-domain>`), never the root domain. Owner-supplied config. |
+| **M1-D3** | **Session lifetime.** | **Approved:** 30-day rolling sessions (refreshed daily with use), `httpOnly`, `Secure`, `SameSite=Lax`. Sign-out revokes the session server-side. A new magic link is needed after 30 days without use. |
+| **M1-D4** | **Preview deployments.** | **Approved:** enabled, protected by Vercel Deployment Protection, connected **only** to a Neon `dev` branch seeded with fixture users. Never production data. |
+| **M1-D5** | **Neon plan / point-in-time restore.** | **Approved:** free tier during M1 (no real data). Move to a paid plan with ≥7 days of point-in-time restore **before** real family data arrives (M3/M4). |
+| **M1-D6** | **Git base branch.** | **Approved:** create `main` from the current docs branch, make it the default, protect it (CI required, no force-push). Milestone work happens on branches merged into `main`. |
 
 ---
 

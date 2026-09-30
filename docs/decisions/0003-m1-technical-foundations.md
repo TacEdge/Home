@@ -1,6 +1,6 @@
 # ADR 0003 — M1 technical foundations
 
-Status: **Proposed** — becomes Accepted when the owner confirms M1-D1…D6 in `docs/m1/M1-BUILD-CONTRACT.md` §3. Finalised by the implementer at the end of M1.
+Status: **Accepted**, 2026-09-30 (owner confirmed M1-D1…D6). The implementer may append clarifications at the end of M1.
 
 ## Context
 
