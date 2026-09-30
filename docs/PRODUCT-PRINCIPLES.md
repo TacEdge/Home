@@ -76,6 +76,8 @@ HOME's signature behaviour is noticing: a clash on Thursday, a clear dry Saturda
 - An insight should feel like *Kev noticed something useful*, not like *the system generated an alert*.
 - Few, dismissible, never repeated once dismissed, never guilt-inducing.
 - Any future notification is an explicit decision: an insight important enough to interrupt for.
+- **Put information where it belongs. Insights are for connections, not repetition.** A problem intrinsic to something already on screen (a pickup with nobody down for it, a clash) is shown *on that thing* — `3:00 Isla — pickup · Who? · Sort it` — never repeated as a separate insight. *Worth knowing* is reserved for connections HOME has made that aren't obvious elsewhere.
+- **Fast should feel fast.** Kev is never deliberately slowed to look thoughtful. A working message ("Looking across the week…") appears only while genuine work is happening.
 
 ## 9. Small, coherent, finished
 

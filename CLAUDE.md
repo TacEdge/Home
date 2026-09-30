@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. **Current milestone: M0.5 — experience prototype** (`/prototype`, throwaway, fixture data only, no backend). Do not write application code (M1+) until the prototype has been reviewed. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0.5 and M0.6 prototype passes complete (`/prototype`, throwaway). **Next: M1 — awaiting the go-ahead.** Do not write application code (M1+) until told to start. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
 
 ## Read first
 

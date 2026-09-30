@@ -179,6 +179,32 @@ Proposals created from a capture carry its id; approving the last of them marks 
 - **"Help me plan the exterior painting."** → `deep` tier → proposed tasks with estimates and weather needs → offer to schedule the first ones.
 - **Week Ahead** → `deep` tier, fixed template (Needs coordination · Potential conflicts · Family opportunities · Home · You two · Coming over the horizon · To sort), generated on request in V0.1.
 
+### Kev as assistant, Kev as destination
+
+Two ways Kev appears, one conversation underneath:
+
+| | Opened from | Presentation | Purpose |
+|---|---|---|---|
+| **Kev as assistant** | Something on screen — an insight, a run, a task, an event, *Sort it* | Alongside the thing (a half-height sheet on phones; a side panel on tablet) so the subject stays visible | Help with *this* |
+| **Kev as destination** | The Ask/Tell bar | The full conversation | Ask or tell anything |
+
+The assistant form can always expand into the destination. The channel-agnostic orchestrator doesn't know the difference; only the adapter does.
+
+### Compound captures
+
+When one message contains more than one thought:
+
+- **Split** when the parts are clearly independently actionable. *"Book the dentist and remind me to buy Nana a present."* → two captures, two proposals.
+- **Keep together** when splitting would lose shared meaning. *"Sort the garage light and see if we can find a nicer solar one."* → one capture; the second part qualifies the first.
+- **Keep together, unstructured** when the intended structure is genuinely uncertain. *"We should probably do something about the garden and maybe get someone in."* → one capture, no proposal yet.
+- **Ask** only when it is genuinely ambiguous which of these applies.
+
+This is *capture first, organise second* applied to a single sentence. The verbatim capture is always one record; splitting happens at the proposal stage.
+
+### Latency
+
+Never add artificial delay. Kev is not slowed down to simulate thinking. When a deep-tier request genuinely takes time, the interface may show a contextual working line ("Looking across the week…") for as long as the work lasts, and no longer.
+
 ## 7. Kev and insights
 
 Insights (SYSTEM-ARCHITECTURE §2.6) are detected by code; Kev's job is to **explain and prioritise**, never to invent:

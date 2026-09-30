@@ -3,7 +3,7 @@
 
    A reply is a list of blocks:
    { say }  { detail }  { cite: [[title, meta], ...] }  { plan: [[step, meta], ...] }
-   { proposal: { title, meta, yes, action } }  { basis }  { waiting }  { text } */
+   { proposal: { title, meta, yes, action } }  { basis }  { text } */
 
 const KEV = (() => {
   const P = (title, meta, yes, action) => ({ proposal: { title, meta, yes: yes || 'Yes', action } });
@@ -11,7 +11,7 @@ const KEV = (() => {
   function intentOf(text) {
     const t = text.toLowerCase().trim();
     if (/week ahead/.test(t)) return 'weekahead';
-    if (/^(add|remind|remember|we need|need to|note|put|book|get|sort|buy|order)\b/.test(t) || /\bremind me\b/.test(t)) return 'tell';
+    if (/^(add|remind|remember|we need|we should|need to|note|put|book|get|sort|buy|order|fix|call|pay)\b/.test(t) || /\bremind me\b|\bshould probably\b|\bsomething about\b/.test(t)) return 'tell';
     if (/anything (i|we) (need|should)|need to know|should i know/.test(t)) return 'need';
     if (/(when|where) could|hours? to|free window|find (me|us) (a|some|three)|time to paint|get .* done/.test(t)) return 'window';
     if (/saturday/.test(t)) return 'saturday';
@@ -23,10 +23,23 @@ const KEV = (() => {
     return 'unknown';
   }
 
+  /* Compound capture rule:
+     - split when the parts are clearly independently actionable (each starts with its own verb);
+     - keep together when the second part qualifies the first ("… and see if we can find a nicer one");
+     - keep together, unstructured, when the intent is genuinely uncertain ("should probably … maybe …"). */
+  function splitCapture(text) {
+    const t = text.trim().replace(/[.!]$/, '');
+    if (/maybe|probably|not sure|might/i.test(t)) return [t];
+    const parts = t.split(/\s+and\s+/i);
+    if (parts.length < 2) return [t];
+    const verb = /^(remind( me)?( to)?|book|get|buy|order|add|call|pay|sort|fix|email|text|ring|ask|renew|cancel|sign|print|pack|check)\b/i;
+    return parts.every(p => verb.test(p.trim())) ? parts.map(p => p.trim()) : [t];
+  }
+
   // Turn "add sorting the garage light" into a task title.
   function titleFrom(text) {
     let t = text.trim().replace(/[.!]$/, '');
-    t = t.replace(/^(please\s+)?(add|remind me to|remind me (that )?we need to|remember (that )?|note (that )?|we need to|need to|put)\s+/i, '');
+    t = t.replace(/^(please\s+)?(add|remind me to|remind me (that )?we need to|remind me (that )?|remember (that )?|note (that )?|we need to|we should (probably )?|need to|put)\s+/i, '');
     t = t.replace(/^(sorting|fixing|booking|getting|buying|ordering)\s+/i, (m) => ({ sorting: 'Sort ', fixing: 'Fix ', booking: 'Book ', getting: 'Get ', buying: 'Buy ', ordering: 'Order ' }[m.trim().toLowerCase()]));
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
@@ -135,16 +148,24 @@ const KEV = (() => {
     },
 
     tell(s, text) {
+      const parts = splitCapture(text);
+      const out = [{ kept: true }];
+      if (parts.length > 1) {
+        out.push({ say: parts.length === 2 ? 'Two things:' : `${parts.length} things:` });
+        parts.forEach(pt => { const t = titleFrom(pt); const g = guessHome(t); out.push(P(t, [g.where, g.est, g.priv ? 'Just you' : 'Shared'].filter(Boolean).join(' · '), 'Add', 'task')); });
+        out.push({ yesall: true });
+        return out;
+      }
       const title = titleFrom(text);
       const g = guessHome(title);
-      const two = /\band\b/.test(title) && /remind|present|birthday/.test(title.toLowerCase());
-      const out = [{ kept: true }];
-      if (two) {
-        const [a, b] = title.split(/\s+and\s+/);
-        out.push({ say: 'Two things:' });
-        out.push(P(titleFrom(a), 'Task · Sam · Shared', 'Add', 'task'));
-        out.push(P(titleFrom(b.replace(/^remind me to\s*/i, '')), 'Task · by Fri · Just you', 'Add', 'task'));
-        out.push({ yesall: true });
+      if (/\band\b/.test(text) && /maybe|probably|not sure|might/i.test(text)) {
+        out.push({ say: "I've kept that as one thought for now — it isn't clear yet what it should become." });
+        out.push({ text: 'Say the word when you want to turn it into something.' });
+        return out;
+      }
+      if (/\band\b/.test(text)) {
+        out.push({ say: 'One thing, with a note — the second part shapes the first.' });
+        out.push(P(title.split(/\s+and\s+/)[0], [g.where, g.est, 'Shared', 'note: ' + title.split(/\s+and\s+/).slice(1).join(' and ')].filter(Boolean).join(' · '), 'Add', 'task'));
         return out;
       }
       const lead = /garage/i.test(title) ? 'Goes with the Garage project, I think.'
@@ -197,7 +218,6 @@ const KEV = (() => {
     plan(s, text, focus) {
       if (/exterior|painting|plan/.test((text || '').toLowerCase()) && !/fence/.test((text || '').toLowerCase())) {
         return [
-          { waiting: 'Give me a moment…' },
           { say: 'Here’s a sensible order: prep, then two coats, all needing dry days. About 12 hours all up.' },
           { plan: [['1 Wash and sand walls', '3 hrs · dry'], ['2 Buy paint and rollers', '1 hr'], ['3 First coat', '4 hrs · dry'], ['4 Second coat', '4 hrs · dry']] },
           P('Start "Exterior painting" with these 4 tasks', 'Home · Shared', 'Yes', 'project'),
@@ -212,7 +232,6 @@ const KEV = (() => {
       const needs = w.needs.filter(n => n.kind === 'needs');
       const knows = w.needs.filter(n => n.kind === 'know');
       return [
-        { waiting: 'Give me a moment…' },
         { say: w.headline },
         { section: 'Needs coordination', lines: needs.length ? needs.map(n => n.text) : ['Nothing.'] },
         { section: 'Potential conflicts', lines: needs.filter(n => /two places|clash/.test(n.text)).map(n => n.text).concat(needs.some(n => /two places|clash/.test(n.text)) ? [] : ['None found.']) },

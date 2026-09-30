@@ -34,16 +34,13 @@ Rules: empty sections disappear. Routine items (school, regular work hours) are 
 │ showers.                             │
 │                                      │
 │ WORTH KNOWING                        │
-│ ● Nobody's down for Isla's 3:00      │  ← needs you
-│   pickup. Alex finishes at 2:30.     │
-│                          Sort it ›   │
-│ ○ Saturday morning looks clear and   │  ← good to know
-│   dry — enough for the back fence.   │
+│ ○ Saturday morning looks clear and   │  ← connections only; the pickup
+│   dry — enough for the back fence.   │     gap is shown on the run itself
 │ ○ Nana Jo's birthday is Tuesday.     │
 │                                      │
 │ GETTING EVERYONE THERE               │
 │ 8:30   School drop-off   ● Alex      │
-│ 3:00   Isla — pickup     ● ?         │  ← gap shown in place
+│ 3:00   Isla — pickup  Who? · Sort it │  ← the gap lives on the run
 │ 3:30   Milo — swimming   ● Alex      │
 │                                      │
 │ EVERYONE'S DAY                       │

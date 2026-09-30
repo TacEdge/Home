@@ -17,14 +17,14 @@
 
   const state = {
     si: 0, s: null, place: 'today', horizon: 'week',
-    kev: 'closed', thread: [], focus: null, dismissed: new Set(), done: new Set(), usualOpen: false,
+    kev: 'closed', thread: [], focus: null, dismissed: new Set(), done: new Set(), usualOpen: false, earlierOpen: false, needsOpen: false,
   };
 
   /* ---------- scenario ---------- */
   function loadScenario(i) {
     state.si = i;
     state.s = JSON.parse(JSON.stringify(SCENARIOS[i]));   // fresh copy: approvals mutate it
-    state.thread = []; state.focus = null; state.dismissed = new Set(); state.done = new Set(); state.usualOpen = false;
+    state.thread = []; state.focus = null; state.dismissed = new Set(); state.done = new Set(); state.usualOpen = false; state.earlierOpen = false; state.needsOpen = false;
     $('scenario').value = i;
     render(); renderKev();
   }
@@ -72,10 +72,14 @@
   function runRow(r) {
     if (r.group) return el('div', 'subgroup', esc(r.group));
     const d = el('div', 'row' + (r.clash ? ' clash' : '') + (r.past ? ' past' : ''));
+    const who = r.gap ? '<button class="who-chip">Who?</button>' : r.who.split(' · ').map(n => dot(n) + esc(n)).join(' ');
+    const sort = (r.gap || r.clash) && r.focus && !r.past ? `<button class="row-sort">Sort it ›</button>` : '';
     d.innerHTML = `<span class="time">${esc(r.time)}</span><span class="title">${esc(r.title)}</span>
-      <span class="who ${r.gap ? 'gap' : ''}">${r.gap ? '' : r.who.split(' · ').map(n => dot(n) + esc(n)).join(' ')}</span>`;
+      <span class="who">${who}${sort ? ' <span class="sep">·</span> ' + sort : ''}</span>`;
     d.querySelector('.title').onclick = () => itemSheet(r);
-    d.querySelector('.who').onclick = () => r.gap ? gapSheet(r) : itemSheet(r);
+    const chip = d.querySelector('.who-chip'); if (chip) chip.onclick = () => gapSheet(r);
+    const rs = d.querySelector('.row-sort'); if (rs) rs.onclick = () => openKev(r.focus, r.title);
+    if (!chip && !rs) d.querySelector('.who').onclick = () => itemSheet(r);
     return d;
   }
 
@@ -91,14 +95,15 @@
 
     if (s.mode === 'evening') return renderEvening(c);
 
-    c.appendChild(el('h1', 'headline', esc(s.headline)));
+    const unresolved = s.runs.some(r => r.gap || r.clash) || s.insights.some((ins, i) => ins.kind === 'needs' && !ins.onObject && !state.dismissed.has('i' + i));
+    c.appendChild(el('h1', 'headline', esc(!unresolved && s.headlineQuiet ? s.headlineQuiet : s.headline)));
     if (s.weather) c.appendChild(el('p', 'weather', esc(s.weather)));
 
     const grid = el('div', 'today-grid'); const col1 = el('div', 'col'); const col2 = el('div', 'col');
     grid.appendChild(col1); grid.appendChild(col2); c.appendChild(grid);
 
-    // Worth knowing — or healthy quiet
-    const live = s.insights.map((ins, i) => ({ ins, key: 'i' + i })).filter(x => !state.dismissed.has(x.key));
+    // Worth knowing — connections only; problems intrinsic to a run live on the run
+    const live = s.insights.map((ins, i) => ({ ins, key: 'i' + i })).filter(x => !x.ins.onObject && !state.dismissed.has(x.key));
     if (live.length) {
       const nodes = live.slice(0, 3).map(x => insightRow(x.ins, x.key));
       const extra = (s.more || 0) + Math.max(0, live.length - 3);
@@ -149,13 +154,15 @@
     grid.appendChild(col1); grid.appendChild(col2); c.appendChild(grid);
 
     const t = s.tomorrow;
-    const tm = section(`Tomorrow morning · ${t.label}`, [el('p', 'quiet', esc(t.headline) + ' ' + esc(t.weather)), ...t.runs.map(runRow), el('p', 'quiet', esc(t.leaveBy))]);
-    col1.appendChild(tm);
-    const live = s.insights.map((ins, i) => ({ ins, key: 'i' + i })).filter(x => !state.dismissed.has(x.key));
+    const before = s.todos.length ? [el('div', 'subgroup', 'Before then'), ...s.todos.map((x, i) => todoRow(x, i))] : [];
+    col1.appendChild(section(`Tomorrow morning · ${t.label}`, [el('p', 'quiet', esc(t.headline) + ' ' + esc(t.weather)), ...t.runs.map(runRow), el('p', 'quiet', esc(t.leaveBy)), ...before]));
+    const live = s.insights.map((ins, i) => ({ ins, key: 'i' + i })).filter(x => !x.ins.onObject && !state.dismissed.has(x.key));
     if (live.length) col1.appendChild(section('Worth knowing', live.map(x => insightRow(x.ins, x.key))));
 
-    if (s.todos.length) col2.appendChild(section('Before tomorrow', s.todos.map((x, i) => todoRow(x, i))));
-    col2.appendChild(section('Earlier today', s.earlier.map(r => runRow({ ...r, past: true }))));
+    const et = el('div', 'usual', `<span>Earlier today</span><span>${state.earlierOpen ? '⌄' : '›'}</span>`);
+    et.onclick = () => { state.earlierOpen = !state.earlierOpen; render(); };
+    col2.appendChild(et);
+    if (state.earlierOpen) s.earlier.forEach(r => col2.appendChild(runRow({ ...r, past: true })));
     if (s.toSort) { const d = el('div', 'tosort', `<span>${s.toSort} things to sort</span><span>›</span>`); d.onclick = toSortSheet; col2.appendChild(d); }
   }
 
@@ -179,7 +186,10 @@
 
     const live = data.needs.map((ins, i) => ({ ins, key: h + i })).filter(x => !state.dismissed.has(x.key));
     const lbl = h === 'season' ? 'Worth deciding early' : 'Needs sorting';
-    col1.appendChild(section(lbl, live.length ? live.map(x => insightRow(x.ins, x.key)) : [el('p', 'quiet', 'Nothing needs sorting.')]));
+    const cap = isWide() || state.needsOpen ? live.length : 2;
+    const needNodes = live.slice(0, cap).map(x => insightRow(x.ins, x.key));
+    if (live.length > cap) { const m = el('button', 'quiet more-btn', `+ ${live.length - cap} more`); m.onclick = () => { state.needsOpen = true; render(); }; needNodes.push(m); }
+    col1.appendChild(section(lbl, live.length ? needNodes : [el('p', 'quiet', 'Nothing needs sorting.')]));
 
     const units = h === 'season' ? data.months : data.units;
     const list = units.map(u => {
@@ -217,6 +227,7 @@
       ${['Sam', 'Alex', 'Nana Jo'].map(n => `<div class="kv pick" data-n="${n}"><span></span><span>${dot(n)}${n}</span></div>`).join('')}
       <button class="sheet-act" id="sheet-ask">Ask Kev who's free ›</button>`);
     $('sheet-body').querySelectorAll('.pick').forEach(p => p.onclick = () => { r.gap = false; r.who = p.dataset.n; closeOverlays(); render(); });
+    if (state.kev === 'half') { state.kev = 'closed'; applyKev(); }
     $('sheet-ask').onclick = () => { closeOverlays(); openKev(state.s.id === 'chaos' ? 'pickups' : 'isla-pickup', r.title); };
   }
 
@@ -253,13 +264,16 @@
   const isWide = () => window.matchMedia('(min-width: 768px)').matches && !$('shell').classList.contains('phone');
 
   function applyKev() {
-    const k = $('kev'); k.classList.remove('open', 'full');
-    if (state.kev === 'open') k.classList.add('open'); if (state.kev === 'full') k.classList.add('full');
-    $('scrim').classList.toggle('on', state.kev !== 'closed' && !isDesktop() && $('sheet').hidden && $('menu').hidden);
+    const k = $('kev'); k.classList.remove('half', 'full');
+    if (state.kev !== 'closed') k.classList.add(state.kev);
+    // scrim only on phones: the tablet side panel sits beside content that stays usable
+    $('scrim').classList.toggle('on', state.kev !== 'closed' && !isWide() && $('sheet').hidden && $('menu').hidden);
   }
 
+  // Kev as assistant (opened from something): half height, the subject stays visible.
+  // Kev as destination (opened from the bar): the full conversation.
   function openKev(focus, focusLabel, autoText) {
-    state.kev = 'open'; applyKev();
+    state.kev = (focus || focusLabel) ? 'half' : 'full'; applyKev();
     if (focusLabel) { state.focus = focusLabel; $('kev-focus').hidden = false; $('kev-focus').textContent = 'About: ' + focusLabel; }
     if (focus) { ask(null, focus); }
     else if (autoText) { ask(autoText); }
@@ -273,12 +287,10 @@
     const kept = blocks.some(b => b.kept);
     if (kept) state.thread[state.thread.length - 1].kept = true;      // captured instantly, before Kev "thinks"
     renderKev();
-    const rest = blocks.filter(b => !b.kept && !b.waiting);
-    const waiting = blocks.find(b => b.waiting);
-    const turn = { role: 'kev', blocks: [] };
-    state.thread.push(turn);
-    if (waiting) { turn.blocks = [waiting]; renderKev(); }
-    setTimeout(() => { turn.blocks = rest; renderKev(); }, waiting ? 1400 : 350);
+    // No artificial latency: fast should feel fast. A real deep call would show
+    // "Looking across the week…" only while genuine work is happening.
+    state.thread.push({ role: 'kev', blocks: blocks.filter(b => !b.kept && !b.waiting) });
+    renderKev();
   }
 
   function renderKev() {
@@ -333,8 +345,6 @@
       if (/interviews/.test(p.title)) { const r = s.runs.find(x => /interviews/i.test(x.title)); if (r) { r.who = 'Alex'; r.clash = false; } }
       if (/dentist/.test(p.title)) { const r = s.runs.find(x => /dentist/i.test(x.title)); if (r) { r.time = '4:15'; r.clash = false; } }
       s.insights.forEach((ins, i) => { if (ins.kind === 'needs' && ins.action && ((/pickup/i.test(ins.text) && /pickup/i.test(p.title)) || (/two places/.test(ins.text) && /interviews|dentist/.test(p.title)))) state.dismissed.add('i' + i); });
-      if (s.id === 'normal' && !s.insights.some((ins, i) => ins.kind === 'needs' && !state.dismissed.has('i' + i))) s.headline = 'Easy day. Nothing needs sorting.';
-      if (s.id === 'conflict' && state.dismissed.has('i0')) s.headline = 'Straightforward. Sam flies out at 6.';
     }
     render();
   }
@@ -346,12 +356,19 @@
     const c = $('content'); c.innerHTML = '';
     if (state.place === 'today') renderToday(c); else renderForward(c);
     let bar = document.querySelector('.kev-bar-wide');
-    if (!bar) { bar = el('div', 'kev-bar-wide', '<button>Ask or tell Kev…</button>'); document.body.appendChild(bar); bar.querySelector('button').onclick = () => openKev(); }
+    if (!bar) {
+      bar = el('div', 'kev-bar-wide', '<input type="text" placeholder="Ask or tell Kev…" aria-label="Ask or tell Kev" />'); document.body.appendChild(bar);
+      const inp = bar.querySelector('input');
+      // typing starts here; the panel opens and carries the text across
+      const handOver = () => { if (state.kev === 'closed') { state.kev = 'full'; applyKev(); renderKev(); } const k = $('kev-text'); if (inp.value) { k.value = inp.value; inp.value = ''; } k.focus(); k.setSelectionRange(k.value.length, k.value.length); };
+      inp.oninput = handOver; inp.onfocus = () => { if (state.kev === 'closed') setTimeout(handOver, 0); };
+      inp.onkeydown = (e) => { if (e.key === 'Enter' && inp.value.trim()) { e.preventDefault(); const t = inp.value.trim(); inp.value = ''; state.kev = 'full'; applyKev(); ask(t); } };
+    }
   }
 
-  $('kev-form').onsubmit = (e) => { e.preventDefault(); const t = $('kev-text').value.trim(); if (!t) return; $('kev-text').value = ''; if (state.kev === 'closed') { state.kev = 'open'; applyKev(); } ask(t); };
-  $('kev-text').onfocus = () => { if (state.kev === 'closed') { state.kev = 'open'; applyKev(); renderKev(); } };
-  $('kev-handle').onclick = () => { state.kev = state.kev === 'open' ? 'full' : 'closed'; applyKev(); };
+  $('kev-form').onsubmit = (e) => { e.preventDefault(); const t = $('kev-text').value.trim(); if (!t) return; $('kev-text').value = ''; if (state.kev === 'closed') { state.kev = 'full'; applyKev(); } ask(t); };
+  $('kev-text').onfocus = () => { if (state.kev === 'closed') { state.kev = 'full'; applyKev(); renderKev(); } };
+  $('kev-handle').onclick = () => { state.kev = state.kev === 'half' ? 'full' : 'closed'; applyKev(); };
   $('scrim').onclick = closeOverlays;
   $('menu-btn').onclick = () => { $('menu').hidden = false; $('scrim').classList.add('on'); };
   const closeBtn = el('button', 'kev-close', '‹ Back'); closeBtn.onclick = () => { state.kev = 'closed'; applyKev(); }; $('kev').insertBefore(closeBtn, $('kev-body'));

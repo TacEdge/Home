@@ -82,6 +82,17 @@ Desktop ≥1200px
 └────┴───────────────────────────────────────┴──────────────────┘
 ```
 
+## M0.6 refinements (from the M0.5 review)
+
+1. **Contextual Kev on phone** — opened from something on screen, Kev is a half-height sheet so the subject stays visible; opened from the bar, Kev is the full conversation. *Kev as assistant / Kev as destination.*
+2. **No duplicate insights** — problems intrinsic to a run live on the run (`Who? · Sort it`); *Worth knowing* is for connections only.
+3. **"Who?" chip** replaces the `?` marker.
+4. **Evening** simplified to Tonight · Tomorrow morning (with "Before then" tasks folded in) · Earlier today (collapsed).
+5. **Forward on phones** shows two *Needs sorting* items, then "+ N more".
+6. **Tablet bar is a real input** — typing starts immediately and the panel follows.
+7. **Compound capture rule** — split / keep together / keep unstructured / ask (see KEV-AGENT-MODEL.md).
+8. **No artificial latency.**
+
 ## Design test (used to judge the M0.5 prototype)
 
 1. Can I understand Today in approximately five seconds?

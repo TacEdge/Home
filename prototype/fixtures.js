@@ -62,16 +62,16 @@ const SCENARIOS = [
   {
     id: 'normal', name: '1 · Normal weekday',
     date: 'Wednesday 14 October', clock: '7:03am',
-    headline: 'Easy morning. One thing to sort before 3.',
+    headline: 'Easy morning. One thing to sort before 3.', headlineQuiet: 'Easy day. Nothing needs sorting.',
     weather: 'Fine until mid-afternoon, then showers.',
     insights: [
-      { kind: 'needs', text: "Nobody's down for Isla's 3:00 pickup. Alex finishes at 2:30.", facts: 'Isla — pickup 3:00 · Alex — work till 2:30 · Sam — client site all day', action: { label: 'Sort it', focus: 'isla-pickup' } },
+      { kind: 'needs', onObject: true, text: "Nobody's down for Isla's 3:00 pickup. Alex finishes at 2:30.", facts: 'Isla — pickup 3:00 · Alex — work till 2:30 · Sam — client site all day', action: { label: 'Sort it', focus: 'isla-pickup' } },
       { kind: 'know', text: 'Saturday morning looks clear and dry — enough for the back fence.', facts: 'Sat 17 · 9:00–12:00 free for Sam · dry, 15° · Back fence needs 3 hrs, dry', action: { label: 'Plan it', focus: 'fence' } },
       { kind: 'know', text: "Nana Jo's birthday is Tuesday.", facts: 'Tue 20 Oct · no event or task linked' },
     ],
     runs: [
       { time: '8:30', title: 'School drop-off', who: 'Alex' },
-      { time: '3:00', title: 'Isla — pickup', who: '', gap: true },
+      { time: '3:00', title: 'Isla — pickup', who: '', gap: true, focus: 'isla-pickup' },
       { time: '3:30', title: 'Milo — swimming', who: 'Alex' },
     ],
     people: [
@@ -90,11 +90,11 @@ const SCENARIOS = [
   {
     id: 'chaos', name: '2 · Chaotic weekday',
     date: 'Monday 19 October', clock: '7:03am',
-    headline: 'Full one. Two clashes, and the 3:30 runs need sorting.',
+    headline: 'Full one. Two clashes, and the 3:30 runs need sorting.', headlineQuiet: 'Full one, but it all fits now.',
     weather: 'Wet all day.',
     insights: [
-      { kind: 'needs', text: "Sam's in two places at 3:30 — dentist and the site meeting.", facts: 'Milo — dentist 3:30 (Sam responsible) · Site meeting 3:00–4:30 (Sam)', action: { label: 'Sort it', focus: 'sam-clash' } },
-      { kind: 'needs', text: "Nobody's down for either 3:30 pickup.", facts: 'Isla — school out 3:00 · Milo — swimming 3:30, pickup 5:15 · Alex — Pilates cover shift 3–6', action: { label: 'Sort it', focus: 'pickups' } },
+      { kind: 'needs', onObject: true, text: "Sam's in two places at 3:30 — dentist and the site meeting.", facts: 'Milo — dentist 3:30 (Sam responsible) · Site meeting 3:00–4:30 (Sam)', action: { label: 'Sort it', focus: 'sam-clash' } },
+      { kind: 'needs', onObject: true, text: "Nobody's down for either 3:30 pickup.", facts: 'Isla — school out 3:00 · Milo — swimming 3:30, pickup 5:15 · Alex — Pilates cover shift 3–6', action: { label: 'Sort it', focus: 'pickups' } },
       { kind: 'know', text: "You're both out until after 6 tonight.", facts: 'Sam — site till 4:30, then board 7pm · Alex — cover shift till 6' },
     ],
     more: 2,
@@ -102,10 +102,10 @@ const SCENARIOS = [
       { group: 'Morning' },
       { time: '8:30', title: 'School drop-off', who: 'Sam' },
       { group: 'Afternoon' },
-      { time: '3:00', title: 'Isla — pickup', who: '', gap: true },
-      { time: '3:30', title: 'Milo — dentist', who: 'Sam', clash: true },
-      { time: '3:30', title: 'Milo — swimming', who: '', gap: true, clash: true },
-      { time: '5:15', title: 'Swimming pickup', who: '', gap: true },
+      { time: '3:00', title: 'Isla — pickup', who: '', gap: true, focus: 'pickups' },
+      { time: '3:30', title: 'Milo — dentist', who: 'Sam', clash: true, focus: 'sam-clash' },
+      { time: '3:30', title: 'Milo — swimming', who: '', gap: true, clash: true, focus: 'pickups' },
+      { time: '5:15', title: 'Swimming pickup', who: '', gap: true, focus: 'pickups' },
       { group: 'Evening' },
       { time: '6:45', title: 'Sam → board meeting', who: 'Sam' },
     ],
@@ -184,16 +184,16 @@ const SCENARIOS = [
   {
     id: 'conflict', name: '4 · Conflict',
     date: 'Thursday 15 October', clock: '7:03am',
-    headline: 'Straightforward, apart from 4 o’clock.',
+    headline: 'Straightforward, apart from 4 o’clock.', headlineQuiet: 'Straightforward. Sam flies out at 6.',
     weather: 'Cloudy, staying dry.',
     insights: [
-      { kind: 'needs', text: "Sam's in two places at 4 — parent interviews and the site meeting.", facts: 'Parent interviews 4:00–4:30 (Sam, Alex) · Site meeting 3:30–4:30 (Sam) · Alex free from 2:30', action: { label: 'Sort it', focus: 'thu-clash' } },
+      { kind: 'needs', onObject: true, text: "Sam's in two places at 4 — parent interviews and the site meeting.", facts: 'Parent interviews 4:00–4:30 (Sam, Alex) · Site meeting 3:30–4:30 (Sam) · Alex free from 2:30', action: { label: 'Sort it', focus: 'thu-clash' } },
       { kind: 'know', text: 'Sam flies out at 6 — leaving home by 4:45 is safe.', facts: 'Flight 6:00pm · airport 35 min · check-in by 5:20' },
     ],
     runs: [
       { time: '8:30', title: 'School drop-off', who: 'Sam' },
       { time: '3:00', title: 'Pickup', who: 'Alex' },
-      { time: '4:00', title: 'Parent interviews', who: 'Sam · Alex', clash: true },
+      { time: '4:00', title: 'Parent interviews', who: 'Sam · Alex', clash: true, focus: 'thu-clash' },
       { time: '4:45', title: 'Sam → airport', who: 'Sam' },
     ],
     people: [
@@ -226,7 +226,7 @@ const SCENARIOS = [
       leaveBy: 'Sam will need to leave around 6:05.',
     },
     insights: [
-      { kind: 'know', text: "Tomorrow's pickups are all covered by Alex.", facts: 'Drop-off 8:30 (Alex) · Pickup 3:00 (Alex) · Sam away' },
+      { kind: 'know', onObject: true, text: "Tomorrow's pickups are all covered by Alex.", facts: 'Drop-off 8:30 (Alex) · Pickup 3:00 (Alex) · Sam away' },
     ],
     earlier: [
       { time: '8:30', title: 'School drop-off', who: 'Alex' },
