@@ -6,28 +6,30 @@ Status: **Proposed.** Only V0.1 is committed. Everything after it is a direction
 
 Prove: *Kev understanding our family context makes coordination meaningfully easier.*
 
-Scope: Today, Forward (7/30/90), Home Projects (tasks + notes), Kev with read + proposal tools, read-only calendar sync, weather, free-window finder, conflicts, Week Ahead on demand, facts, visibility, audit, backups, export. See [V0.1-SCOPE.md](./V0.1-SCOPE.md).
+Scope: Today, Forward (7/30/90), Home Projects (tasks + notes), lightweight People profiles, Capture / To sort, Kev (channel-agnostic, fast/deep routing, read + capture + proposal tools), read-only calendar sync via a provider interface (ICS first), weather, free-window finder, conflicts, Week Ahead on demand, context, visibility and sensitivity, audit, usage, backups, export. See [V0.1-SCOPE.md](./V0.1-SCOPE.md).
 
 ### Build milestones
 
-Each milestone ends deployed, usable and tested. No milestone starts until the previous one is merged.
+Each milestone ends deployed (from M1), usable and tested. No milestone starts until the previous one is merged.
 
 | # | Milestone | Outcome |
 |---|---|---|
-| **M1** | **Foundations** | Repo scaffold (Next.js, TS strict, Tailwind, Drizzle, Vitest, Playwright), lint rules incl. layer boundaries, CI (lint, typecheck, test), deploy to hosting, magic-link auth with allowlist, empty authenticated shell with calm base design tokens. |
-| **M2** | **Knowledge core** | Schema + migrations for People, Users, Events, EventPerson, Tasks, Projects, Notes, Facts, Proposals, AuditLog. Actor context, visibility filtering and audit in the domain layer, with tests proving private records never leak. Synthetic fixture family + seed. |
-| **M3** | **Manual family data** | Minimal, calm UI to manage people, manual events (with recurrence), tasks, projects and notes. Settings pages. Export to JSON. Backups configured and a restore tested. |
-| **M4** | **Calendar sync** | ICS adapter (encrypted URLs, lazy refresh, freshness), recurrence + time-zone handling, person/responsibility annotations on synced events. Exhaustive tests for all-day, DST boundaries, RRULE exceptions. |
-| **M5** | **Today** | The Today screen from real data: per-person day, pickups/drop-offs, tasks due/scheduled, weather line. |
-| **M6** | **Forward + conflicts** | 7/30/90-day horizon, deterministic conflict engine, quiet conflict surfacing on Today and Forward. |
-| **M7** | **Weather + free windows** | Open-Meteo adapter with caching; `windows` engine (people × calendar × daylight × weather × duration), tested against fixtures. |
-| **M8** | **Kev: read** | Chat UI (streaming, dictation-friendly), context assembly, read tools, citations to items, limits and spend cap, audit of tool calls, first eval scenarios running in CI. |
-| **M9** | **Kev: propose** | Proposal tools, approval cards (approve / edit / reject / approve all), execution through domain services, facts proposals and *What Kev knows* screen, injection and privacy evals. |
-| **M10** | **Week Ahead + trial** | Week Ahead template, polish pass on design and tone, PWA install, then a 3–4 week live family trial and retrospective. |
+| **M0** | **Experience concepts** (no code) | Information architecture and wireframes for **Today, Forward and Kev** in `docs/concepts/`, including the 7am five-second test, the capture/To sort flow and proposal cards. Agreed before any UI is built. |
+| **M1** | **Foundations** | Scaffold (Next.js, TS strict, Tailwind, Drizzle, Vitest, Playwright), lint rules incl. layer boundaries, CI, deploy to Sydney hosting, magic-link auth with allowlist, empty authenticated shell with base design tokens from M0. |
+| **M2** | **Knowledge core** | Schema + migrations: Person (profile fields), User, CalendarConnection/Source, Event, EventPerson, Task, Project, Note, **Capture**, **Context**, Proposal, Conversation/Message, AuditLog, KevUsage. Actor (with channel), visibility + sensitivity filtering, audit. `stage` and `staleness` engines. Tests proving private and sensitive records never leak. Synthetic fixture family + seed. |
+| **M3** | **Manual family data + capture** | Calm UI for people/profiles, manual events (recurrence), tasks, projects, notes, context. **Capture input and To sort list working without any LLM** (manual organise). Settings. JSON export. Backups + tested restore. |
+| **M4** | **Calendar sync** | `CalendarProvider` interface + ICS adapter (encrypted credentials, lazy refresh, freshness, deletions), recurrence + time-zone handling, annotations on synced events. Contract tests any future provider must pass. Exhaustive tests for all-day, DST, RRULE exceptions. |
+| **M5** | **Today** | Today per the M0 concept: per-person day, pickups/drop-offs, tasks, weather line, To sort count; person profile screens. |
+| **M6** | **Forward + conflicts** | 7/30/90-day horizon, conflict engine, quiet conflict surfacing on Today and Forward. |
+| **M7** | **Weather + free windows** | Open-Meteo adapter; `windows` engine (people × calendar × daylight × weather × duration). |
+| **M8** | **Kev: orchestrator + read** | `kev.handle()` orchestrator emitting `KevEvent`s; web channel adapter (streaming, dictation-friendly); model router (fast/deep + escalate) and provider adapter; context assembly incl. profiles and staleness; read tools; citations; limits, usage log and spend cap; first evals in CI against both tiers. |
+| **M9** | **Kev: capture + propose** | `capture` tool; capture triage on the fast tier; proposal tools and approval cards; *What Kev knows* with confirm/retire; privacy, sensitivity, injection and capture evals. |
+| **M10** | **Week Ahead + trial** | Week Ahead on the deep tier; design and tone polish; PWA install; 3–4 week family trial and retrospective. |
 
 ## V0.2 — Home, properly (likely next)
 
-- Photos and attachments (private object storage, signed URLs) on projects, notes and tasks.
+- Photos and attachments (private object storage, signed URLs) on projects, notes, tasks and captures.
+- Authenticated read-only calendar adapters (Google, Microsoft, iCloud/CalDAV) if ICS proves limiting — no domain changes needed.
 - Project depth: measurements, materials, rough costs — only as structure proven necessary by V0.1 notes.
 - Kev planning a project end-to-end, scheduled around weather, re-planned when forecasts change (still proposal-based).
 - Life Admin basics: Assets (vehicles, appliances), renewals and recurring maintenance generating tasks/events.
@@ -47,8 +49,9 @@ Each milestone ends deployed, usable and tested. No milestone starts until the p
 
 ## V0.5 — Kev reaches out (external actions, with approval)
 
-- Two-way calendar integration (Google/Apple APIs) — Kev proposes, human approves each write.
-- Inbound email forwarding address (school newsletters, bookings, bills) → Kev extracts proposals. Requires a dedicated prompt-injection and sensitive-data review first.
+- Calendar write-back as an optional provider capability — Kev proposes, human approves each write.
+- New capture channels: share sheet, and an inbound email forwarding address (school newsletters, bookings, bills) → captures → Kev proposals. Email requires a dedicated prompt-injection and sensitive-data review first.
+- Voice channel adapter over the same Kev orchestrator (speech in, `say` out, spoken confirmation of proposals).
 - Drafting (not sending) messages.
 
 ## Later / maybe
@@ -64,13 +67,14 @@ Each milestone ends deployed, usable and tested. No milestone starts until the p
 These are excluded on purpose. Revisiting any of them is a decision, not drift.
 
 - **Vector database / embeddings / RAG** — the data fits in structured queries.
-- **Hidden or automatic AI memory** — facts only, approved by humans.
+- **Hidden or automatic AI memory** — context records only, approved by humans.
+- **Sophisticated model routing** (learned classifiers, many tiers) — two tiers and one escalation path until usage data says otherwise.
 - **Any autonomous action** — every change is proposed and approved.
 - **Writes to external systems** (calendars, email, messaging, bookings, payments).
 - **Email/inbox ingestion** — biggest privacy and injection risk; later and carefully.
 - **Notifications and background jobs** — V0.1 is pull-only.
 - **Native mobile apps** — PWA is enough.
-- **Custom voice stack** — use phone dictation.
+- **Custom voice stack** — use phone dictation; the orchestrator is voice-ready.
 - **Children as users; child development tracking of any kind.**
 - **Relationship metrics, streaks, scores or gamification.**
 - **Multi-household / SaaS / multi-tenancy.**

@@ -1,15 +1,16 @@
 # HOME — Family Data Model
 
-Status: **Proposed.** V0.1 entities are specified; later entities are sketched to show the model can grow without restructuring.
+Status: **Rev 2 — amendments awaiting review.** V0.1 entities are specified; later entities are sketched to show the model can grow without restructuring.
 
 ## 1. Modelling principles
 
-1. **Few generic entities, tagged by domain.** An `Event` is an event whether it is a swimming lesson, a WOF appointment or an anniversary dinner. A `Task` is a task whether it belongs to the garage project or life admin. Domains are *views*, not tables.
-2. **People are first-class.** Almost everything relates to one or more people. That is what makes cross-domain reasoning possible ("what's competing for Mike's Saturday?").
-3. **Every record knows who made it, how, and who can see it.** `created_by`, `created_via` (`ui` | `kev` | `sync`), `visibility`.
-4. **External data is mirrored, not owned.** Synced calendar events are stored with their source and external ID, refreshed from source, and never edited in place in HOME (V0.1). HOME can add *annotations* (people, responsibility) on top.
-5. **Kev's memory is data, not magic.** Anything Kev "knows" beyond the structured records is a `Fact` the family can see and edit.
-6. **Time is explicit.** Instants stored as UTC `timestamptz` plus an IANA zone; all-day items as `date`; recurrence as RFC 5545 RRULE strings expanded in code.
+1. **Few generic entities, tagged by domain.** An `Event` is an event whether it is a swimming lesson, a WOF appointment or an anniversary dinner. Domains are *views*, not tables.
+2. **People are first-class.** Almost everything relates to one or more people. Each person has a lightweight profile so Kev understands the people behind the calendar.
+3. **Capture first, organise second.** Raw input is stored as a `Capture` immediately; structured records are created from it by approved proposals, and remember where they came from.
+4. **Every record knows who made it, how, and who can see it.** `created_by`, `created_via` (`ui` | `kev` | `sync`), `visibility`.
+5. **External data is mirrored, not owned.** Synced calendar events are stored with their provider, source and external IDs, refreshed from source, and never edited in place in V0.1. HOME adds *annotations* (people, responsibility) on top.
+6. **Family knowledge is context, not fact.** What Kev knows beyond structured records is held as `Context`: attributed, dated, confirmable, able to go stale, with sensitivity and visibility.
+7. **Time is explicit.** Instants stored as UTC `timestamptz` plus an IANA zone; all-day items as `date`; recurrence as RFC 5545 RRULE strings expanded in code.
 
 ## 2. Common fields
 
@@ -20,22 +21,36 @@ Every user-facing table has:
 | `id` | uuid | |
 | `created_at`, `updated_at` | timestamptz | |
 | `created_by` | user id | null for `sync` |
-| `created_via` | enum `ui` \| `kev` \| `sync` | |
-| `visibility` | enum `household` \| `private` | default `household` |
+| `created_via` | enum `ui` \| `kev` \| `sync` | `kev` means created by approving a Kev proposal |
+| `visibility` | enum `household` \| `private` | default `household` (captures default `private`) |
 | `archived_at` | timestamptz null | soft delete; purged after 30 days |
+| `origin_capture_id` | uuid null | on records organised from a capture |
 
 ## 3. V0.1 entities
 
-### Person
-A member of the family. Not necessarily a user.
+### Person — lightweight profile
+A member of the family (or the wider circle who appears in family life). Not necessarily a user.
 
 | Field | Notes |
 |---|---|
-| `name`, `short_name` | "Courtney", "Court" |
-| `kind` | `adult` \| `child` |
-| `birthday` | date, optional |
+| `name`, `short_name` | |
+| `role` | `parent` \| `child` \| `other` |
+| `relationship` | short free text, e.g. "Grandma (Dad's side)" |
+| `in_household` | lives at home? Grandparents may appear in events without being household |
+| `date_of_birth` | optional; drives age and stage |
+| `stage_note` | optional override/extra, e.g. "starting school in Feb" |
 | `colour` | soft UI colour |
-| `notes` | short free text (e.g. "Year 3 at …") |
+
+The **profile** Kev and the People screen see is mostly *derived*, not stored:
+
+| Profile section | Source |
+|---|---|
+| Age, NZ school year / stage | `stage` engine from `date_of_birth` (+ `stage_note`) |
+| Regular week (recurring activities) | Recurring `Event`s where the person is attending/responsible |
+| Things to know (interests, preferences, practical details) | `Context` records with this person as subject |
+| Coming up | Agenda for this person; next birthday |
+
+Recurring activities are therefore **recurring events**, not a separate table. This is deliberately not a development record: no measurements, assessments, progress or observations.
 
 ### User
 An authenticated login. Adults only in V0.1.
@@ -46,16 +61,28 @@ An authenticated login. Adults only in V0.1.
 | `person_id` | the Person this user is |
 | `preferences` | JSON (e.g. Week Ahead day) |
 
-### CalendarSource
-A read-only external calendar feed.
+### CalendarConnection
+A connection to an external calendar provider. Provider-agnostic.
 
 | Field | Notes |
 |---|---|
-| `name` | "Mike – work", "Family Google calendar" |
-| `ics_url_encrypted` | secret; never sent to client or LLM |
+| `provider` | `ics` (V0.1) \| `google` \| `microsoft` \| `caldav` (later) |
+| `owner_user_id` | whose connection it is |
+| `credentials_encrypted` | ICS: the secret URL. Later: OAuth tokens. Never sent to client or LLM |
+| `status`, `last_error` | |
+
+### CalendarSource
+One calendar within a connection (for ICS, exactly one per connection).
+
+| Field | Notes |
+|---|---|
+| `connection_id` | |
+| `external_calendar_id` | provider's id (ICS: the URL hash) |
+| `name` | "Parent A – work", "Family calendar" |
 | `default_person_ids` | whose events these usually are |
 | `default_kind` | e.g. `work` |
 | `visibility` | a work calendar might be `household`; a personal one `private` |
+| `sync_cursor` | provider sync token where supported |
 | `last_synced_at`, `last_sync_status` | freshness |
 
 ### Event
@@ -66,24 +93,21 @@ Anything that happens at a time.
 | `title`, `description`, `location` | description/location from sync are untrusted text |
 | `starts_at`, `ends_at`, `time_zone` | or `start_date`/`end_date` when `all_day` |
 | `all_day` | bool |
-| `rrule`, `exdates` | recurrence (manual events and synced) |
+| `rrule`, `exdates` | recurrence |
 | `kind` | `appointment` \| `activity` \| `work` \| `school` \| `social` \| `travel` \| `birthday` \| `deadline` \| `other` |
 | `domain` | `family` \| `home` \| `us` \| `admin` \| null |
-| `source` | `manual` \| `ics` |
-| `source_id`, `external_uid` | for synced events |
+| `source` | `manual` \| `synced` |
+| `calendar_source_id`, `external_uid`, `external_etag` | for synced events; provider-neutral |
 
 ### EventPerson (annotation)
-Who is involved and how. Works for both manual and synced events.
+Who is involved and how. Works for manual and synced events.
 
 | Field | Notes |
 |---|---|
-| `event_id`, `person_id` | |
+| `event_id` (or `external_uid` for synced series), `person_id` | |
 | `role` | `attending` \| `responsible` (e.g. doing drop-off/pickup) |
 
-This is what lets Kev answer *"who's doing pickup on Thursday?"* and detect *"nobody is responsible for Tuesday's pickup"*.
-
 ### Task
-Something that needs doing, optionally at a time or within a project.
 
 | Field | Notes |
 |---|---|
@@ -92,107 +116,144 @@ Something that needs doing, optionally at a time or within a project.
 | `project_id` | optional |
 | `domain` | `home` \| `family` \| `admin` \| `us` \| null |
 | `assignee_person_id` | optional |
-| `due_date` | optional hard deadline |
-| `estimate_minutes` | optional; enables "when could I get this done?" |
-| `needs` | JSON set: `dry_weather`, `daylight`, `two_people`, `shops_open` (small fixed vocabulary) |
-| `scheduled_for` | optional planned window (start/end) once agreed |
+| `about_person_id` | optional — e.g. a task that concerns a child |
+| `due_date` | optional |
+| `estimate_minutes` | optional |
+| `needs` | JSON set: `dry_weather`, `daylight`, `two_people`, `shops_open` |
+| `scheduled_for` | optional agreed window |
 | `completed_at` | |
 
 ### Project
-A body of work with a goal. V0.1: home projects only.
+V0.1: home projects only.
 
 | Field | Notes |
 |---|---|
-| `title` | "Exterior painting" |
+| `title`, `summary` | |
 | `domain` | `home` in V0.1 |
 | `status` | `idea` \| `active` \| `paused` \| `done` |
-| `summary` | one or two lines of intent |
 | `target_date` | optional |
 
-A project's detail is its tasks + notes (+ photos from V0.2).
-
 ### Note
-Free text attached to something, or to nothing.
 
 | Field | Notes |
 |---|---|
 | `body` | markdown |
 | `subject_type`, `subject_id` | `project` \| `person` \| `event` \| null |
 
-Measurements, paint colours, decisions made, supplier names — in V0.1 these all live as notes on a project. We add structure only when repeated use shows it is needed.
-
-### Fact ("What Kev knows")
-Durable context Kev can use that isn't naturally an event, task or note.
+### Capture — "capture first"
+Something a user told HOME, stored verbatim before anyone decides what it is.
 
 | Field | Notes |
 |---|---|
-| `statement` | "Charlie's swimming is Tuesdays after school at the aquatic centre." |
-| `about_person_id` | optional |
-| `source` | who told Kev, when (conversation id) |
+| `text` | the user's own words, verbatim (never model-written) |
+| `captured_by` | user |
+| `channel` | `web` (V0.1); later `voice`, `share`, `email` |
+| `message_id` | the conversation message it came from, if any |
+| `status` | `new` \| `proposed` \| `organised` \| `dismissed` |
+| `organised_into` | JSON list of `{type, id}` records created from it |
+| `visibility` | `private` until organised; the organised records get their own visibility |
+
+Flow:
+```
+user says something ──► Capture(new, private)          ← stored immediately, no LLM needed
+                          │
+                          ▼ Kev triage (fast tier)
+                      Proposal(s) linked to capture ──► Capture(proposed)
+                          │ approve                        │ reject / ignore
+                          ▼                                ▼
+       Task / Event / Project / Note / Context      stays in "To sort"
+       (origin_capture_id set) ──► Capture(organised)   (dismiss → purge in 30 days)
+```
+A capture may organise into several records ("book the WOF and remember the car's due for tyres" → a task and a context record). If nothing fits, it stays a capture — which is fine.
+
+### Context — "what Kev knows"
+Replaces the earlier `Fact`. Family knowledge that isn't naturally an event, task or note, and which can change.
+
+| Field | Notes |
+|---|---|
+| `subject_type`, `subject_id` | `person` \| `household` \| `project` (later `place`) |
+| `content` | "Enjoys dinosaurs at the moment." |
+| `category` | `interest` \| `preference` \| `routine` \| `intention` \| `practical` \| `other` |
+| `source_type` | `told_kev` \| `manual` \| `capture` |
+| `source_user_id`, `source_ref` | who said it; conversation or capture id |
+| `created_at` | |
+| `last_confirmed_at` | set on creation and whenever someone confirms it's still true |
+| `valid_until` | optional, for time-bound context ("this month") |
+| `sensitivity` | `normal` \| `sensitive` |
+| `visibility` | `household` \| `private` |
 | `status` | `proposed` \| `active` \| `retired` |
-| `visibility` | `private` facts only ever appear in their author's Kev context |
+
+Staleness is **derived, not stored**: the `staleness` engine treats context as *possibly out of date* when past `valid_until`, or when `last_confirmed_at` is older than a per-category default (initial proposal: interest/preference 12 months, routine 6 months, intention 3 months, practical 12 months). Kev phrases stale context tentatively ("last I heard…") and never states it as current. Settings shows stale items for a quick confirm/retire.
 
 Rules:
-- Kev may **propose** facts; they become `active` only on approval.
-- Facts are about stable context and preferences — never about emotions, health, behaviour or relationship dynamics.
-- All facts are listed in Settings → *What Kev knows*, editable and deletable.
+- Kev may **propose** `normal` context; it becomes `active` only on approval.
+- Kev never proposes `sensitive` context and never infers emotions, health, behaviour, development or relationship dynamics. People may record practical sensitive details themselves (e.g. an allergy).
+- Everything is listed in Settings → *What Kev knows*: editable, confirmable, retirable, deletable.
 
 ### Conversation / Message
-Kev chat history. Owned by one user. Retained 90 days (configurable). Not used as memory.
-
-### Proposal
-A change Kev wants to make, awaiting human approval.
+Kev chat history, owned by one user, retained 90 days, not used as memory.
 
 | Field | Notes |
 |---|---|
-| `conversation_id`, `requested_by_user_id` | |
-| `action` | e.g. `task.create`, `task.update`, `event.create`, `project.create`, `note.create`, `fact.create`, `task.schedule` |
+| `role` | `user` \| `kev` |
+| `channel` | `web` (V0.1) |
+| `content` | provider-neutral structure: text, citations, tool-call summaries, proposal and capture refs |
+| `tier`, `model` | on Kev messages |
+
+### Proposal
+A change Kev wants to make, awaiting approval.
+
+| Field | Notes |
+|---|---|
+| `conversation_id`, `requested_by_user_id`, `capture_id` (optional) | |
+| `action` | `task.create`, `task.update`, `task.schedule`, `event.create`, `event.update`, `event_person.set`, `project.create`, `project.update`, `note.create`, `context.create`, `context.update`, `capture.dismiss` |
 | `payload` | JSON validated by the action's Zod schema |
-| `summary` | human-readable ("Add *Fix garage light* to *Garage*, 1 hour, Saturday morning") |
+| `summary` | human-readable, speakable |
 | `status` | `pending` \| `approved` \| `rejected` \| `expired` \| `failed` |
-| `decided_by`, `decided_at`, `result_ref` | |
+| `decided_by`, `decided_at`, `decided_channel`, `result_ref` | |
 
-### AuditLog
-Append-only record of writes and Kev tool calls. See SYSTEM-ARCHITECTURE §5.8.
+### AuditLog, KevUsage
+- `audit_log` — append-only record of writes and Kev tool calls.
+- `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap.
 
-### WeatherCache, SyncState
-Operational tables: cached forecast (location, fetched_at, hourly JSON), per-source sync state.
+### WeatherCache
+Cached forecast (location, fetched_at, hourly JSON).
 
 ## 4. Relationships (V0.1)
 
 ```
-User ─1:1─ Person ─┬─< EventPerson >─ Event >─ CalendarSource
-                   ├─< Task (assignee) >─ Project
-                   ├─< Fact (about)
+User ─1:1─ Person ─┬─< EventPerson >─ Event >─ CalendarSource >─ CalendarConnection
+                   ├─< Task (assignee / about) >─ Project
+                   ├─< Context (subject)
                    └─< Note (subject)
-Project ─< Task
-Project ─< Note
+Project ─< Task, Note, Context
 User ─< Conversation ─< Message
-Conversation ─< Proposal
+User ─< Capture ─< Proposal ──► (Task | Event | Project | Note | Context).origin_capture_id
 ```
 
 ## 5. Derived views (computed, not stored)
 
 | View | Built by | Used for |
 |---|---|---|
-| **Day agenda** | `agenda` engine: expanded events + due/scheduled tasks + birthdays, per person | Today |
-| **Horizon** | `agenda` over 7/30/90 days + deadlines + birthdays + project target dates | Forward |
-| **Conflicts** | `conflicts` engine over the horizon | Today, Forward, Week Ahead |
-| **Free windows** | `windows` engine: people × calendar × daylight × weather × duration | "When could I get this done?", date-night finder |
-| **Week Ahead** | Kev over horizon + conflicts + open tasks + projects + facts | Weekly briefing |
+| Day agenda | `agenda` | Today |
+| Horizon | `agenda` over 7/30/90 days | Forward |
+| Conflicts | `conflicts` | Today, Forward, Week Ahead |
+| Free windows | `windows` | "When could I get this done?", date-night finder |
+| Person profile | `stage` + recurring events + context + agenda | People screen, Kev context |
+| Staleness | `staleness` | Kev phrasing, Settings review |
+| Week Ahead | Kev over all of the above | Weekly briefing |
 
 ## 6. Later entities (sketch — not built in V0.1)
 
 | Entity | Domain | Notes |
 |---|---|---|
-| `Attachment` | Home, Admin | Photos/files in private object storage; linked to project/asset/note. **V0.2.** |
-| `Idea` | Family, Us, Home | Things we'd like to do/try/buy; `status` idea → planned → done; links to a resulting Event. Covers date ideas, restaurants, experiences, "things one of us mentioned". |
-| `Place` | Family, Us | Restaurants, venues, walks; used by Ideas. |
-| `Milestone` / `Memory` | Family | Positive moments; photos; never evaluative. |
-| `Asset` | Admin, Home | Vehicle, appliance, house systems: make, model, purchase date, warranty end. |
-| `Policy` / `Subscription` | Admin | Provider, renewal date, cost, auto-renew. Sensitive numbers encrypted at field level. |
-| `MaintenanceSchedule` | Admin, Home | Recurring rule attached to an Asset (e.g. WOF, gutter clean) generating Tasks/Events. |
+| `Attachment` | Home, Admin | Photos/files in private object storage. **V0.2.** |
+| `Idea` | Family, Us, Home | Things to do/try/buy; status idea → planned → done. Until it exists, ideas live as captures or `intention` context. |
+| `Place` | Family, Us | Restaurants, venues, walks. |
+| `Memory` | Family | Positive moments, photos; never evaluative. |
+| `Asset` | Admin, Home | Vehicles, appliances, house systems. |
+| `Policy` / `Subscription` | Admin | Renewals, cost; sensitive fields encrypted. |
+| `MaintenanceSchedule` | Admin, Home | Recurring rule on an Asset generating tasks/events. |
 | `Decision` | Home, Family | A choice to be made, options, deadline, outcome. |
-| `ProjectCost` / `Material` | Home | Only if notes prove insufficient. |
 
-The core entities above do not need to change for any of these to be added.
+None of these require changes to the V0.1 entities; captures can organise into them once they exist.

@@ -18,7 +18,11 @@ HOME is not a calendar, a task manager or a dashboard. It is a calm place that u
 2. **See what matters next** — the coming week, month and season, with issues surfaced before they are urgent.
 3. **Get help** — ask Kev, in plain language, and get a useful, grounded answer or a sensible proposal.
 
-The primary interface is conversation. We should rarely need to decide where information belongs. We tell Kev; HOME keeps structured information underneath.
+The primary interface is conversation — typed today, spoken eventually. We should rarely need to decide where information belongs. We tell Kev; HOME keeps structured information underneath.
+
+**Capture first, organise second.** Anything we tell HOME is kept immediately, in our own words, even if nobody has decided yet whether it is a task, an event, a project, a note or something to remember about someone. Kev then suggests how it should be organised. Nothing is lost because it didn't fit a box.
+
+**People are at the centre.** HOME understands the people behind the calendar — who they are, their age and stage, their regular week, what they enjoy — not just the appointments attached to their names.
 
 > "Kev, what does our weekend look like?"
 > "Add fixing the garage light to the house."
@@ -50,13 +54,15 @@ Domains are a way of *presenting* the family's information. They are not silos. 
 
 ## Kev
 
-Kev is not a chatbot bolted onto an app. Kev is the reasoning layer across the whole family system. Kev's operating model:
+Kev is not a chatbot bolted onto an app. Kev is the reasoning layer across the whole family system. HOME's permanent trust model — for V0.1 and for every future capability — is:
 
 ```
 OBSERVE → UNDERSTAND → RECOMMEND → HUMAN APPROVAL → ACT
 ```
 
 Kev never makes consequential decisions on its own. Kev earns autonomy gradually, one well-understood capability at a time.
+
+Kev's rule of thumb: **code computes, Kev explains.** Dates, permissions, conflicts, weather windows and free time are calculated deterministically; Kev reasons over those results and communicates them. Kev never invents them.
 
 The signature behaviour is **cross-domain reasoning**. A home project needs three dry hours; Kev considers the calendar, work, the kids' activities, the forecast and existing priorities, and says: *"Saturday 9:00–12:00 looks like the cleanest window."*
 

@@ -7,7 +7,7 @@ These principles resolve arguments. When a design or build decision is unclear, 
 HOME will hold the most personal information our family has. A feature that erodes trust is a net loss, however clever. We would rather Kev do less, correctly and privately, than more, unpredictably.
 
 - Nothing leaves HOME without a human choosing it.
-- Everything Kev "knows" about us is visible, editable and deletable.
+- Everything Kev "knows" about us is visible, editable and deletable — and treated as context that can change or go stale, not as permanent truth.
 - Private stays private — including between the two of us (surprises, gifts, personal notes).
 
 ## 2. Calm by default
@@ -19,9 +19,14 @@ HOME should reduce cognitive load, never add to it.
 - Surface issues *early and quietly* rather than late and loudly.
 - Empty is fine. "Nothing needs your attention today" is a good screen.
 
-## 3. Tell Kev; don't file things
+## 3. Tell Kev; don't file things — capture first, organise second
 
-Users should not need to decide which domain, list or project something belongs to. Kev infers structure from natural language and proposes it; the human confirms. Manual editing always exists as a fallback, but it is never the primary path.
+Users should not need to decide which domain, list or project something belongs to.
+
+- Anything said to HOME is **captured immediately, verbatim**, before any organising happens. Capture never fails because Kev is unsure, slow or offline.
+- Kev then **proposes** how to organise it (a task in the Garage project, an event, something to know about a person); the human confirms.
+- Unorganised captures wait quietly in a "To sort" list. They are never lost and never nag.
+- Manual editing always exists as a fallback, but it is never the primary path.
 
 ## 4. Grounded, never invented
 
@@ -34,7 +39,13 @@ Kev answers from what HOME actually knows, and says so when it doesn't.
 
 ## 5. Human approval before action
 
-Kev observes, understands and recommends. Humans approve. Kev then acts.
+HOME's permanent trust model:
+
+```
+OBSERVE → UNDERSTAND → RECOMMEND → HUMAN APPROVAL → ACT
+```
+
+Kev observes, understands and recommends. Humans approve. Kev then acts. This governs every future agent capability, not just V0.1.
 
 - Every change Kev makes is proposed first (in V0.1, without exception).
 - Anything that touches the outside world (sending, booking, paying, writing to external calendars) is out of scope until explicitly designed and approved.
@@ -74,4 +85,4 @@ Everything is exportable in an open format. Everything is backed up. Deleting so
 - **Density:** Today fits on one phone screen in the common case.
 - **Motion:** minimal, purposeful.
 - **Mobile first:** HOME is used standing in the kitchen, in the car park, on the couch. Desktop is secondary.
-- **Voice:** V0.1 relies on the phone's built-in dictation; no custom voice stack.
+- **Voice:** speaking to Kev will likely become a primary interface. V0.1 relies on the phone's built-in dictation, but everything Kev does must work through a channel-agnostic conversation layer so voice can later be added as an adapter, not a redesign. Kev's answers lead with a short, speakable sentence.
