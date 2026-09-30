@@ -10,8 +10,8 @@ The five-second test maps to the first three blocks. Everything below them is su
 
 | Order | Block | Answers | Source |
 |---|---|---|---|
-| 1 | **Date + headline** (one or two sentences) + weather as words | *What does today look like?* | `agenda` load + insights → template; Kev phrasing when cached |
-| 2 | **Worth knowing** — up to 3 insights, most important first | *What deserves my attention? Has Kev noticed anything?* | `insights` engine; Kev orders/phrases |
+| 1 | **Date + headline** (one or two sentences) + weather as words | *What does today look like?* | Deterministic template from `agenda` load + insights. **Never replaced by Kev text.** |
+| 2 | **Worth knowing** — up to 3 insights, most important first; or the single line *Nothing needs sorting.* | *What deserves my attention? Has Kev noticed anything?* | `insights` engine; Kev may order/phrase, never invent |
 | 3 | **Getting everyone there** — drop-offs, pickups, runs, with who's doing each | *Where does the family need to be? What needs coordinating?* | `agenda` + `EventPerson(responsible)` |
 | 4 | **Everyone's day** — one line or two per person | *Who's where?* | `agenda` per person; routine compressed |
 | 5 | **To do** — tasks due or scheduled today (max 3 shown) | *Anything to get done?* | tasks |
@@ -69,7 +69,7 @@ On a typical phone, blocks 1–3 sit above the fold: the five-second answer is v
 
 ## 3. Tablet / desktop adaptation
 
-**Tablet (≥768px)** — two columns. Left: headline, Worth knowing, Getting everyone there, To do. Right: Everyone's day, shown as simple **lanes per person** for today only (morning / afternoon / evening bands, not an hour grid). Kev bar spans the bottom; Kev opens as a side sheet.
+**Tablet (≥768px)** — two columns. Left: headline, Worth knowing, Getting everyone there, To do. Right: Everyone's day as **one calm card per person** — name, then their day as a few lines (morning / afternoon / evening as words, not a time axis). Never hourly lanes. Kev bar spans the bottom; Kev opens as a side sheet.
 
 **Desktop (≥1200px)** — the same two columns in the middle, the ⌂ rail on the left, and Kev as a persistent panel on the right (see README).
 
@@ -77,16 +77,17 @@ On a typical phone, blocks 1–3 sit above the fold: the five-second answer is v
 Tablet
 ┌───────────────────────────────┬───────────────────────────────┐
 │ Wednesday 14 October          │ EVERYONE'S DAY                │
-│ Easy morning. One thing to    │        Sam     Alex  Milo Isla│
-│ sort before 3.                │ Morn   Site    Work  Sch  Sch │
-│                               │ Arvo   Site    ·     Swim ?   │
-│ WORTH KNOWING                 │ Eve    Board   Pil.  ·    ·   │
-│ ● Nobody's down for Isla's…   │                               │
-│ ○ Saturday morning…           │ TO DO                         │
-│                               │ ○ Pay swimming term fees      │
-│ GETTING EVERYONE THERE        │                               │
-│ 8:30 Drop-off   Alex          │ 2 things to sort           ›  │
-│ 3:00 Isla       ?             │                               │
+│ Easy morning. One thing to    │ ┌ Sam ────────┐ ┌ Alex ─────┐ │
+│ sort before 3.                │ │ Client site │ │ Work–2:30 │ │
+│                               │ │ 7pm Board   │ │ 6:15 Pil. │ │
+│ WORTH KNOWING                 │ └─────────────┘ └───────────┘ │
+│ ● Nobody's down for Isla's…   │ ┌ Milo ───────┐ ┌ Isla ─────┐ │
+│ ○ Saturday morning…           │ │ School      │ │ School    │ │
+│                               │ │ 3:30 Swim   │ │ 3:00 ?    │ │
+│ GETTING EVERYONE THERE        │ └─────────────┘ └───────────┘ │
+│ 8:30 Drop-off   Alex          │ TO DO                         │
+│ 3:00 Isla       ?             │ ○ Pay swimming term fees      │
+│                               │ 2 things to sort           ›  │
 ├───────────────────────────────┴───────────────────────────────┤
 │ Ask or tell Kev…                                              │
 └───────────────────────────────────────────────────────────────┘
@@ -107,11 +108,11 @@ A future kitchen/wall display would be this tablet layout, read-only, larger typ
 | Tick a to-do | Done, with a brief *Undo*. |
 | Pull down | Refresh calendars and weather; a quiet "Updated just now". |
 | Tap the headline | Opens Kev with "Tell me about today" — a slightly fuller spoken-style briefing. |
-| **Evening mode** (after ~8pm) | Today leads with **Tomorrow morning** ("Early start: Sam's at the airport by 6:40") and folds the rest of today away. |
+| **Evening** (contextual, not a clock rule) | When nothing meaningful remains today, Today leads with **Tonight — nothing else needs you**, then **Tomorrow morning** with the first commitments and a leave-by time. If something still needs attention tonight, it stays first. Principle: *Today shows what is useful now.* |
 
 ## 5. What Kev contributes
 
-- **Phrasing** of the headline and insights, in Kev's voice (fast tier, cached for the day). The deterministic template shows first; Kev's words fade in when ready. Today never waits.
+- **Phrasing** of insights in Kev's voice (fast tier, cached for the day), from their facts only. The headline itself stays deterministic. Today never waits for, and never visibly changes because of, Kev.
 - **Prioritising** the top few insights (a pickup gap outranks a free window).
 - **Follow-through**: "Sort it" leads to a proposal, approved in one tap.
 - Everything else on Today — times, who's where, gaps, weather, free windows — is computed by code.
@@ -127,7 +128,24 @@ A future kitchen/wall display would be this tablet layout, read-only, larger typ
 - No routine noise: "School" is one word, not two events with times.
 - No more than three insights; no insight that isn't actionable or genuinely useful.
 
-## 7. Empty states
+## 7. Empty states — healthy quiet
+
+HOME must be comfortable saying nothing needs attention. Insights are never manufactured to look clever; Kev is not rewarded for finding problems.
+
+**An easy weekday**
+```
+│ Thursday 15 October                  │
+│                                      │
+│ Thursday looks easy.                 │
+│ Nothing needs sorting.               │
+│                                      │
+│ GETTING EVERYONE THERE               │
+│ 8:30   School drop-off   ● Alex      │
+│ 3:00   Pickup            ● Alex      │
+│                                      │
+│ EVERYONE'S DAY                       │
+│ …                                    │
+```
 
 **A clear day**
 ```

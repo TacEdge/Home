@@ -1,6 +1,6 @@
 # M0 — Experience Concepts
 
-Status: **Draft for review.** No code. Approve, change or reject before any UI is built.
+Status: **Approved with refinements (below).** Next: M0.5 experience prototype (`/prototype`).
 
 M0 covers exactly three primary experiences:
 
@@ -37,6 +37,15 @@ Per D18, no real family information appears in the repository. All concepts use 
 Home projects: *Back fence* (paint; 3 hours, needs dry weather) and *Garage* (light needs sorting).
 Scenario date: **Wednesday 14 October 2026**, 7:03am, Pacific/Auckland.
 
+## Refinements agreed at review
+
+1. **The name stays FORWARD** — looking ahead deliberately, not listing what's coming.
+2. **Navigation is not permanently two-screen.** Today, Forward and Kev are the primary V0.1 experience. HOME has other **places** — People, Home (projects), Family, Us, Life Admin — that don't need primary navigation yet but must be able to emerge into it naturally later (see the model below).
+3. **Evening mode is contextual, not a clock rule.** Today shows what is useful *now*. When nothing meaningful remains today, it may lead with *Tonight — nothing else needs you*, then *Tomorrow morning*. If something still needs attention tonight, that stays first.
+4. **The Today headline is deterministic.** It renders instantly and never changes when an LLM response arrives. Kev adds colour only when asked or when an insight is opened.
+5. **Tablet/desktop per-person layouts are calm cards/columns, never hourly timeline lanes.**
+6. **Healthy quiet.** HOME is comfortable saying "Thursday looks easy. Nothing needs sorting." Insights are never manufactured; Kev is not rewarded for finding problems.
+
 ## Global navigation model
 
 ```
@@ -52,25 +61,39 @@ Scenario date: **Wednesday 14 October 2026**, 7:03am, Pacific/Auckland.
                  └──────────────────────────────┘   Kev never navigates away
 ```
 
-- **Two places, one conversation.** *Today* (now) and *Forward* (ahead) are the only primary destinations. Kev is not a place you go; it's always at the bottom of wherever you are.
-- **No tab bar.** Six icons at the bottom is how organisers look. Secondary areas live behind a quiet ⌂ menu (top-left) and, more often, are reached by tapping the thing you care about.
+- **Places.** HOME is made of places: *Today*, *Forward*, and — over time — *People*, *Home*, *Family*, *Us*, *Life Admin*. In V0.1 two places are **primary** (the switch at the top); the rest are **quiet** (reached through the ⌂ menu or by tapping content). The model is a single ordered list of places with a `primary` flag, so a place can be promoted into the top switch later without redesigning navigation — the switch grows from two items to three or four, and on desktop the rail already lists every place.
+- **Kev is not a place.** It's the conversation, present at the bottom of every place.
+- **No tab bar in V0.1.** Six icons at the bottom is how organisers look. Quiet places live behind the ⌂ menu and, more often, are reached by tapping the thing you care about (a person, a project, "2 to sort").
 - **Sheets, not pages, for detail.** Tapping an event, insight or person opens a sheet over the current screen; dismiss it and you're exactly where you were.
 - **Kev as a sheet.** Tapping the Kev bar raises a sheet over the current screen (≈70% height), drag up for full screen. Kev knows what you were looking at (`focus`).
 - **Landing:** HOME always opens on Today.
 - **Tablet (≥768px):** same model; content gains a second column; Kev opens as a side sheet.
-- **Desktop (≥1200px):** ⌂ menu becomes a slim left rail; Kev becomes a persistent right-hand panel; Today/Forward fill the middle.
+- **Desktop (≥1200px):** the ⌂ menu becomes a slim left rail listing every place (primary ones first); Kev becomes a persistent right-hand panel; the current place fills the middle.
 
 ```
 Desktop ≥1200px
 ┌────┬───────────────────────────────────────┬──────────────────┐
-│ ⌂  │  Today   Forward                      │  Kev             │
-│    │                                       │                  │
-│ ▢  │   …Today or Forward content,          │  …conversation…  │
-│ ▢  │    two columns…                       │                  │
-│ ▢  │                                       │                  │
-│ ▢  │                                       │ [Ask or tell…  ] │
+│ Td │  Today   Forward                      │  Kev             │
+│ Fw │                                       │                  │
+│ ·  │   …Today or Forward content,          │  …conversation…  │
+│ Pp │    two columns…                       │                  │
+│ Hm │                                       │                  │
+│ …  │                                       │ [Ask or tell…  ] │
 └────┴───────────────────────────────────────┴──────────────────┘
 ```
+
+## Design test (used to judge the M0.5 prototype)
+
+1. Can I understand Today in approximately five seconds?
+2. Does a busy day still feel calm?
+3. Does an empty day feel intentionally empty rather than unfinished?
+4. Does Forward provide anticipation rather than becoming another calendar?
+5. Does Kev feel like the easiest way to interact with HOME?
+6. Can I tell Kev something without understanding HOME's data structure?
+7. Are recommendations clearly different from facts?
+8. Is approval obvious without being bureaucratic?
+9. Does HOME feel like a household operating system rather than a productivity app?
+10. Does the experience feel useful enough that we would genuinely open it every morning?
 
 ## Shared visual language (low fidelity)
 
@@ -91,17 +114,17 @@ These are directions for the concepts, not a finished design system.
 
 | Block | Used in | Notes |
 |---|---|---|
-| **Headline** | Today, Forward | One or two sentences of meaning. Deterministic template first; Kev's phrasing when cached. Never waits for Kev. |
+| **Headline** | Today, Forward | One or two sentences of meaning. **Deterministic, instant, never replaced by LLM text.** Kev expands on it only when asked. |
 | **Insight row** | Today, Forward, Kev | Mark + one sentence + optional action ("Sort it ›"). Tap to see what it's based on. Swipe to dismiss. |
 | **Person line** | Today | Colour dot, name, one or two lines of their day. Tap → profile. |
 | **Item row** | everywhere | Time · title · who. Tap → detail sheet. |
 | **Kev bar** | everywhere | "Ask or tell Kev…" — one input, no modes. |
 | **Proposal card** | Kev | What Kev would do, in plain words; where it goes; who can see it; **Yes / Change / Not now**. |
 
-## Open questions for review
+## Review questions — answered
 
-1. **Naming.** Is "Forward" the right user-facing word, or should the switch read *Today · Ahead* or *Today · Coming up*?
-2. **Evening mode.** After ~8pm, should Today lead with *Tomorrow morning* (proposed in TODAY.md)?
-3. **Headline authorship.** Comfortable with Kev's phrasing replacing the deterministic headline once cached, or should the Today headline always be the plain template?
-4. **Desktop lanes.** On wide screens, is a simple one-day "lanes per person" view welcome, or too calendar-like?
-5. **Visual next step.** Would a clickable, rendered low-fi version of these three screens help before M1?
+1. Naming → **Forward** stays.
+2. Evening mode → yes, contextual (refinement 3).
+3. Headline → always deterministic (refinement 4).
+4. Wide screens → per-person cards/columns, never hourly lanes (refinement 5).
+5. Rendered low-fi → yes: **M0.5 experience prototype**, evaluated with six fixture states (see ROADMAP).

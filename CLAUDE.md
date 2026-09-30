@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). **Current milestone: M0 — experience concepts** (`docs/concepts/`). Do not write application code until the M0 concepts are approved. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. **Current milestone: M0.5 — experience prototype** (`/prototype`, throwaway, fixture data only, no backend). Do not write application code (M1+) until the prototype has been reviewed. Then build strictly milestone by milestone per `docs/ROADMAP.md`.
 
 ## Read first
 
@@ -53,8 +53,9 @@ If a request conflicts with these docs, stop and say so. Don't silently diverge;
 11. **Nothing clinical, nothing scored.** No child tracking, relationship metrics, streaks or gamification. No storing inferences about emotions, health, behaviour or relationships. Person profiles are lightweight context, never development records.
 12. **Kev is channel-agnostic.** All conversation goes through `kev.handle()` in `src/kev/orchestrator.ts`, which emits structured `KevEvent`s. No UI, HTTP or audio concerns inside Kev; no Kev logic inside UI code. Voice will be an adapter, not a rewrite.
 13. **Integrations sit behind HOME-defined interfaces.** Calendar access goes through `CalendarProvider`; ICS is one adapter. Never let a provider's shape leak into domain entities.
-14. **Insights are derived, not stored.** Detectors in `src/domain/engines/insights/` are pure and tested; every insight carries its source facts and template text. Kev may rephrase and reorder, never invent. Only dismissals persist (`insight_response`). Screens never wait on the LLM.
-15. **This household only.** Don't build or prepare multi-household/SaaS structures.
+14. **`/prototype` is throwaway.** It must never import from `src/`, be imported by `src/`, or gain a database, auth, API, AI or integration. Delete it once M1's real screens exist.
+15. **Insights are derived, not stored.** Detectors in `src/domain/engines/insights/` are pure and tested; every insight carries its source facts and template text. Kev may rephrase and reorder, never invent. Only dismissals persist (`insight_response`). Screens never wait on the LLM.
+16. **This household only.** Don't build or prepare multi-household/SaaS structures.
 
 ## Architecture in one screen
 
