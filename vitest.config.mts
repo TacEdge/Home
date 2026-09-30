@@ -18,16 +18,12 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-<<<<<<< HEAD
         test: {
           name: 'unit',
           include: ['tests/unit/**/*.test.ts'],
           environment: 'node',
           setupFiles: ['tests/setup.ts'],
         },
-=======
-        test: { name: 'unit', include: ['tests/unit/**/*.test.ts'], environment: 'node' },
->>>>>>> origin/main
       },
       {
         extends: true,
@@ -36,11 +32,8 @@ export default defineConfig({
           include: ['tests/integration/**/*.test.ts'],
           environment: 'node',
           fileParallelism: false,
-<<<<<<< HEAD
           setupFiles: ['tests/setup.ts'],
           globalSetup: ['tests/integration/global-setup.ts'],
-=======
->>>>>>> origin/main
         },
       },
     ],
