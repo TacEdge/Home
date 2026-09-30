@@ -87,7 +87,7 @@ export default defineConfig([
       'src/lib/env.ts',
       'next.config.ts',
       'drizzle.config.ts',
-      'vitest.config.ts',
+      'vitest.config.mts',
       'playwright.config.ts',
       'scripts/**',
       'tests/**',
