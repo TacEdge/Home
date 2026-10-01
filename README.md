@@ -6,7 +6,7 @@ This repository holds the product documentation, the M0 experience prototype (re
 
 - Start with [`CLAUDE.md`](./CLAUDE.md) — the operating rules for anyone (human or AI) working here.
 - Product and architecture: [`docs/`](./docs/).
-- Current milestone: **M1 — Foundations** ([`docs/m1/M1-BUILD-CONTRACT.md`](./docs/m1/M1-BUILD-CONTRACT.md)).
+- Current milestone: **M1 — Foundations**, code complete ([`docs/m1/M1-BUILD-CONTRACT.md`](./docs/m1/M1-BUILD-CONTRACT.md)).
 
 ## Local development
 
@@ -18,7 +18,7 @@ cp .env.example .env.local     # then fill in values — never commit this file
 pnpm dev
 ```
 
-Full steps, including the database, live in `docs/runbooks/LOCAL-DEV.md` (written during M1).
+Full steps, including the database and tests, are in [`docs/runbooks/LOCAL-DEV.md`](./docs/runbooks/LOCAL-DEV.md). Deployment: [`docs/runbooks/DEPLOY.md`](./docs/runbooks/DEPLOY.md). Migrations: [`docs/runbooks/MIGRATIONS.md`](./docs/runbooks/MIGRATIONS.md).
 
 ## Scripts
 
@@ -28,7 +28,9 @@ Full steps, including the database, live in `docs/runbooks/LOCAL-DEV.md` (writte
 | `pnpm build` / `pnpm start` | Production build and serve |
 | `pnpm lint` | ESLint + Prettier check |
 | `pnpm typecheck` | TypeScript, strict |
-| `pnpm test` | Unit tests (from step 4) |
+| `pnpm test` | Unit tests |
+| `pnpm test:integration` | Integration tests against Postgres |
+| `pnpm test:e2e` | Playwright end-to-end |
 
 ## Privacy
 

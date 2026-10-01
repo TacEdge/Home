@@ -1,0 +1,37 @@
+name: Migrate production database
+
+# Applies pending migrations to production. Runs after a push to main that
+# touches migrations, or on demand. The `production` GitHub environment holds
+# DATABASE_URL_MIGRATE (Neon direct connection) and requires a reviewer, so
+# nothing reaches the live database without a human approving the run.
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/db/migrations/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply migrations
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm exec drizzle-kit migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_MIGRATE }}

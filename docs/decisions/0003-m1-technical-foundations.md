@@ -22,6 +22,15 @@ ADR 0001 fixed the stack (TypeScript, Next.js, Postgres/Neon, Drizzle, Zod, Tail
 12. **Private-terms scan:** CI checks tracked files against a secret list of real-world terms (`HOME_PRIVATE_TERMS`), so the list never enters the repo.
 13. **Prototype:** stays as reference, excluded from build and deploy, deleted in M6; retrievable from tag `m0.6-prototype`.
 
+## Clarifications recorded during implementation
+
+14. **Auth and database handles are built lazily** (`getAuth()`, `getDb()`), never at import, so `next build` and CI need no runtime configuration. Session-dependent routes are `force-dynamic`.
+15. **E2E runs against the dev server.** `next start` forces `NODE_ENV=production`, where `env.ts` refuses the test mail transport — correctly. A test-only `HOME_NEXT_DIST_DIR` knob lets a second dev server (narrower allowlist) run from the same checkout to prove allowlist removal signs a person out.
+16. **Rate limits live in `sendMagicLink`** (per email and per IP, 5 per 15 minutes), because server-action calls to `auth.api` bypass Better Auth's HTTP limiter; the HTTP limiter stays on as a second layer, generous on verify since tokens are single-use. `x-forwarded-for` is trusted for the client IP, which holds behind Vercel.
+17. **System font stacks**, not `next/font/google`: no font fetches at build or runtime.
+18. **`agentRules: false`** in `next.config.ts`: `next dev` must never edit `CLAUDE.md`.
+19. **Stacked milestone PRs merge with merge commits**, not squashes, so each branch shares history with `main`.
+
 ## Consequences
 
 - Cold starts are slightly slower than Edge; irrelevant at two users.
