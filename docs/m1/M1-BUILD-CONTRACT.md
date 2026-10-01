@@ -80,8 +80,8 @@ Everything not listed here is decided in ADR 0003. All six are now **approved**:
 |---|---|---|
 | **M1-D1** | **Production URL** (needed for auth base URL, cookies and email links). | A dedicated HOME subdomain on a domain the owner already controls. If none is ready, M1 uses the Vercel deployment URL; the final domain is decided before real use. Owner-supplied config only — never in the repo, never blocking local work. |
 | **M1-D2** | **Magic-link email provider** and sending address. | **Postmark**, from a dedicated sending subdomain (e.g. `auth.<your-domain>`), never the root domain. Owner-supplied config. |
-| **M1-D3** | **Session lifetime.** | **Approved:** 30-day rolling sessions (refreshed daily with use), `httpOnly`, `Secure`, `SameSite=Lax`. Sign-out revokes the session server-side. A new magic link is needed after 30 days without use. |
-| **M1-D4** | **Preview deployments.** | **Approved:** enabled, protected by Vercel Deployment Protection, connected **only** to a Neon `dev` branch seeded with fixture users. Never production data. |
+| **M1-D3** | **Session lifetime.** | **Approved, amended by M1.1 (§3.A, ADR 0003 §23):** **fixed 30-day sessions** from sign-in, not extended by use; `httpOnly`, `Secure`, `SameSite=Lax`. Sign-out revokes the session server-side. A new magic link is needed after 30 days, whatever the use. (Originally: rolling, refreshed daily with use.) |
+| **M1-D4** | **Preview deployments.** | **Approved, clarified by M1.1 (D-M1.1-3):** enabled, protected by Vercel Deployment Protection, connected **only** to the separate Neon project `home-dev` (not a branch of production) with the fixture/test allowlist. Never production data. |
 | **M1-D5** | **Neon plan / point-in-time restore.** | **Approved:** free tier during M1 (no real data). Move to a paid plan with ≥7 days of point-in-time restore **before** real family data arrives (M3/M4). |
 | **M1-D6** | **Git base branch.** | **Approved:** create `main` from the current docs branch, make it the default, protect it (CI required, no force-push). Milestone work happens on branches merged into `main`. |
 
@@ -108,9 +108,9 @@ HOME will hold the family's most sensitive information. M1 sets the defaults eve
 
 ### 5.1 Authentication
 - Magic link only. Links are single-use and expire after **15 minutes**. No passwords, no social login.
-- Better Auth's database sessions; cookies `httpOnly`, `Secure`, `SameSite=Lax`, `__Secure-`/`__Host-` prefixes where supported. Lifetime per M1-D3.
+- Better Auth's database sessions; cookies `httpOnly`, `Secure`, `SameSite=Lax`, `__Secure-`/`__Host-` prefixes where supported. Lifetime per M1-D3 (fixed 30 days from sign-in, per M1.1).
 - Sign-out deletes the session server-side, not just the cookie.
-- Rate limits on link requests: per IP and per normalised email (e.g. 5 per 15 minutes), using Better Auth's database-backed rate limiter (works across serverless instances).
+- Rate limits on link requests: per IP (every request) and per normalised email (household addresses), 5 per 15 minutes each, applied by HOME's own gate **before** Better Auth runs (M1.1 §1.1), with atomic counters in the database (works across serverless instances). Only the magic-link verify endpoint is reachable over HTTP; links are requested through the server action alone.
 - `BETTER_AUTH_URL` is the production URL; trusted origins limited to it (and the preview domain in preview).
 
 ### 5.2 Household allowlist (defence in depth)
@@ -267,7 +267,7 @@ Allowed runtime dependencies in M1: `next`, `react`, `react-dom`, `drizzle-orm`,
 **Human setup (owner), documented step by step in `docs/runbooks/DEPLOY.md` by Fable:**
 1. Neon project in `ap-southeast-2` with branches `main` (production) and `dev` (previews); app role and connection strings (pooled for the app, direct for migrations).
 2. Vercel project linked to the GitHub repo, function region `syd1`, production branch `main`, Deployment Protection on previews.
-3. Environment variables for Production and Preview (separate values; preview uses the `dev` branch and fixture/test allowlist).
+3. Environment variables for Production and Preview (separate values; preview uses the separate `home-dev` Neon project and the fixture/test allowlist; `DATABASE_URL` is always the runtime/app credential).
 4. Mail provider account, verified sending domain (SPF, DKIM, DMARC), API key.
 5. Custom domain per M1-D1, HTTPS.
 6. GitHub: `main` protected, CI required; `production` environment with `DATABASE_URL_MIGRATE` and required reviewer for `migrate.yml`; secret `HOME_PRIVATE_TERMS`.

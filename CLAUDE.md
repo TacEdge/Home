@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **M1 — Foundations: code complete** per `docs/m1/M1-BUILD-CONTRACT.md` (ADR 0003 holds the technical choices and implementation clarifications). Remaining: owner deployment setup (`docs/runbooks/DEPLOY.md`), production smoke checklist, then Opus code and architecture review. **Do not start M2 until that review is done.** Runbooks: `docs/runbooks/`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **M1 — Foundations: code complete** per `docs/m1/M1-BUILD-CONTRACT.md` (ADR 0003 holds the technical choices and implementation clarifications). **M1.1 — Security & Deployment Hardening: implemented** per `docs/m1/M1.1-FIX-CONTRACT.md` (ADR 0003 §20–28), awaiting Opus verification of exactly those items. Remaining: that verification, owner deployment setup (`docs/runbooks/DEPLOY.md`), production smoke checklist. **Do not start M2 until the verification and smoke checklist are done.** Runbooks: `docs/runbooks/`.
 
 ## Read first
 

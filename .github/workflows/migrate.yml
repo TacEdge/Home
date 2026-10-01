@@ -1,9 +1,15 @@
 name: Migrate production database
 
 # Applies pending migrations to production. Runs after a push to main that
-# touches migrations, or on demand. The `production` GitHub environment holds
-# DATABASE_URL_MIGRATE (Neon direct connection) and requires a reviewer, so
-# nothing reaches the live database without a human approving the run.
+# touches migrations, or on demand — but only ever from main (M1.1 contract
+# §1.5): a dispatch from any other branch does nothing. The `production`
+# GitHub environment holds DATABASE_URL_MIGRATE, the migration/admin
+# credential (Neon direct connection), and requires a reviewer, so nothing
+# reaches the live database without a human approving the run. That
+# credential is never supplied to the HOME application or the Vercel runtime.
+#
+# Every action is pinned to a commit SHA (version in the trailing comment);
+# Dependabot keeps the pins current and tests/unit/workflows.test.ts enforces it.
 
 on:
   push:
@@ -22,11 +28,12 @@ jobs:
   migrate:
     name: Apply migrations
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -34,4 +41,4 @@ jobs:
       - name: Apply migrations
         run: pnpm exec drizzle-kit migrate
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_MIGRATE }}
+          DATABASE_URL_MIGRATE: ${{ secrets.DATABASE_URL_MIGRATE }}

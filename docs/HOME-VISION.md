@@ -27,7 +27,7 @@ The primary interface is conversation — typed today, spoken eventually. We sho
 > "Kev, what does our weekend look like?"
 > "Add fixing the garage light to the house."
 > "When could I realistically get that done?"
-> "Find us a night where Courtney and I could go out."
+> "Find us a night where Alex and I could go out."
 
 ## Who it is for
 
