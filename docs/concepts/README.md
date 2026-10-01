@@ -120,9 +120,9 @@ These are directions for the concepts, not a finished design system.
 
 | Element | Direction |
 |---|---|
-| **Surface** | Warm off-white "paper" (dark mode: warm charcoal). Generous margins. One column on phones. |
-| **Type** | A warm, humanist serif for the one headline sentence per screen; a clean sans for everything else. Few sizes. |
-| **Colour** | Near-monochrome. One warm accent (terracotta/amber) reserved for *needs you*. Each person has a soft identifying colour, used only as a small dot next to their name. **No red.** |
+| **Surface** | Warm chalk ground, "Morning" (dark mode: "night" on Pine). Generous margins. One column on phones. Values in `docs/BRAND.md` (ADR 0004). |
+| **Type** | A contemporary grotesque (Bricolage Grotesque) for the one headline sentence per screen; Figtree for everything else; DM Mono for labels and times. Few sizes. |
+| **Colour** | Near-monochrome. One warm accent, "Sun", reserved for *needs you*. Each person has a soft identifying colour, used only as a small dot next to their name. **No red.** |
 | **Section labels** | Small, muted capitals ("WORTH KNOWING"). Sections with nothing in them are not shown at all. |
 | **Insight marks** | `●` accent — needs you (coordination, conflict). `○` muted — good to know (opportunity, heads-up). |
 | **Numbers** | No badges, counters or streaks. Where a count helps, it's words: "2 things to sort". |

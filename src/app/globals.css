@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 @import '../ui/tokens.css';
 
-/* Expose tokens to Tailwind utilities (bg-paper, text-ink, font-serif, …). */
+/* Expose tokens to Tailwind utilities (bg-paper, text-ink, font-display, …). */
 @theme inline {
   --color-paper: var(--paper);
   --color-paper-2: var(--paper-2);
@@ -12,8 +12,12 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-ok: var(--ok);
-  --font-serif: var(--font-serif);
+  --color-sky: var(--sky);
+  --color-plum: var(--plum);
+  --color-orb: var(--orb);
+  --font-display: var(--font-display);
   --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
   --radius-home: var(--radius);
   --radius-home-sm: var(--radius-sm);
 }
@@ -28,6 +32,20 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 17px;
-  line-height: 1.45;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }

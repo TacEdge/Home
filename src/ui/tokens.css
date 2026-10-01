@@ -1,24 +1,68 @@
 /*
-  HOME design tokens — derived from the M0 experience direction
-  (docs/concepts/README.md): warm paper, ink, one terracotta accent reserved
-  for "needs you", soft person colours, a serif for the single headline and a
-  sans for everything else. No red, no badges.
+  HOME design tokens — brand identity 01, "The day, rising" (docs/BRAND.md,
+  ADR 0004). A green-black ink instead of black, a warm chalk ground, and
+  exactly one warm colour, reserved for "needs you". The O in the wordmark is
+  an orb: the Sun by day and, in dark mode, the Moon.
+
+  Semantic names are what components use; the brand names they map to are in
+  docs/BRAND.md. Dark mode is "night", not an inversion.
 */
 
-:root {
-  --paper: #f7f3ec;
-  --paper-2: #efe9df;
-  --ink: #2b2723;
-  --ink-2: #5d564e;
-  --muted: #8f867b;
-  --line: #e3dccf;
-  --accent: #b8613a;
-  --accent-soft: #f1dfd4;
-  --ok: #7a8b6f;
+/* Self-hosted type (public/fonts, SIL OFL). Never fetched from a third party
+   at build or runtime (ADR 0003 §17 as amended by ADR 0004). */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/bricolage-grotesque.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/figtree.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/dm-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/dm-mono-500.woff2') format('woff2');
+}
 
-  --font-serif: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+:root {
+  /* surfaces and ink */
+  --paper: #f6f4ee; /* Morning */
+  --paper-2: #ebe7dc; /* Linen */
+  --ink: #1f3b36; /* Pine */
+  --ink-2: #4f6b62; /* Moss */
+  --muted: #8c9c95; /* Mist */
+  --line: #d9d4c6; /* horizon rules */
+
+  /* the one warm colour */
+  --accent: #f0a05a; /* Sun — "needs you" */
+  --accent-soft: #fbe7d3;
+
+  /* secondary marks, never fills behind text */
+  --ok: #a8c3a0; /* Sage — done, covered, calm */
+  --sky: #c9dce6; /* Forward, weather */
+  --plum: #6e5a86; /* Us, and the edge of a Kev proposal */
+
+  /* what the O is right now */
+  --orb: var(--accent);
+
+  --font-display: 'Bricolage Grotesque', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Figtree', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -29,18 +73,25 @@
   --space-8: 32px;
   --radius: 14px;
   --radius-sm: 8px;
+
+  color-scheme: light;
 }
 
+/* Night: Pine ground, Moon ink; the O goes pale. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #221f1b;
-    --paper-2: #2b2723;
-    --ink: #efe9df;
-    --ink-2: #cdc4b6;
-    --muted: #8f867b;
-    --line: #3a3530;
-    --accent: #d98559;
-    --accent-soft: #3d2a20;
-    --ok: #98a98b;
+    --paper: #161d1b;
+    --paper-2: #212a27;
+    --ink: #ece8de;
+    --ink-2: #b9c4bf;
+    --muted: #7f8d88;
+    --line: #303936;
+    --accent: #f2b072;
+    --accent-soft: #3a2a1b;
+    --ok: #7e9a78;
+    --sky: #3b5565;
+    --plum: #a893c3;
+    --orb: #e9e4d6; /* Moon */
+    color-scheme: dark;
   }
 }

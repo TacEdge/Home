@@ -37,7 +37,7 @@ export default async function ActivityPage() {
         <ul>
           {entries.map((e) => (
             <li key={e.id} className="border-line flex items-baseline gap-3 border-t py-2">
-              <span className="text-muted w-[120px] shrink-0 text-[14px] tabular-nums">
+              <span className="text-muted font-mono w-[120px] shrink-0 text-[13px] tabular-nums">
                 {fmt.format(e.at)}
               </span>
               <span className="flex-1">
