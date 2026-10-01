@@ -61,6 +61,8 @@ jobs:
       - run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+      - name: A misconfigured server fails at boot (contract §2.6)
+        run: node scripts/check-boot-validation.mjs "$TEST_APP_DATABASE_URL"
 
   bundle:
     # What Vercel uploads (the repository minus .vercelignore) must build on

@@ -32,6 +32,9 @@ const schema = z.object({
   HOME_TIMEZONE: z.string().min(1).default('Pacific/Auckland'),
   // Set by Vercel on its deployments; absent everywhere else.
   VERCEL_ENV: z.enum(['production', 'preview', 'development']).optional(),
+  // Host of the production database (M1.1 contract §1.4, I2). Previews must
+  // never point at it; production must point at it when set.
+  HOME_PRODUCTION_DB_HOST: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -73,7 +76,38 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         bad.join('; '),
       );
   }
+  // Preview/production database isolation (contract §1.4). Preview and
+  // production are separate Neon projects; this is the backstop against a
+  // production credential ending up in the preview environment, or vice versa.
+  const dbHost = hostOf(env.DATABASE_URL);
+  if (env.VERCEL_ENV === 'preview') {
+    if (!env.HOME_PRODUCTION_DB_HOST)
+      throw new EnvError(
+        ['HOME_PRODUCTION_DB_HOST'],
+        'HOME_PRODUCTION_DB_HOST (required in preview deployments)',
+      );
+    if (dbHost === env.HOME_PRODUCTION_DB_HOST)
+      throw new EnvError(
+        ['DATABASE_URL'],
+        'DATABASE_URL (a preview deployment must not use the production database host)',
+      );
+  }
+  if (env.VERCEL_ENV === 'production' && env.HOME_PRODUCTION_DB_HOST) {
+    if (dbHost !== env.HOME_PRODUCTION_DB_HOST)
+      throw new EnvError(
+        ['DATABASE_URL'],
+        'DATABASE_URL (production must use the HOME_PRODUCTION_DB_HOST database host)',
+      );
+  }
   return env;
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
 }
 
 let cached: Env | undefined;

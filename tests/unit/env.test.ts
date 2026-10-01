@@ -65,6 +65,81 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...valid, HOME_ALLOWED_EMAILS: ' , ' })).toThrow(/HOME_ALLOWED_EMAILS/);
   });
 
+  describe('preview/production database isolation (§1.4)', () => {
+    const prodHost = 'ep-prod.ap-southeast-2.aws.neon.tech';
+    const devHost = 'ep-dev.ap-southeast-2.aws.neon.tech';
+    const url = (host: string) => `postgres://home_app:pw@${host}/neondb?sslmode=require`;
+
+    it('preview refuses the production database host', () => {
+      expect(() =>
+        parseEnv({
+          ...valid,
+          VERCEL_ENV: 'preview',
+          HOME_PRODUCTION_DB_HOST: prodHost,
+          DATABASE_URL: url(prodHost),
+        }),
+      ).toThrow(/DATABASE_URL/);
+    });
+
+    it('preview requires HOME_PRODUCTION_DB_HOST', () => {
+      expect(() =>
+        parseEnv({ ...valid, VERCEL_ENV: 'preview', DATABASE_URL: url(devHost) }),
+      ).toThrow(/HOME_PRODUCTION_DB_HOST/);
+    });
+
+    it('preview accepts a different host', () => {
+      expect(() =>
+        parseEnv({
+          ...valid,
+          VERCEL_ENV: 'preview',
+          HOME_PRODUCTION_DB_HOST: prodHost,
+          DATABASE_URL: url(devHost),
+        }),
+      ).not.toThrow();
+    });
+
+    it('production accepts its own host', () => {
+      expect(() =>
+        parseEnv({
+          ...valid,
+          VERCEL_ENV: 'production',
+          HOME_PRODUCTION_DB_HOST: prodHost,
+          DATABASE_URL: url(prodHost),
+        }),
+      ).not.toThrow();
+    });
+
+    it('production refuses a mismatched host', () => {
+      expect(() =>
+        parseEnv({
+          ...valid,
+          VERCEL_ENV: 'production',
+          HOME_PRODUCTION_DB_HOST: prodHost,
+          DATABASE_URL: url(devHost),
+        }),
+      ).toThrow(/DATABASE_URL/);
+    });
+
+    it('never echoes the URL or password', () => {
+      try {
+        parseEnv({
+          ...valid,
+          VERCEL_ENV: 'preview',
+          HOME_PRODUCTION_DB_HOST: prodHost,
+          DATABASE_URL: url(prodHost),
+        });
+        expect.unreachable();
+      } catch (e) {
+        expect((e as Error).message).not.toContain('pw@');
+        expect((e as Error).message).not.toContain(prodHost);
+      }
+    });
+
+    it('does nothing outside Vercel', () => {
+      expect(() => parseEnv({ ...valid, HOME_PRODUCTION_DB_HOST: prodHost })).not.toThrow();
+    });
+  });
+
   describe('in production', () => {
     const prod = {
       ...valid,

@@ -1,10 +1,13 @@
 // Runs once when the Next.js server starts (not at build). The checks here
-// make a misconfigured deployment fail at boot, visibly, instead of on its
-// first request. Only the Node runtime applies: HOME has no edge code.
+// make a misconfigured deployment fail at boot, visibly in the runtime logs,
+// instead of on its first request (M1.1 contract §2.6, §1.7). Only the Node
+// runtime applies: HOME has no edge code.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  const [{ env }, { getDb }, { assertRuntimeRole }] = await Promise.all([
-    import('@/lib/env'),
+  const { parseEnv } = await import('@/lib/env');
+  // Throws EnvError naming the bad variables (never their values).
+  const env = parseEnv(process.env);
+  const [{ getDb }, { assertRuntimeRole }] = await Promise.all([
     import('@/db/client'),
     import('@/db/role-check'),
   ]);
