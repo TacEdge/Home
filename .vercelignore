@@ -1,0 +1,9 @@
+# Never deployed: reference prototype, docs, tests, CI, local tooling.
+prototype
+docs
+tests
+.github
+test-results
+playwright-report
+docker-compose.yml
+scripts/check-private-terms.mts

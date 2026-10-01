@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **Current milestone: M1 — Foundations**, defined exactly by `docs/m1/M1-BUILD-CONTRACT.md` (technical choices in ADR 0003). Build only what the contract lists, in its order; stop at its definition of done for review. Then milestone by milestone per `docs/ROADMAP.md`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **M1 — Foundations: code complete** per `docs/m1/M1-BUILD-CONTRACT.md` (ADR 0003 holds the technical choices and implementation clarifications). Remaining: owner deployment setup (`docs/runbooks/DEPLOY.md`), production smoke checklist, then Opus code and architecture review. **Do not start M2 until that review is done.** Runbooks: `docs/runbooks/`.
 
 ## Read first
 
