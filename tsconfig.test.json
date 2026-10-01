@@ -1,0 +1,16 @@
+{
+  // Everything the production config excludes, so tests, runner configs and
+  // scripts stay type-checked by `pnpm typecheck` (M1.1 contract §1.2).
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    ".next-narrow/types/**/*.ts",
+    ".next-narrow/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", "prototype", ".next", ".next-*", "out"]
+}

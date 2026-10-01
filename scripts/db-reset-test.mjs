@@ -1,14 +1,14 @@
 // Drops and recreates the integration-test schema, then applies all migrations.
-// Uses TEST_DATABASE_URL or the local default. Never points at production.
+// Uses TEST_DATABASE_URL or the local default, and refuses anything that is
+// not a local *_test database (tests/db-guard.ts) before connecting.
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { assertTestDatabase } from '../tests/db-guard.ts';
 
-const url = process.env.TEST_DATABASE_URL ?? 'postgres://home:home@localhost:5432/home_test';
-if (!/localhost|127\.0\.0\.1|home_test/.test(url)) {
-  console.error('Refusing to reset a database that does not look like a local test database.');
-  process.exit(1);
-}
+const url = assertTestDatabase(
+  process.env.TEST_DATABASE_URL ?? 'postgres://home:home@localhost:5432/home_test',
+);
 const pool = new Pool({ connectionString: url, max: 1 });
 try {
   await pool.query('drop schema if exists public cascade; create schema public;');
