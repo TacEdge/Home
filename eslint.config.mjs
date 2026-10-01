@@ -86,6 +86,7 @@ export default defineConfig([
   {
     files: [
       'src/lib/env.ts',
+      'src/instrumentation.ts', // reads only Next's own NEXT_RUNTIME
       'next.config.ts',
       'drizzle.config.ts',
       'vitest.config.mts',

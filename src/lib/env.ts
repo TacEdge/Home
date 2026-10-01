@@ -30,6 +30,8 @@ const schema = z.object({
   MAIL_FROM: z.string().email().optional(),
   AUDIT_HASH_SECRET: bytes(32),
   HOME_TIMEZONE: z.string().min(1).default('Pacific/Auckland'),
+  // Set by Vercel on its deployments; absent everywhere else.
+  VERCEL_ENV: z.enum(['production', 'preview', 'development']).optional(),
 });
 
 export type Env = z.infer<typeof schema>;

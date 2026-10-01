@@ -1,9 +1,13 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
-import { testDb } from './db';
+import { adminDb, testDb } from './db';
 
 const { db, close } = testDb();
-afterAll(close);
+const admin = adminDb();
+afterAll(async () => {
+  await close();
+  await admin.close();
+});
 
 describe('database', () => {
   it('answers a trivial query through Drizzle', async () => {
@@ -19,8 +23,10 @@ describe('database', () => {
     expect(names).toContain('audit_log');
   });
 
-  it('is idempotent: re-running the migrator makes no changes', async () => {
+  it('is idempotent: re-running the migrator (as the migration/admin role) makes no changes', async () => {
     const { migrate } = await import('drizzle-orm/node-postgres/migrator');
-    await expect(migrate(db, { migrationsFolder: 'src/db/migrations' })).resolves.toBeUndefined();
+    await expect(
+      migrate(admin.db, { migrationsFolder: 'src/db/migrations' }),
+    ).resolves.toBeUndefined();
   });
 });

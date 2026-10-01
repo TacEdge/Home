@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { assertTestDatabase } from './tests/db-guard';
-import { TEST_DATABASE_URL, testEnv } from './tests/env';
+import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL, testEnv } from './tests/env';
 
 // End-to-end tests run against the dev server with the test mail transport
 // (production refuses it, by design) and the local test database.
@@ -13,6 +13,7 @@ import { TEST_DATABASE_URL, testEnv } from './tests/env';
 // Before any server starts: the dev servers and the global setup may only ever
 // touch a local *_test database (contract §1.6).
 assertTestDatabase(TEST_DATABASE_URL);
+assertTestDatabase(TEST_APP_DATABASE_URL);
 
 export const MAIN_PORT = 3333;
 export const NARROW_PORT = 3334;

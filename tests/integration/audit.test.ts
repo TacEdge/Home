@@ -3,10 +3,17 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { auditLog } from '@/db/schema';
 import { listAudit, recordAudit } from '@/trust/audit';
 import { systemActor, type UserActor } from '@/trust/actor';
-import { testDb } from './db';
+import { adminDb, testDb } from './db';
 
 const { db, close } = testDb();
-afterAll(close);
+// The trigger is the second layer behind the role privileges (contract §1.7).
+// As home_app the privilege check fires first (tests/integration/app-role),
+// so proving the trigger itself means connecting as the owner.
+const admin = adminDb();
+afterAll(async () => {
+  await close();
+  await admin.close();
+});
 
 // Drizzle wraps driver errors ("Failed query: …") and keeps the Postgres error
 // as `cause`; the trigger's message lives there.
@@ -42,20 +49,20 @@ describe('audit_log', () => {
     expect(row.actorChannel).toBeNull();
   });
 
-  it('rejects UPDATE at the database level', async () => {
+  it('rejects UPDATE at the database level, even for the table owner (trigger)', async () => {
     const row = await recordAudit(sam, { event: 'test.immutable' }, { db });
     await expectAppendOnly(
-      db.update(auditLog).set({ summary: 'tampered' }).where(eq(auditLog.id, row.id)),
+      admin.db.update(auditLog).set({ summary: 'tampered' }).where(eq(auditLog.id, row.id)),
     );
   });
 
-  it('rejects DELETE at the database level', async () => {
+  it('rejects DELETE at the database level, even for the table owner (trigger)', async () => {
     const row = await recordAudit(sam, { event: 'test.immutable' }, { db });
-    await expectAppendOnly(db.delete(auditLog).where(eq(auditLog.id, row.id)));
+    await expectAppendOnly(admin.db.delete(auditLog).where(eq(auditLog.id, row.id)));
   });
 
-  it('rejects TRUNCATE at the database level', async () => {
-    await expectAppendOnly(db.execute(sql`truncate audit_log`));
+  it('rejects TRUNCATE at the database level, even for the table owner (trigger)', async () => {
+    await expectAppendOnly(admin.db.execute(sql`truncate audit_log`));
   });
 
   it('lists newest first and paginates with `before`', async () => {

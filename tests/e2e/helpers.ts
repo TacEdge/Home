@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { Pool } from 'pg';
-import { TEST_DATABASE_URL } from '../env';
+import { TEST_APP_DATABASE_URL } from '../env';
 import { waitForLink } from './mailbox';
 
 export const SENT_TEXT = 'If that address can use HOME, a link is on its way.';
@@ -24,9 +24,12 @@ export async function signIn(page: Page, email: string): Promise<void> {
   await page.waitForURL('**/today');
 }
 
-/** Direct access to the test database for setup that has no UI (e.g. expiring a link). */
+/**
+ * Direct access to the test database for setup that has no UI (e.g. expiring
+ * a link), as the runtime/app role — the same role model as the servers.
+ */
 export async function withDb<T>(fn: (pool: Pool) => Promise<T>): Promise<T> {
-  const pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+  const pool = new Pool({ connectionString: TEST_APP_DATABASE_URL, max: 1 });
   try {
     return await fn(pool);
   } finally {
