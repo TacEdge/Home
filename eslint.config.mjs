@@ -59,6 +59,7 @@ export default defineConfig([
   ...nextTs,
   globalIgnores([
     '.next/**',
+    '.next-*/**',
     'out/**',
     'build/**',
     'next-env.d.ts',
@@ -91,6 +92,7 @@ export default defineConfig([
       'playwright.config.ts',
       'scripts/**',
       'tests/**',
+      'playwright.config.ts',
     ],
     rules: { 'no-restricted-properties': 'off' },
   },

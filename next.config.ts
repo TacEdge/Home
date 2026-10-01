@@ -16,6 +16,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Only for tests: lets a second dev server run from the same checkout
+  // (Next allows one dev server per distDir). Unset in every real environment.
+  distDir: process.env.HOME_NEXT_DIST_DIR ?? '.next',
+  // `next dev` would otherwise append its own block to CLAUDE.md. That file is
+  // HOME's operating instructions and is edited only deliberately.
+  agentRules: false,
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

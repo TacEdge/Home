@@ -21,9 +21,11 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs studio",
-    "db:reset:test": "node scripts/db-reset-test.mjs"
+    "db:reset:test": "node scripts/db-reset-test.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "better-auth": "^1.7.7",
     "drizzle-orm": "^0.45.3",
     "next": "16.3.8",
     "pg": "^8.23.1",
@@ -33,6 +35,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22",
     "@types/pg": "^8.23.1",
