@@ -1,0 +1,39 @@
+name: Migrate preview database
+
+# Applies pending migrations to the home-dev Neon project, the completely
+# separate database previews run against. On demand only, from main, and
+# only through the `preview` GitHub environment, which holds that project's
+# own migration/admin credential. Production is a different workflow, a
+# different environment and a different secret value (migrate.yml).
+#
+# Every action is pinned to a commit SHA (version in the trailing comment);
+# Dependabot keeps the pins current and tests/unit/workflows.test.ts enforces it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-preview
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply migrations (home-dev)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: preview
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm exec drizzle-kit migrate
+        env:
+          DATABASE_URL_MIGRATE: ${{ secrets.DATABASE_URL_MIGRATE }}

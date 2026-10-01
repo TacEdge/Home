@@ -10,7 +10,9 @@ const workflows = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
 
 describe('GitHub workflows', () => {
   it('exist', () => {
-    expect(workflows).toEqual(expect.arrayContaining(['ci.yml', 'migrate.yml']));
+    expect(workflows).toEqual(
+      expect.arrayContaining(['ci.yml', 'migrate.yml', 'migrate-preview.yml']),
+    );
   });
 
   it.each(workflows)('%s pins every action to a 40-character commit SHA', (file) => {
@@ -29,6 +31,19 @@ describe('GitHub workflows', () => {
     const text = readFileSync(join(dir, 'migrate.yml'), 'utf8');
     expect(text).toMatch(/if:\s*github\.ref == 'refs\/heads\/main'/);
     expect(text).toMatch(/environment:\s*production/);
+  });
+
+  it('migrate-preview.yml is dispatch-only, main-only, and never touches production', () => {
+    const text = readFileSync(join(dir, 'migrate-preview.yml'), 'utf8');
+    // The only trigger is a manual dispatch: no push, schedule or PR event.
+    const on = text.match(/^on:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+    expect(on.trim()).toBe('workflow_dispatch:');
+    expect(text).toMatch(/if:\s*github\.ref == 'refs\/heads\/main'/);
+    expect(text).toMatch(/environment:\s*preview/);
+    // The production environment and its credential boundary stay in migrate.yml.
+    expect(text).not.toMatch(/environment:\s*production/);
+    expect(text).not.toMatch(/migrate-production/);
+    expect(text).toMatch(/DATABASE_URL_MIGRATE: \$\{\{ secrets\.DATABASE_URL_MIGRATE \}\}/);
   });
 
   it('dependabot covers github-actions', () => {
