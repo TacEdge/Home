@@ -27,7 +27,7 @@ ADR 0001 fixed the stack (TypeScript, Next.js, Postgres/Neon, Drizzle, Zod, Tail
 14. **Auth and database handles are built lazily** (`getAuth()`, `getDb()`), never at import, so `next build` and CI need no runtime configuration. Session-dependent routes are `force-dynamic`.
 15. **E2E runs against the dev server.** `next start` forces `NODE_ENV=production`, where `env.ts` refuses the test mail transport — correctly. A test-only `HOME_NEXT_DIST_DIR` knob lets a second dev server (narrower allowlist) run from the same checkout to prove allowlist removal signs a person out.
 16. ~~Rate limits live in `sendMagicLink`.~~ **Superseded by M1.1 (item 20).** Better Auth stores a pending token, with the address, before calling `sendMagicLink`, so limits and the allowlist there were too late; and `x-forwarded-for` was the wrong header to trust.
-17. **System font stacks**, not `next/font/google`: no font fetches at build or runtime.
+17. ~~System font stacks~~ **Amended by ADR 0004:** the brand's three faces are self-hosted from `public/fonts/`. The intent stands: no `next/font/google`, no font fetched from a third party at build or runtime.
 18. **`agentRules: false`** in `next.config.ts`: `next dev` must never edit `CLAUDE.md`.
 19. **Stacked milestone PRs merge with merge commits**, not squashes, so each branch shares history with `main`.
 

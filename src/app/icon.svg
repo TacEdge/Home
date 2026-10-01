@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- HOME app icon: the sun, just over the horizon, on Pine (docs/BRAND.md §02). -->
+  <rect width="128" height="128" rx="29" fill="#1f3b36"/>
+  <circle cx="64" cy="88" r="42" fill="#f0a05a"/>
+  <rect x="0" y="98" width="128" height="30" fill="#1f3b36"/>
+  <rect x="26" y="96.5" width="76" height="3.5" rx="1.75" fill="#ece8de"/>
+</svg>

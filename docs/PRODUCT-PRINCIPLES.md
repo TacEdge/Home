@@ -96,6 +96,7 @@ Everything is exportable in an open format. Everything is backed up. Deleting so
 ## Design language (initial)
 
 - **Tone:** warm, calm, concise, natural NZ English. Kev speaks like a perceptive, capable friend who has been paying attention — not a butler, not a coach, not a corporate assistant. Understated, occasionally playful. Emoji extremely sparingly; no filler. Full personality spec in [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md).
+- **Identity:** the visual identity — wordmark, colour, type, icons — is `docs/BRAND.md` (ADR 0004). Everything below sits inside it.
 - **Layout:** generous whitespace, one primary column, strong typographic hierarchy, few colours. Each person has a soft, consistent colour.
 - **Density:** Today fits on one phone screen in the common case.
 - **Motion:** minimal, purposeful.

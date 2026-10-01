@@ -28,6 +28,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 |---|---|
 | `docs/HOME-VISION.md` | Always, once. What HOME is and isn't. |
 | `docs/PRODUCT-PRINCIPLES.md` | Before any UI, copy or Kev behaviour change. |
+| `docs/BRAND.md` | Before any UI change: the identity (wordmark, colour tokens, type, icons) and its rules. |
 | `docs/SYSTEM-ARCHITECTURE.md` | Before touching structure, dependencies, auth, data access or integrations. |
 | `docs/FAMILY-DATA-MODEL.md` | Before any schema change. |
 | `docs/KEV-AGENT-MODEL.md` | Before changing prompts, tools, context assembly or memory. |
@@ -88,7 +89,7 @@ Do not add dependencies casually. Prefer the platform and what's already here. A
 - **Naming:** domain language (person, event, task, project, note, context, capture, proposal) — not generic CRUD names.
 - **Organised records** keep `origin_capture_id` when they came from a capture.
 - **Copy and Kev tone:** warm, calm, concise, natural NZ English. Kev is perceptive, understated and occasionally playful — never nagging, corporate or over-enthusiastic. Emoji extremely sparingly; exclamation marks rarely. See the personality spec in `docs/KEV-AGENT-MODEL.md`.
-- **UI:** mobile first, generous whitespace, one column, few colours. If a screen feels like a dashboard, simplify it.
+- **UI:** mobile first, generous whitespace, one column, few colours. If a screen feels like a dashboard, simplify it. Colour and type come only from the tokens in `src/ui/tokens.css` (`docs/BRAND.md`): one warm accent for "needs you", nothing red, fonts self-hosted.
 
 ## Kev specifics
 
