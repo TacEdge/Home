@@ -24,7 +24,7 @@ For **each** project:
    ```sql
    CREATE ROLE home_app LOGIN PASSWORD '<openssl rand -base64 36>' NOINHERIT NOCREATEDB NOCREATEROLE;
    ```
-3. Apply the migrations with the migration/admin credential: `DATABASE_URL_MIGRATE=<direct url> pnpm exec drizzle-kit migrate`. Migration `0002_app_role` grants `home_app` exactly what the app needs. (After the first time, production migrations run through the GitHub workflow.)
+3. Apply the migrations with the migration/admin credential, through GitHub Actions so no machine needs the credential: for `home`, the **Migrate production database** workflow (`production` environment, required reviewer); for `home-dev`, the **Migrate preview database** workflow (`preview` environment). Both are dispatched from *Actions → <workflow> → Run workflow* on `main`, and each reads its own environment's `DATABASE_URL_MIGRATE`. Migration `0002_app_role` grants `home_app` exactly what the app needs.
 4. Build the **runtime/app credential**: the project's **pooled** connection string with the user and password replaced by `home_app` and its password. Keep it for the Vercel step below.
 5. Verify from the trusted machine, connected as `home_app`: `update audit_log set summary = 'x'` must fail with *permission denied*; `alter table audit_log disable trigger all` must fail with *must be owner*.
 
@@ -63,6 +63,7 @@ Notes:
 ### 4. GitHub
 1. **Default branch** `main`. **Branch protection** on `main`: require a pull request, require status checks `Lint, typecheck, unit and integration tests`, `End-to-end (Playwright)`, `Vercel bundle build` and `Secret scan (gitleaks)`, block force-pushes. Leave required approvals at 0 so green PRs can merge without a second person (M1-D6).
 2. **Environments → `production`**: add required reviewer (you); **Deployment branches and tags → Selected branches → `main` only**; secret `DATABASE_URL_MIGRATE` = the `home` project's **migration/admin credential** (direct URL). The workflow also refuses to run from any ref but `main`.
+   **Environments → `preview`**: **Deployment branches and tags → Selected branches → `main` only**; secret `DATABASE_URL_MIGRATE` = the `home-dev` project's **migration/admin credential** (direct URL), never `home`'s. No required reviewer: `home-dev` holds fixture data only. The two environments share a secret *name* so the two migration workflows mirror each other; they never share a *value*.
 3. **Repository secret** `HOME_PRIVATE_TERMS`: comma-separated real-world terms that must never appear in the repo (family names, street, school, suburb…). CI fails if any appears in tracked files; the list never enters the repo. Until it is set, every CI run shows a warning annotation.
 4. Enable **secret scanning** (Settings → Code security).
 5. **Your GitHub account → Settings → Emails**: enable **Keep my email addresses private** and **Block command line pushes that expose my email**, so merges made on github.com no longer carry your address.

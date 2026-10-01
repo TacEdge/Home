@@ -37,10 +37,12 @@ Order on a release that changes the schema: merge → migration workflow (approv
 
 Preview deployments use the **`home-dev` Neon project**, a completely separate project from production, with its own runtime/app and migration/admin credentials. It is **never** derived from, reset from, or branched from production: once real household data exists, nothing may copy it into the database that unreviewed branches run against.
 
-Apply migrations there from a trusted machine: `DATABASE_URL_MIGRATE=<home-dev direct url> pnpm exec drizzle-kit migrate`.
+Apply migrations there with the **Migrate preview database** workflow (`.github/workflows/migrate-preview.yml`): *Actions → Migrate preview database → Run workflow* on `main`. It is dispatch-only (previews do not auto-migrate on merge), runs only from `main`, and uses the `preview` GitHub environment, whose `DATABASE_URL_MIGRATE` secret is the `home-dev` project's own migration/admin credential (direct connection). It never has access to the `production` environment or its secret; that is a different workflow (`migrate.yml`). No local machine is needed.
 
-**Rebuilding `home-dev`** when it drifts or needs a clean slate, connected with its migration/admin credential:
+Run it whenever a migration has merged and a preview needs the new schema.
 
-1. `drop schema public cascade; create schema public; drop schema if exists drizzle cascade;`
-2. `DATABASE_URL_MIGRATE=<home-dev direct url> pnpm exec drizzle-kit migrate`
+**Rebuilding `home-dev`** when it drifts or needs a clean slate:
+
+1. In the Neon console for `home-dev`, SQL Editor, as the owner role: `drop schema public cascade; create schema public; drop schema if exists drizzle cascade;`
+2. Dispatch **Migrate preview database** from `main`.
 3. Fixtures: none are needed in M1 (users are created on first sign-in from the preview allowlist). Later milestones add a fixture script here; it loads the synthetic fixture family only, never real data.
