@@ -3,7 +3,11 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditLog, verification } from '@/db/schema';
 import { TEST_MAILBOX_PATH } from '@/trust/mail';
-import { gateLinkRequest, handleLinkRequest } from '@/trust/sign-in-gate';
+import {
+  DENIED_AUDIT_MAX_PER_WINDOW,
+  gateLinkRequest,
+  handleLinkRequest,
+} from '@/trust/sign-in-gate';
 import { testDb } from './db';
 
 // B1 (contract §1.1): the gate runs before Better Auth, through the same code
@@ -115,6 +119,40 @@ describe('sign-in gate', () => {
   it('requests without a usable client IP share one bucket', async () => {
     for (let i = 0; i < 5; i++) await gateLinkRequest({ email: SAM, ip: null }, { db });
     expect(await gateLinkRequest({ email: ALEX, ip: null }, { db })).toBe('drop');
+  });
+
+  it('40 outside-address requests from 40 distinct IPs: no token rows, no addresses, at most the global audit budget', async () => {
+    const auditBefore = await denied();
+    const needles: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const ip = `2001:db8:${i.toString(16)}::1`; // 40 distinct /64 buckets
+      const email = `stranger-${i}@example.test`;
+      needles.push(`stranger-${i}`);
+      expect(await request(email, ip)).toBe('drop');
+    }
+    expect(await count('verification')).toBe(0);
+    expect((await denied()) - auditBefore).toBeLessThanOrEqual(DENIED_AUDIT_MAX_PER_WINDOW);
+    for (const needle of needles) {
+      expect(await count('verification', sql`value like ${'%' + needle + '%'}`)).toBe(0);
+      expect(
+        await count(
+          'audit_log',
+          sql`summary like ${'%' + needle + '%'} or meta::text like ${'%' + needle + '%'}`,
+        ),
+      ).toBe(0);
+    }
+  });
+
+  it('a household address still signs in after the global denied-audit budget is spent', async () => {
+    for (let i = 0; i < DENIED_AUDIT_MAX_PER_WINDOW + 5; i++) {
+      await request(OUTSIDER, `198.51.100.${i + 1}`);
+    }
+    expect(await request(SAM, '203.0.113.200')).toBe('send');
+    expect(await sentTo(SAM)).toBe(1);
+    expect(await count('verification')).toBe(1);
+    // Rate limiting keeps operating for everyone meanwhile.
+    for (let i = 0; i < 5; i++) await request(SAM, '203.0.113.201');
+    expect(await request(SAM, '203.0.113.201')).toBe('drop');
   });
 
   it('a dropped request writes nothing to verification', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, parseEnv } from '@/lib/env';
+import { EnvError, normaliseDbHost, parseEnv } from '@/lib/env';
 
 const secret = 'x'.repeat(48);
 const valid = {
@@ -133,6 +133,78 @@ describe('parseEnv', () => {
         expect((e as Error).message).not.toContain('pw@');
         expect((e as Error).message).not.toContain(prodHost);
       }
+    });
+
+    describe('Neon pooled/direct endpoint forms are the same database', () => {
+      const direct = 'ep-example.ap-southeast-2.aws.neon.tech';
+      const pooled = 'ep-example-pooler.ap-southeast-2.aws.neon.tech';
+      const other = 'ep-other.ap-southeast-2.aws.neon.tech';
+
+      it('preview refuses: production host direct, DATABASE_URL pooled', () => {
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'preview',
+            HOME_PRODUCTION_DB_HOST: direct,
+            DATABASE_URL: url(pooled),
+          }),
+        ).toThrow(/DATABASE_URL/);
+      });
+
+      it('preview refuses: production host pooled, DATABASE_URL direct', () => {
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'preview',
+            HOME_PRODUCTION_DB_HOST: pooled,
+            DATABASE_URL: url(direct),
+          }),
+        ).toThrow(/DATABASE_URL/);
+      });
+
+      it('preview accepts a genuinely different Neon endpoint, pooled or direct', () => {
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'preview',
+            HOME_PRODUCTION_DB_HOST: direct,
+            DATABASE_URL: url(other),
+          }),
+        ).not.toThrow();
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'preview',
+            HOME_PRODUCTION_DB_HOST: pooled,
+            DATABASE_URL: url(`ep-other-pooler.ap-southeast-2.aws.neon.tech`),
+          }),
+        ).not.toThrow();
+      });
+
+      it('production accepts its own endpoint in either form', () => {
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'production',
+            HOME_PRODUCTION_DB_HOST: direct,
+            DATABASE_URL: url(pooled),
+          }),
+        ).not.toThrow();
+      });
+
+      it('leaves non-Neon hosts alone: "-pooler" there is just part of the name', () => {
+        expect(normaliseDbHost('db-pooler.example.test')).toBe('db-pooler.example.test');
+        expect(() =>
+          parseEnv({
+            ...valid,
+            VERCEL_ENV: 'preview',
+            HOME_PRODUCTION_DB_HOST: 'db.example.test',
+            DATABASE_URL: url('db-pooler.example.test'),
+          }),
+        ).not.toThrow();
+        expect(normaliseDbHost(pooled)).toBe(direct);
+        expect(normaliseDbHost('EP-Example.ap-southeast-2.aws.neon.tech')).toBe(direct);
+      });
     });
 
     it('does nothing outside Vercel', () => {

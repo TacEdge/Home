@@ -23,6 +23,8 @@ export const LINK_WINDOW_MS = 15 * 60 * 1000;
 export const LINK_MAX_PER_IP = 5;
 export const LINK_MAX_PER_EMAIL = 5;
 export const UNKNOWN_IP_BUCKET = 'unknown';
+/** Persisted denied-attempt audit rows allowed per window, across all IPs. */
+export const DENIED_AUDIT_MAX_PER_WINDOW = 20;
 
 export type GateDeps = { db?: Db; now?: () => number };
 
@@ -56,18 +58,20 @@ export async function gateLinkRequest(
 }
 
 /**
- * At most one `auth.sign_in_denied` row per client IP per window, so denied
- * attempts cannot flood the audit log. Repeats in the window are only logged,
- * with the IP hashed and no address.
+ * At most one `auth.sign_in_denied` row per client IP per window, and at most
+ * DENIED_AUDIT_MAX_PER_WINDOW rows per window across every IP, so denied
+ * attempts cannot flood the append-only audit log even when spread over many
+ * addresses. Anything beyond either budget is only logged, with the IP hashed
+ * and no address. The per-IP check runs first so repeats from one address
+ * never spend the shared budget.
  */
 async function auditDenied(db: Db, bucket: string, emailHash: string, now: number) {
-  const first = await consumeRateLimit(`denied:ip:${bucket}`, {
-    max: 1,
-    windowMs: LINK_WINDOW_MS,
-    now,
-    db,
-  });
-  if (first) {
+  const limit = { windowMs: LINK_WINDOW_MS, now, db };
+  const firstFromIp = await consumeRateLimit(`denied:ip:${bucket}`, { ...limit, max: 1 });
+  const withinGlobal =
+    firstFromIp &&
+    (await consumeRateLimit('denied:all', { ...limit, max: DENIED_AUDIT_MAX_PER_WINDOW }));
+  if (withinGlobal) {
     await recordAudit(
       systemActor,
       {
