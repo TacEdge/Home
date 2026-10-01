@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
-import { testEnv } from './tests/env';
+import { assertTestDatabase } from './tests/db-guard';
+import { TEST_DATABASE_URL, testEnv } from './tests/env';
 
 // End-to-end tests run against the dev server with the test mail transport
 // (production refuses it, by design) and the local test database.
@@ -8,6 +9,10 @@ import { testEnv } from './tests/env';
 // allowlist omits Sam. Cookies for localhost ignore the port, so visiting the
 // second server with Sam's session proves that removing an address from the
 // allowlist signs that person out on their next request.
+
+// Before any server starts: the dev servers and the global setup may only ever
+// touch a local *_test database (contract §1.6).
+assertTestDatabase(TEST_DATABASE_URL);
 
 export const MAIN_PORT = 3333;
 export const NARROW_PORT = 3334;

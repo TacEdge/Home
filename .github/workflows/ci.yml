@@ -59,6 +59,20 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
 
+  bundle:
+    # What Vercel uploads (the repository minus .vercelignore) must build on
+    # its own (M1.1 contract §1.2, B2). The script does its own install.
+    name: Vercel bundle build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: node scripts/vercel-bundle-check.mjs
+
   e2e:
     name: End-to-end (Playwright)
     runs-on: ubuntu-latest

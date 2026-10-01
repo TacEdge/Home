@@ -34,5 +34,18 @@
     ".next-narrow/types/**/*.ts",
     ".next-narrow/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "prototype", ".next", ".next-*", "out"]
+  // Production config: what `next build` type-checks. Test code, test runners
+  // and local scripts are excluded because Vercel does not upload them
+  // (.vercelignore) — tsconfig.test.json adds them back for `pnpm typecheck`.
+  "exclude": [
+    "node_modules",
+    "prototype",
+    ".next",
+    ".next-*",
+    "out",
+    "tests",
+    "scripts",
+    "playwright.config.ts",
+    "vitest.config.mts"
+  ]
 }
