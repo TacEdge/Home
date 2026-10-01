@@ -22,7 +22,8 @@
     "db:migrate": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "db:reset:test": "node scripts/db-reset-test.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:private-terms": "node scripts/check-private-terms.mts"
   },
   "dependencies": {
     "better-auth": "^1.7.7",
