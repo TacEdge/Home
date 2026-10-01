@@ -14,7 +14,7 @@ const describe: Record<string, string> = {
 export default async function ActivityPage() {
   const actor = await getActor();
   if (!actor) redirect('/sign-in');
-  const entries = await listAudit(actor, { limit: 50 });
+  const { rows: entries } = await listAudit(actor, { limit: 50 });
   const fmt = new Intl.DateTimeFormat('en-NZ', {
     weekday: 'short',
     day: 'numeric',
