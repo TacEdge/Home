@@ -1,6 +1,7 @@
 // Fails if any private term appears in tracked files. The terms come from the
 // HOME_PRIVATE_TERMS secret (comma-separated, matched case-insensitively) so
-// the list itself never enters the repository. Skips cleanly when unset.
+// the list itself never enters the repository. When unset it cannot check
+// anything, and says so as a GitHub Actions warning rather than passing silently.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -11,7 +12,9 @@ const terms = raw
   .filter((t) => t.length >= 3);
 
 if (terms.length === 0) {
-  console.log('check-private-terms: HOME_PRIVATE_TERMS not set; skipping.');
+  console.log(
+    '::warning title=check-private-terms::HOME_PRIVATE_TERMS is not set, so tracked files were not scanned for private terms. Set the repository secret (docs/runbooks/DEPLOY.md §A.4).',
+  );
   process.exit(0);
 }
 

@@ -1,0 +1,11 @@
+# Keeps the SHA-pinned GitHub Actions in .github/workflows current
+# (M1.1 contract §1.5). Actions only: npm dependencies are updated
+# deliberately, with a justification per CLAUDE.md.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'ci(actions):'

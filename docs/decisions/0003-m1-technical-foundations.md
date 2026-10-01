@@ -1,6 +1,6 @@
 # ADR 0003 — M1 technical foundations
 
-Status: **Accepted**, 2026-09-30 (owner confirmed M1-D1…D6). The implementer may append clarifications at the end of M1.
+Status: **Accepted**, 2026-09-30 (owner confirmed M1-D1…D6). Amended 2026-10-01 by M1.1 (`docs/m1/M1.1-FIX-CONTRACT.md`): items 16 and 20–28.
 
 ## Context
 
@@ -26,10 +26,22 @@ ADR 0001 fixed the stack (TypeScript, Next.js, Postgres/Neon, Drizzle, Zod, Tail
 
 14. **Auth and database handles are built lazily** (`getAuth()`, `getDb()`), never at import, so `next build` and CI need no runtime configuration. Session-dependent routes are `force-dynamic`.
 15. **E2E runs against the dev server.** `next start` forces `NODE_ENV=production`, where `env.ts` refuses the test mail transport — correctly. A test-only `HOME_NEXT_DIST_DIR` knob lets a second dev server (narrower allowlist) run from the same checkout to prove allowlist removal signs a person out.
-16. **Rate limits live in `sendMagicLink`** (per email and per IP, 5 per 15 minutes), because server-action calls to `auth.api` bypass Better Auth's HTTP limiter; the HTTP limiter stays on as a second layer, generous on verify since tokens are single-use. `x-forwarded-for` is trusted for the client IP, which holds behind Vercel.
+16. ~~Rate limits live in `sendMagicLink`.~~ **Superseded by M1.1 (item 20).** Better Auth stores a pending token, with the address, before calling `sendMagicLink`, so limits and the allowlist there were too late; and `x-forwarded-for` was the wrong header to trust.
 17. **System font stacks**, not `next/font/google`: no font fetches at build or runtime.
 18. **`agentRules: false`** in `next.config.ts`: `next dev` must never edit `CLAUDE.md`.
 19. **Stacked milestone PRs merge with merge commits**, not squashes, so each branch shares history with `main`.
+
+## Amendments recorded by M1.1 (security and deployment hardening)
+
+20. **Sign-in requests are gated before Better Auth** (`src/trust/sign-in-gate.ts`): per-IP limit on every request (5 per 15 minutes), then the household allowlist, then the per-email limit (5 per 15 minutes). Nothing outside the household or over a limit reaches Better Auth, so no token row and no address is ever stored for it. Denied attempts are audited at most once per IP per window; repeats are only logged with a hashed IP. `sendMagicLink` keeps the allowlist check as defence in depth only. Rate-limit counters are one atomic `INSERT … ON CONFLICT … RETURNING count` statement.
+21. **Public auth surface is one endpoint** (decision D-M1.1-2): the route handler forwards only `GET /api/auth/magic-link/verify` to Better Auth; every other Better Auth path is 404 before any auth code runs (`src/trust/auth-surface.ts`). Requesting a link is possible only through the server action. Any future endpoint added there must apply the allowlist check (`actorFor`) before forwarding.
+22. **Client IP comes from `x-real-ip` only**, the header Vercel documents as the public IP address of the client that made the request (Vercel request-headers reference, https://vercel.com/docs/headers/request-headers), set at the edge so a client-supplied value is replaced. Exactly one valid address is accepted; IPv6 is bucketed to its /64; anything else falls back to one shared `unknown` bucket (fail closed). Better Auth's `ipAddressHeaders` uses the same header.
+23. **Sessions are fixed at 30 days from sign-in and never extended by use** (`disableSessionRefresh: true`), amending M1-D3's rolling sessions. A deliberate V0.1 simplification: the refresh would only have happened through a route handler or server action, and the simpler rule is easier to reason about. Cookie: `__Secure-home.session_token`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age=2592000`, no `Domain` (asserted by an in-process production-shaped test).
+24. **Runtime/app role** (decision D-M1.1-1, I5): the application connects as `home_app`, the runtime/app credential — a role that owns no objects, has `USAGE` on `public` without `CREATE`, data access on the auth tables and only `SELECT, INSERT` on `audit_log`. The migration/admin credential (the project owner) runs migrations and administration and is never supplied to the app or Vercel; the app refuses to start on Vercel if its role owns `audit_log`. The trigger remains the second layer. Local and CI use the same two roles. Migration `0002_app_role` is a no-op where the role does not exist.
+25. **Preview/dev is a separate Neon project** (`home-dev`, decision D-M1.1-3), never a branch of production, with its own credentials; `env.ts` refuses a preview deployment whose `DATABASE_URL` host equals `HOME_PRODUCTION_DB_HOST`, and a production deployment whose host differs from it when set.
+26. **Library log messages are never forwarded as free text.** Better Auth's logger maps to fixed events (`auth.library_warn` / `auth.library_error`) with a sanitised detail (emails, URLs and token-like strings stripped, 200 characters). Better Auth may still call `console.*` directly in rare paths (e.g. plugin configuration warnings at construction); those carry no user data and are accepted.
+27. **Accepted: per-email lockout by a distributed attacker.** Anyone who knows a household address can spend its 5-per-15-minutes budget from many IPs and delay that person's sign-in by up to 15 minutes. Accepted for a two-person household; the per-IP limit and the sealed HTTP surface make it the only remaining lever, and it cannot store or send anything.
+28. **Environment is validated at server start** (`src/instrumentation.ts`), so a misconfigured deployment fails at boot in the runtime logs rather than on its first request. Test code is excluded from the production `tsconfig.json`; `tsconfig.test.json` type-checks it; CI builds the exact Vercel upload (`scripts/vercel-bundle-check.mjs`). Workflow actions are pinned to commit SHAs (Dependabot refreshes them); the migration workflow runs only from `main`.
 
 ## Consequences
 
