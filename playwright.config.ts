@@ -1,0 +1,57 @@
+import { defineConfig, devices } from '@playwright/test';
+import { testEnv } from './tests/env';
+
+// End-to-end tests run against the dev server with the test mail transport
+// (production refuses it, by design) and the local test database.
+//
+// Two servers: the main one (both fixture users allowed) and a second whose
+// allowlist omits Sam. Cookies for localhost ignore the port, so visiting the
+// second server with Sam's session proves that removing an address from the
+// allowlist signs that person out on their next request.
+
+export const MAIN_PORT = 3333;
+export const NARROW_PORT = 3334;
+export const MAIN_URL = `http://localhost:${MAIN_PORT}`;
+export const NARROW_URL = `http://localhost:${NARROW_PORT}`;
+
+const serverEnv = (port: number, allowed: string) => ({
+  ...process.env,
+  ...testEnv,
+  NODE_ENV: 'development',
+  BETTER_AUTH_URL: `http://localhost:${port}`,
+  HOME_ALLOWED_EMAILS: allowed,
+});
+
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+
+export default defineConfig({
+  testDir: 'tests/e2e',
+  globalSetup: './tests/e2e/global-setup.ts',
+  fullyParallel: false,
+  workers: 1,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  timeout: 30_000,
+  use: {
+    baseURL: MAIN_URL,
+    trace: 'retain-on-failure',
+    ...(chromiumPath ? { launchOptions: { executablePath: chromiumPath } } : {}),
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: [
+    {
+      command: `pnpm dev -p ${MAIN_PORT}`,
+      url: `${MAIN_URL}/sign-in`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: serverEnv(MAIN_PORT, 'sam@example.test,alex@example.test'),
+    },
+    {
+      command: `pnpm dev -p ${NARROW_PORT}`,
+      url: `${NARROW_URL}/sign-in`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: { ...serverEnv(NARROW_PORT, 'alex@example.test'), HOME_NEXT_DIST_DIR: '.next-narrow' },
+    },
+  ],
+});

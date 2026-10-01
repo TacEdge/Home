@@ -25,17 +25,20 @@ const DAY = 60 * 60 * 24;
 const LINK_WINDOW_SECONDS = 15 * 60;
 const LINK_MAX_PER_EMAIL = 5;
 
-/** Per-email limiter: at most LINK_MAX_PER_EMAIL requests per window. */
-async function emailWithinRateLimit(email: string): Promise<boolean> {
+/**
+ * Sliding-window counter in Better Auth's rate_limit table: true while `key`
+ * is within `max` per window. Applied to link requests per email and per IP,
+ * because server-side auth.api calls bypass Better Auth's HTTP limiter.
+ */
+async function withinRateLimit(key: string, max = LINK_MAX_PER_EMAIL): Promise<boolean> {
   const db = getDb();
-  const key = `magic-link:email:${hashEmail(email)}`;
   const now = Date.now();
   const windowStart = now - LINK_WINDOW_SECONDS * 1000;
   const [row] = await db
     .select()
     .from(schema.rateLimit)
     .where(and(eq(schema.rateLimit.key, key), gt(schema.rateLimit.lastRequest, windowStart)));
-  if (row && row.count >= LINK_MAX_PER_EMAIL) return false;
+  if (row && row.count >= max) return false;
   await db
     .insert(schema.rateLimit)
     .values({ id: key, key, count: 1, lastRequest: now })
@@ -79,6 +82,12 @@ function buildAuth() {
       enabled: true,
       storage: 'database',
       modelName: 'rateLimit',
+      customRules: {
+        // HTTP path: requests limited per IP. Verify is generous — tokens are
+        // single-use, and a household shares one IP.
+        '/sign-in/magic-link': { window: LINK_WINDOW_SECONDS, max: 5 },
+        '/magic-link/verify': { window: LINK_WINDOW_SECONDS, max: 30 },
+      },
     },
     databaseHooks: {
       user: {
@@ -110,8 +119,7 @@ function buildAuth() {
       magicLink({
         expiresIn: LINK_WINDOW_SECONDS,
         storeToken: 'hashed',
-        rateLimit: { window: LINK_WINDOW_SECONDS, max: 5 },
-        sendMagicLink: async ({ email, url }) => {
+        sendMagicLink: async ({ email, url }, ctx) => {
           // Layer 1: same outcome for everyone; only household addresses get mail.
           if (!isAllowed(email)) {
             await recordAudit(systemActor, {
@@ -121,8 +129,15 @@ function buildAuth() {
             });
             return;
           }
-          if (!(await emailWithinRateLimit(email))) {
-            log.warn('auth.link_rate_limited', { emailHash: hashEmail(email) });
+          // Both paths (HTTP and server action): per email and per IP.
+          const ip = ctx?.headers?.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+          const emailOk = await withinRateLimit(`magic-link:email:${hashEmail(email)}`);
+          const ipOk = await withinRateLimit(`magic-link:ip:${ip}`);
+          if (!emailOk || !ipOk) {
+            log.warn('auth.link_rate_limited', {
+              emailHash: hashEmail(email),
+              by: emailOk ? 'ip' : 'email',
+            });
             return;
           }
           await recordAudit(systemActor, {

@@ -133,6 +133,13 @@ describe('magic-link sign-in', () => {
     ).rejects.toThrow();
   });
 
+  it('limits link requests per IP to 5 per 15 minutes, across emails', async () => {
+    await db.execute(sql`delete from "rate_limit"`);
+    for (let i = 0; i < 7; i++)
+      await requestLink(i % 2 ? ALLOWED : 'alex@example.test', '10.2.2.2');
+    expect(await mailbox()).toHaveLength(5);
+  });
+
   it('limits link requests per email to 5 per 15 minutes, independent of IP', async () => {
     await db.execute(sql`delete from "rate_limit"`);
     for (let i = 0; i < 7; i++) await requestLink(ALLOWED, `10.1.1.${i}`);

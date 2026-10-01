@@ -18,7 +18,7 @@ export async function requestLinkAction(formData: FormData): Promise<void> {
         body: {
           email: parsed.data.email,
           callbackURL: '/today',
-          errorCallbackURL: '/sign-in?error=link',
+          errorCallbackURL: '/sign-in',
         },
         headers: await headers(),
       });
