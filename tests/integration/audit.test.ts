@@ -1,12 +1,19 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { auditLog } from '@/db/schema';
-import { listAudit, recordAudit } from '@/trust/audit';
+import { listAudit, recordAudit, type AuditCursor } from '@/trust/audit';
 import { systemActor, type UserActor } from '@/trust/actor';
-import { testDb } from './db';
+import { adminDb, testDb } from './db';
 
 const { db, close } = testDb();
-afterAll(close);
+// The trigger is the second layer behind the role privileges (contract §1.7).
+// As home_app the privilege check fires first (tests/integration/app-role),
+// so proving the trigger itself means connecting as the owner.
+const admin = adminDb();
+afterAll(async () => {
+  await close();
+  await admin.close();
+});
 
 // Drizzle wraps driver errors ("Failed query: …") and keeps the Postgres error
 // as `cause`; the trigger's message lives there.
@@ -42,32 +49,51 @@ describe('audit_log', () => {
     expect(row.actorChannel).toBeNull();
   });
 
-  it('rejects UPDATE at the database level', async () => {
+  it('rejects UPDATE at the database level, even for the table owner (trigger)', async () => {
     const row = await recordAudit(sam, { event: 'test.immutable' }, { db });
     await expectAppendOnly(
-      db.update(auditLog).set({ summary: 'tampered' }).where(eq(auditLog.id, row.id)),
+      admin.db.update(auditLog).set({ summary: 'tampered' }).where(eq(auditLog.id, row.id)),
     );
   });
 
-  it('rejects DELETE at the database level', async () => {
+  it('rejects DELETE at the database level, even for the table owner (trigger)', async () => {
     const row = await recordAudit(sam, { event: 'test.immutable' }, { db });
-    await expectAppendOnly(db.delete(auditLog).where(eq(auditLog.id, row.id)));
+    await expectAppendOnly(admin.db.delete(auditLog).where(eq(auditLog.id, row.id)));
   });
 
-  it('rejects TRUNCATE at the database level', async () => {
-    await expectAppendOnly(db.execute(sql`truncate audit_log`));
+  it('rejects TRUNCATE at the database level, even for the table owner (trigger)', async () => {
+    await expectAppendOnly(admin.db.execute(sql`truncate audit_log`));
   });
 
-  it('lists newest first and paginates with `before`', async () => {
+  it('lists newest first and paginates with a (at, id) cursor', async () => {
     for (let i = 0; i < 5; i++) {
       await recordAudit(sam, { event: `test.page.${i}` }, { db });
     }
     const first = await listAudit(sam, { limit: 3 }, { db });
-    expect(first).toHaveLength(3);
-    expect(first.map((r) => r.event)).toEqual(['test.page.4', 'test.page.3', 'test.page.2']);
-    const last = first[2];
-    if (!last) throw new Error('expected a row');
-    const next = await listAudit(sam, { limit: 3, before: last.at }, { db });
-    expect(next.map((r) => r.event).slice(0, 2)).toEqual(['test.page.1', 'test.page.0']);
+    expect(first.rows).toHaveLength(3);
+    expect(first.rows.map((r) => r.event)).toEqual(['test.page.4', 'test.page.3', 'test.page.2']);
+    expect(first.next).not.toBeNull();
+    const next = await listAudit(sam, { limit: 3, before: first.next ?? undefined }, { db });
+    expect(next.rows.map((r) => r.event).slice(0, 2)).toEqual(['test.page.1', 'test.page.0']);
+  });
+
+  it('returns every row exactly once when timestamps are identical across a page boundary (§2.9)', async () => {
+    // Twelve rows that all share one explicit `at`, so only `id` can order them.
+    const at = new Date('2026-03-01T10:00:00.000Z');
+    const events = Array.from({ length: 12 }, (_, i) => `test.same.${i}`);
+    await db.insert(auditLog).values(events.map((event) => ({ at, actorVia: 'system', event })));
+
+    const seen: string[] = [];
+    let cursor: AuditCursor | undefined;
+    for (let guard = 0; guard < 20; guard++) {
+      const page = await listAudit(sam, { limit: 5, before: cursor }, { db });
+      seen.push(...page.rows.map((r) => r.event));
+      if (!page.next) break;
+      cursor = page.next;
+    }
+    const same = seen.filter((e) => e.startsWith('test.same.'));
+    expect(same).toHaveLength(12);
+    expect(new Set(same).size).toBe(12);
+    expect(same.sort()).toEqual([...events].sort());
   });
 });

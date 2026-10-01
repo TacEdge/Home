@@ -15,6 +15,13 @@
       "when": 1790811896733,
       "tag": "0001_blushing_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790816981723,
+      "tag": "0002_app_role",
+      "breakpoints": true
     }
   ]
 }
