@@ -80,20 +80,23 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // production are separate Neon projects; this is the backstop against a
   // production credential ending up in the preview environment, or vice versa.
   const dbHost = hostOf(env.DATABASE_URL);
+  const prodHost = env.HOME_PRODUCTION_DB_HOST
+    ? normaliseDbHost(env.HOME_PRODUCTION_DB_HOST)
+    : undefined;
   if (env.VERCEL_ENV === 'preview') {
     if (!env.HOME_PRODUCTION_DB_HOST)
       throw new EnvError(
         ['HOME_PRODUCTION_DB_HOST'],
         'HOME_PRODUCTION_DB_HOST (required in preview deployments)',
       );
-    if (dbHost === env.HOME_PRODUCTION_DB_HOST)
+    if (dbHost === prodHost)
       throw new EnvError(
         ['DATABASE_URL'],
         'DATABASE_URL (a preview deployment must not use the production database host)',
       );
   }
   if (env.VERCEL_ENV === 'production' && env.HOME_PRODUCTION_DB_HOST) {
-    if (dbHost !== env.HOME_PRODUCTION_DB_HOST)
+    if (dbHost !== prodHost)
       throw new EnvError(
         ['DATABASE_URL'],
         'DATABASE_URL (production must use the HOME_PRODUCTION_DB_HOST database host)',
@@ -102,12 +105,25 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   return env;
 }
 
+/**
+ * Hostname for the production-host comparison. Neon gives one endpoint two
+ * names, `ep-x.<region>.aws.neon.tech` (direct) and `ep-x-pooler.<region>…`
+ * (pooled); they are the same database, so the `-pooler` form is folded into
+ * the direct one. Only that one Neon convention is normalised; any other host
+ * is compared as is.
+ */
 function hostOf(url: string): string | null {
   try {
-    return new URL(url).hostname;
+    return normaliseDbHost(new URL(url).hostname);
   } catch {
     return null;
   }
+}
+
+export function normaliseDbHost(host: string): string {
+  const lower = host.toLowerCase();
+  if (!lower.endsWith('.neon.tech')) return lower;
+  return lower.replace(/^([^.]+)-pooler\./, '$1.');
 }
 
 let cached: Env | undefined;

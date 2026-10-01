@@ -44,7 +44,7 @@ Order matters: create `home_app` → migrate (grants apply) → configure Vercel
 | Variable | Production | Preview |
 |---|---|---|
 | `DATABASE_URL` | **Runtime/app credential** for project `home` (pooled, user `home_app`) | **Runtime/app credential** for project `home-dev` (pooled, user `home_app`) |
-| `HOME_PRODUCTION_DB_HOST` | the host of the `home` project's connection string (optional, asserts the right database) | the host of the `home` project's connection string (**required**: preview refuses to start if `DATABASE_URL` points there) |
+| `HOME_PRODUCTION_DB_HOST` | the **host part of Production's `DATABASE_URL`** (the text between `@` and `/`), optional here: asserts production runs against its own database | the **same value, copied from Production's `DATABASE_URL`** (**required**: preview refuses to start if its `DATABASE_URL` points at that endpoint) |
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 48` | a different random value |
 | `BETTER_AUTH_URL` | `https://<production domain>` | the stable branch URL Vercel assigns to the branch you use for previews (form `https://<project>-git-<branch>-<team>.vercel.app`), set once |
 | `HOME_ALLOWED_EMAILS` | the two household addresses | `sam@example.test,alex@example.test` or your own test addresses |
@@ -55,6 +55,7 @@ Order matters: create `home_app` → migrate (grants apply) → configure Vercel
 | `HOME_TIMEZONE` | `Pacific/Auckland` | same |
 
 Notes:
+- `HOME_PRODUCTION_DB_HOST` is always derived from Production's `DATABASE_URL`, never typed from memory. For this check HOME treats Neon's pooled (`ep-x-pooler.<region>.aws.neon.tech`) and direct (`ep-x.<region>.aws.neon.tech`) names of one endpoint as the same database, so it does not matter which form is in which variable.
 - The migration/admin credential is **never** entered in Vercel. `DATABASE_URL_MIGRATE` exists only as a GitHub secret.
 - No `NEXT_PUBLIC_*` variables exist. `BETTER_AUTH_URL` must be `https` in production (`env.ts` refuses otherwise). `VERCEL_ENV` is set by Vercel itself.
 - The client IP used for rate limiting is read **only** from `x-real-ip`, which Vercel sets to the public address of the client that made the request. Do not put another proxy in front of Vercel without preserving that header; if it is missing, every request shares one small rate-limit budget rather than an unlimited one.
