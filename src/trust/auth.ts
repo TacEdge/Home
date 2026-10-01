@@ -3,89 +3,82 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
 import { magicLink } from 'better-auth/plugins/magic-link';
-import { and, eq, gt, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
+import type { Db } from '@/db/create';
 import * as schema from '@/db/schema';
-import { env } from '@/lib/env';
-import { log } from '@/lib/log';
+import { env as processEnv, type Env } from '@/lib/env';
+import { log, sanitiseMessage } from '@/lib/log';
 import { systemActor } from './actor';
 import { hashEmail, isAllowed } from './allowlist';
 import { recordAudit } from './audit';
-import { sendMail } from './mail';
+import { CLIENT_IP_HEADER } from './client-ip';
+import { sendMail as defaultSendMail, type Mail } from './mail';
 
-// Better Auth configuration (contract §5.1–5.2, ADR 0003 §4).
+// Better Auth configuration (contract §5.1–5.2, ADR 0003 §4; M1.1 contract
+// §1.1, §2.2, §2.4, §3.A).
 //   - magic link only; links single-use, 15 minutes
-//   - database sessions, 30-day rolling, refreshed daily
-//   - household allowlist at link request (layer 1) and user creation (layer 2);
-//     layer 3 (every request) is in ./session.ts
-//   - rate limits: Better Auth's database limiter per IP, plus a per-email
-//     limiter here using the same table
+//   - database sessions, fixed 30 days from sign-in, never extended by use
+//   - household allowlist: layer 1 is the sign-in gate (./sign-in-gate.ts),
+//     which runs before Better Auth; `sendMagicLink` re-checks as defence in
+//     depth; layer 2 is user creation (below); layer 3 is every request
+//     (./session.ts)
+//   - rate limits on link requests live in the gate; Better Auth's own
+//     limiter covers the one public HTTP endpoint, verify
 
 const DAY = 60 * 60 * 24;
 const LINK_WINDOW_SECONDS = 15 * 60;
-const LINK_MAX_PER_EMAIL = 5;
+
+export type BuildAuthOptions = {
+  env?: Env;
+  db?: Db;
+  sendMail?: (mail: Mail) => Promise<void>;
+};
 
 /**
- * Sliding-window counter in Better Auth's rate_limit table: true while `key`
- * is within `max` per window. Applied to link requests per email and per IP,
- * because server-side auth.api calls bypass Better Auth's HTTP limiter.
+ * Builds the Better Auth instance. Production code uses getAuth(); tests may
+ * build their own with a different environment (e.g. production-shaped, to
+ * assert cookie attributes) or a stubbed mail sender.
  */
-async function withinRateLimit(key: string, max = LINK_MAX_PER_EMAIL): Promise<boolean> {
-  const db = getDb();
-  const now = Date.now();
-  const windowStart = now - LINK_WINDOW_SECONDS * 1000;
-  const [row] = await db
-    .select()
-    .from(schema.rateLimit)
-    .where(and(eq(schema.rateLimit.key, key), gt(schema.rateLimit.lastRequest, windowStart)));
-  if (row && row.count >= max) return false;
-  await db
-    .insert(schema.rateLimit)
-    .values({ id: key, key, count: 1, lastRequest: now })
-    .onConflictDoUpdate({
-      target: schema.rateLimit.key,
-      set: {
-        count: sql`case when ${schema.rateLimit.lastRequest} > ${windowStart} then ${schema.rateLimit.count} + 1 else 1 end`,
-        lastRequest: now,
-      },
-    });
-  return true;
-}
-
-function buildAuth() {
+export function buildAuth(opts: BuildAuthOptions = {}) {
+  const env = opts.env ?? processEnv;
+  const sendMail = opts.sendMail ?? defaultSendMail;
   const isProduction = env.NODE_ENV === 'production';
   return betterAuth({
     appName: 'HOME',
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: [env.BETTER_AUTH_URL],
-    database: drizzleAdapter(getDb(), { provider: 'pg', schema }),
+    database: drizzleAdapter(opts.db ?? getDb(), { provider: 'pg', schema }),
     telemetry: { enabled: false },
     logger: {
       level: 'warn',
-      // Route through the redacting logger; Better Auth's args may contain
-      // request details, so only the message is kept.
+      // Never forward free text: Better Auth interpolates URLs and addresses
+      // into some messages. Fixed events, sanitised detail (contract §2.4).
       log: (level, message) =>
-        log[level === 'error' ? 'error' : 'warn']('auth.' + level, { message }),
+        level === 'error'
+          ? log.error('auth.library_error', { detail: sanitiseMessage(message) })
+          : log.warn('auth.library_warn', { detail: sanitiseMessage(message) }),
     },
     session: {
+      // Fixed lifetime (M1.1 §3.A, amends M1-D3): 30 days from sign-in, not
+      // extended by use. A deliberate V0.1 simplification.
       expiresIn: 30 * DAY,
-      updateAge: DAY,
+      disableSessionRefresh: true,
     },
     advanced: {
       useSecureCookies: isProduction,
       cookiePrefix: 'home',
       defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', secure: isProduction },
-      ipAddress: { ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'] },
+      // The same single platform header HOME's gate uses (contract §2.2).
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
     rateLimit: {
       enabled: true,
       storage: 'database',
       modelName: 'rateLimit',
       customRules: {
-        // HTTP path: requests limited per IP. Verify is generous — tokens are
-        // single-use, and a household shares one IP.
-        '/sign-in/magic-link': { window: LINK_WINDOW_SECONDS, max: 5 },
+        // The only public HTTP path. Generous: tokens are single-use, and a
+        // household shares one IP. Link requests are limited in the gate.
         '/magic-link/verify': { window: LINK_WINDOW_SECONDS, max: 30 },
       },
     },
@@ -119,25 +112,12 @@ function buildAuth() {
       magicLink({
         expiresIn: LINK_WINDOW_SECONDS,
         storeToken: 'hashed',
-        sendMagicLink: async ({ email, url }, ctx) => {
-          // Layer 1: same outcome for everyone; only household addresses get mail.
+        sendMagicLink: async ({ email, url }) => {
+          // Defence in depth only: the gate has already refused outsiders.
+          // Reaching here with one means the gate was bypassed — say so, send
+          // nothing, and never record the address.
           if (!isAllowed(email)) {
-            await recordAudit(systemActor, {
-              event: 'auth.sign_in_denied',
-              summary: 'Magic link requested for an address outside the household',
-              meta: { emailHash: hashEmail(email), stage: 'link_request' },
-            });
-            return;
-          }
-          // Both paths (HTTP and server action): per email and per IP.
-          const ip = ctx?.headers?.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-          const emailOk = await withinRateLimit(`magic-link:email:${hashEmail(email)}`);
-          const ipOk = await withinRateLimit(`magic-link:ip:${ip}`);
-          if (!emailOk || !ipOk) {
-            log.warn('auth.link_rate_limited', {
-              emailHash: hashEmail(email),
-              by: emailOk ? 'ip' : 'email',
-            });
+            log.error('auth.gate_bypassed', { emailHash: hashEmail(email) });
             return;
           }
           await recordAudit(systemActor, {

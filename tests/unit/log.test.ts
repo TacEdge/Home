@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REDACTED_KEYS, createLogger, redact } from '@/lib/log';
+import { REDACTED_KEYS, createLogger, redact, sanitiseMessage } from '@/lib/log';
 
 describe('redact', () => {
   it.each([...REDACTED_KEYS])('redacts key "%s" at the top level', (key) => {
@@ -70,5 +70,29 @@ describe('createLogger', () => {
     const entry = JSON.parse(lines[0] ?? '{}');
     expect(entry.requestId).toBe('r1');
     expect(entry.cookie).toBe('[redacted]');
+  });
+});
+
+describe('sanitiseMessage', () => {
+  it('strips URLs (with query strings), tokens and emails from library text', () => {
+    const out = sanitiseMessage(
+      'Invalid callbackURL: https://x.test/a?token=abc123 for sam@example.test',
+    );
+    expect(out).not.toContain('x.test');
+    expect(out).not.toContain('abc123');
+    expect(out).not.toContain('sam@');
+    expect(out).not.toContain('example.test');
+    expect(out).toContain('Invalid callbackURL');
+  });
+
+  it('removes long token-like strings on their own', () => {
+    const token = 'abcdefghijkl'.repeat(2); // 24 token-like chars, not a secret
+    expect(sanitiseMessage(`bad token ${token} rejected`)).toBe('bad token [token] rejected');
+  });
+
+  it('truncates to 200 characters and copes with non-strings', () => {
+    expect(sanitiseMessage('word '.repeat(100))).toHaveLength(200);
+    expect(sanitiseMessage(undefined)).toBe('');
+    expect(sanitiseMessage({ toString: () => 'obj' })).toBe('obj');
   });
 });
