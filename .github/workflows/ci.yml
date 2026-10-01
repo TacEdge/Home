@@ -44,3 +44,38 @@ jobs:
       - run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    needs: checks
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: home
+          POSTGRES_PASSWORD: home
+          POSTGRES_DB: home_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U home -d home_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://home:home@localhost:5432/home_test
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7
