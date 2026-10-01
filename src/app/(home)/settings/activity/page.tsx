@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { env } from '@/lib/env';
 import { listAudit } from '@/trust/audit';
 import { getActor } from '@/trust/session';
 import { Headline, Label, Quiet } from '@/ui/calm';
@@ -21,7 +22,7 @@ export default async function ActivityPage() {
     month: 'short',
     hour: 'numeric',
     minute: '2-digit',
-    timeZone: 'Pacific/Auckland',
+    timeZone: env.HOME_TIMEZONE,
   });
 
   return (
