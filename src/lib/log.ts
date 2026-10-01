@@ -42,6 +42,20 @@ export function redact(value: unknown, depth = 0): unknown {
   return value;
 }
 
+/**
+ * Free text from a library (M1.1 contract §2.4): strip anything that could
+ * carry an address, a link or a credential, then cap the length. Used for
+ * Better Auth's log messages, which may interpolate URLs and emails.
+ */
+export function sanitiseMessage(message: unknown): string {
+  const text = typeof message === 'string' ? message : String(message ?? '');
+  return text
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[url]')
+    .replace(/[A-Za-z0-9_-]{20,}/g, '[token]')
+    .slice(0, 200);
+}
+
 export type Sink = (line: string, level: Level) => void;
 
 const defaultSink: Sink = (line, level) => {

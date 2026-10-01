@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { NARROW_URL } from '../../playwright.config';
+import { MAIN_URL, NARROW_URL } from '../../playwright.config';
 import { OUTSIDER, SAM } from '../fixtures/users';
 import { SENT_TEXT, requestLink, signIn, withDb } from './helpers';
 import { readMailbox, waitForLink } from './mailbox';
@@ -150,4 +150,33 @@ test('9. sign-in and the Today shell render at phone and desktop widths', async 
     await page.screenshot({ path: `test-results/${name}-today.png` });
     await ctx.close();
   }
+});
+
+test('10. only the magic-link verify endpoint is public under /api/auth', async ({ request }) => {
+  const tokens = () =>
+    withDb(
+      async (pool) =>
+        (await pool.query('select count(*)::int as n from "verification"')).rows[0]?.n as number,
+    );
+  const before = await tokens();
+  const signIn = await request.post('/api/auth/sign-in/magic-link', {
+    data: { email: SAM.email, callbackURL: '/today' },
+    headers: { origin: MAIN_URL },
+  });
+  expect(signIn.status()).toBe(404);
+  expect(await tokens()).toBe(before);
+
+  for (const [method, path] of [
+    ['get', '/api/auth/get-session'],
+    ['post', '/api/auth/update-user'],
+    ['post', '/api/auth/sign-out'],
+    ['get', '/api/auth/list-sessions'],
+    ['post', '/api/auth/magic-link/verify'],
+  ] as const) {
+    const res = await request[method](path, { headers: { origin: MAIN_URL } });
+    expect(res.status(), `${method.toUpperCase()} ${path}`).toBe(404);
+  }
+  // The one public path still answers (a bad token is an auth error, not a 404).
+  const verify = await request.get('/api/auth/magic-link/verify?token=nope', { maxRedirects: 0 });
+  expect(verify.status()).not.toBe(404);
 });

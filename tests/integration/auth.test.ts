@@ -7,7 +7,9 @@ import { TEST_MAILBOX_PATH } from '@/trust/mail';
 import { testDb } from './db';
 
 // Exercises Better Auth as configured in src/trust/auth.ts against the test
-// database, with the test mail transport. Never sends real mail.
+// database, with the test mail transport. Never sends real mail. The gate in
+// front of it (allowlist, rate limits, denied-attempt auditing) is covered in
+// ./sign-in-gate.test.ts; this file is about what Better Auth itself does.
 
 const { db, close } = testDb();
 afterAll(close);
@@ -18,7 +20,7 @@ const OUTSIDER = 'someone-else@example.test';
 
 let ipCounter = 0;
 const headersFor = (ip?: string) =>
-  new Headers({ 'x-forwarded-for': ip ?? `10.0.0.${++ipCounter}`, host: 'localhost:3000' });
+  new Headers({ 'x-real-ip': ip ?? `10.0.0.${++ipCounter}`, host: 'localhost:3000' });
 
 async function mailbox(): Promise<Array<{ to: string; text: string }>> {
   try {
@@ -71,23 +73,17 @@ describe('magic-link sign-in', () => {
     expect(JSON.stringify(entry)).not.toContain(ALLOWED);
   });
 
-  it('gives an outsider the same response, sends nothing, and audits a hash only', async () => {
+  it('sendMagicLink is defence in depth: an outsider that bypasses the gate gets no mail and no audit row with the address', async () => {
+    // Calling Better Auth directly skips the gate; the plugin still refuses.
     const res = await requestLink(OUTSIDER);
     expect(res).toEqual({ status: true });
     expect(await mailbox()).toHaveLength(0);
-
-    const [entry] = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.event, 'auth.sign_in_denied'))
-      .orderBy(desc(auditLog.at))
-      .limit(1);
-    expect(entry?.meta).toMatchObject({ stage: 'link_request' });
-    expect((entry?.meta as { emailHash: string }).emailHash).toMatch(/^[0-9a-f]{32}$/);
-    expect(JSON.stringify(entry)).not.toContain('someone-else');
-
     const users = await db.select().from(userTable).where(eq(userTable.email, OUTSIDER));
     expect(users).toHaveLength(0);
+    const rows = await db.execute(
+      sql`select count(*)::int as n from audit_log where summary like '%someone-else%' or meta::text like '%someone-else%'`,
+    );
+    expect(rows.rows[0]?.n).toBe(0);
   });
 
   it('refuses to create a user for an address outside the household (layer 2)', async () => {
@@ -131,18 +127,5 @@ describe('magic-link sign-in', () => {
     await expect(
       auth.api.magicLinkVerify({ query: { token: token ?? '' }, headers: headersFor() }),
     ).rejects.toThrow();
-  });
-
-  it('limits link requests per IP to 5 per 15 minutes, across emails', async () => {
-    await db.execute(sql`delete from "rate_limit"`);
-    for (let i = 0; i < 7; i++)
-      await requestLink(i % 2 ? ALLOWED : 'alex@example.test', '10.2.2.2');
-    expect(await mailbox()).toHaveLength(5);
-  });
-
-  it('limits link requests per email to 5 per 15 minutes, independent of IP', async () => {
-    await db.execute(sql`delete from "rate_limit"`);
-    for (let i = 0; i < 7; i++) await requestLink(ALLOWED, `10.1.1.${i}`);
-    expect(await mailbox()).toHaveLength(5);
   });
 });
