@@ -35,16 +35,24 @@ export async function recordAudit(actor: Actor, e: AuditEvent, deps: Deps = {}):
   return row;
 }
 
-/** Position in the audit log: the `(at, id)` of the last row seen. */
-export type AuditCursor = { at: Date; id: string };
+/**
+ * Position in the audit log: the id of the last row seen. Deliberately not
+ * its timestamp: Postgres stores `at` to the microsecond, but a JavaScript
+ * Date holds milliseconds, so a cursor carrying `at` through JavaScript lands
+ * before every row in the same millisecond and skips them. The database
+ * resolves the id to the row's exact `(at, id)` instead.
+ */
+export type AuditCursor = { id: string };
 
 export type AuditPage = { rows: AuditRow[]; next: AuditCursor | null };
 
 /**
- * Newest first, paginated by a `(at, id)` cursor so rows with identical
- * timestamps are never skipped or repeated (M1.1 contract §2.9). `next` is
- * null once the last page has been read. Any household member may read the
- * household's activity (it is shared by design, SYSTEM-ARCHITECTURE §5.8).
+ * Newest first, paginated by a cursor on `(at, id)` so rows with identical or
+ * sub-millisecond timestamps are never skipped or repeated (M1.1 contract
+ * §2.9). The comparison happens entirely in Postgres at full precision.
+ * `next` is null once the last page has been read; a cursor naming no row
+ * returns an empty page. Any household member may read the household's
+ * activity (it is shared by design, SYSTEM-ARCHITECTURE §5.8).
  */
 export async function listAudit(
   _actor: Actor,
@@ -59,13 +67,13 @@ export async function listAudit(
     .from(auditLog)
     .where(
       cursor
-        ? sql`(${auditLog.at}, ${auditLog.id}) < (${cursor.at}, ${cursor.id}::uuid)`
+        ? sql`(${auditLog.at}, ${auditLog.id}) < (select c.at, c.id from audit_log c where c.id = ${cursor.id}::uuid)`
         : undefined,
     )
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page.at(-1);
-  const next = rows.length > limit && last ? { at: last.at, id: last.id } : null;
+  const next = rows.length > limit && last ? { id: last.id } : null;
   return { rows: page, next };
 }
