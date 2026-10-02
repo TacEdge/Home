@@ -85,7 +85,8 @@ describe('audit_log', () => {
 
     const seen: string[] = [];
     let cursor: AuditCursor | undefined;
-    for (let guard = 0; guard < 20; guard++) {
+    // Page to the end: other suites leave rows above these twelve.
+    for (let guard = 0; guard < 10_000; guard++) {
       const page = await listAudit(sam, { limit: 5, before: cursor }, { db });
       seen.push(...page.rows.map((r) => r.event));
       if (!page.next) break;

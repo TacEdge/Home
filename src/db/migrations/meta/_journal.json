@@ -22,6 +22,13 @@
       "when": 1790816981723,
       "tag": "0002_app_role",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790930970462,
+      "tag": "0003_knowledge_core_people",
+      "breakpoints": true
     }
   ]
 }

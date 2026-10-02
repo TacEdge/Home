@@ -13,3 +13,5 @@ export function createDb(connectionString: string) {
 }
 
 export type Db = ReturnType<typeof createDb>['db'];
+/** A database handle or a transaction on one: what services and audit accept. */
+export type DbOrTx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];

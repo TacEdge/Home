@@ -72,6 +72,19 @@ describe('runtime/app role (home_app)', () => {
     expect(r.rows[0]?.n).toBeGreaterThan(0);
   });
 
+  it('has data access on tables created by later migrations (0002 default privileges): person', async () => {
+    const grants = await db.execute(
+      sql`select privilege_type from information_schema.role_table_grants
+          where grantee = 'home_app' and table_name = 'person' order by 1`,
+    );
+    expect(grants.rows.map((r) => r.privilege_type)).toEqual([
+      'DELETE',
+      'INSERT',
+      'SELECT',
+      'UPDATE',
+    ]);
+  });
+
   it('cannot UPDATE audit_log rows (permission, not trigger)', async () => {
     await expectPermissionDenied(
       db.execute(sql`update audit_log set summary = 'tampered' where event = 'test.app_role'`),

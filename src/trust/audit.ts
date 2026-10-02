@@ -1,9 +1,11 @@
 import 'server-only';
-import { desc, sql } from 'drizzle-orm';
+import { and, desc, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
-import type { Db } from '@/db/create';
+import type { DbOrTx } from '@/db/create';
 import { auditLog, type AuditRow } from '@/db/schema';
 import type { Actor } from './actor';
+import { auditVisibleTo } from './audit-subjects';
+import type { Visibility } from './visibility';
 
 export type AuditEvent = {
   event: string; // dotted, e.g. auth.sign_in
@@ -11,9 +13,14 @@ export type AuditEvent = {
   subjectId?: string;
   summary?: string; // human-readable, never contains an email or token
   meta?: Record<string, unknown>;
+  // P-1: the affected record's visibility at write time (default household)
+  // and, for a private or owner-only record, who owns it. Domain writes set
+  // these through the domain write helper; auth events leave them unset.
+  visibility?: Visibility;
+  visibleToUserId?: string;
 };
 
-type Deps = { db?: Db };
+type Deps = { db?: DbOrTx };
 
 /** Append one audit entry. Never throws away the write silently. */
 export async function recordAudit(actor: Actor, e: AuditEvent, deps: Deps = {}): Promise<AuditRow> {
@@ -29,6 +36,11 @@ export async function recordAudit(actor: Actor, e: AuditEvent, deps: Deps = {}):
       subjectId: e.subjectId ?? null,
       summary: e.summary ?? null,
       meta: e.meta ?? null,
+      // Only named when set: an insert that leaves the P-1 columns to their
+      // defaults is identical to the M1 insert, so auth events still succeed
+      // in the window between a deploy and its migration being approved.
+      ...(e.visibility ? { visibility: e.visibility } : {}),
+      ...(e.visibleToUserId ? { visibleToUserId: e.visibleToUserId } : {}),
     })
     .returning();
   if (!row) throw new Error('audit insert returned no row');
@@ -43,11 +55,12 @@ export type AuditPage = { rows: AuditRow[]; next: AuditCursor | null };
 /**
  * Newest first, paginated by a `(at, id)` cursor so rows with identical
  * timestamps are never skipped or repeated (M1.1 contract §2.9). `next` is
- * null once the last page has been read. Any household member may read the
- * household's activity (it is shared by design, SYSTEM-ARCHITECTURE §5.8).
+ * null once the last page has been read. The household's activity is shared
+ * by design (SYSTEM-ARCHITECTURE §5.8), except that a row about a record the
+ * actor cannot currently see is not listed (P-1, `auditVisibleTo`).
  */
 export async function listAudit(
-  _actor: Actor,
+  actor: Actor,
   opts: { limit?: number; before?: AuditCursor } = {},
   deps: Deps = {},
 ): Promise<AuditPage> {
@@ -58,9 +71,12 @@ export async function listAudit(
     .select()
     .from(auditLog)
     .where(
-      cursor
-        ? sql`(${auditLog.at}, ${auditLog.id}) < (${cursor.at}, ${cursor.id}::uuid)`
-        : undefined,
+      and(
+        auditVisibleTo(actor),
+        cursor
+          ? sql`(${auditLog.at}, ${auditLog.id}) < (${cursor.at}, ${cursor.id}::uuid)`
+          : undefined,
+      ),
     )
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(limit + 1);

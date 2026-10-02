@@ -1,3 +1,5 @@
-// All tables. Domain tables arrive in M2; M1 has only auth and audit.
+// All tables: auth and audit (M1), then the domain tables (M2 onwards).
+export * from './common';
 export * from './auth';
 export * from './audit';
+export * from './person';

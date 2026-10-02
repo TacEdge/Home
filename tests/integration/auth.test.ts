@@ -5,6 +5,7 @@ import { auditLog, session as sessionTable, user as userTable } from '@/db/schem
 import { getAuth } from '@/trust/auth';
 import { TEST_MAILBOX_PATH } from '@/trust/mail';
 import { testDb } from './db';
+import { clearDomainRows } from './fixtures';
 
 // Exercises Better Auth as configured in src/trust/auth.ts against the test
 // database, with the test mail transport. Never sends real mail. The gate in
@@ -48,6 +49,7 @@ beforeAll(async () => {
   await db.execute(sql`delete from "rate_limit"`);
   await db.execute(sql`delete from "verification"`);
   await db.execute(sql`delete from "session"`);
+  await clearDomainRows(db); // domain rows reference user.id (M2)
   await db.execute(sql`delete from "user"`);
 });
 beforeEach(async () => {
