@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, normaliseDbHost, parseEnv } from '@/lib/env';
+import { EnvError, describeDbSsl, normaliseDbHost, parseEnv } from '@/lib/env';
 
 const secret = 'x'.repeat(48);
 const valid = {
@@ -68,7 +68,7 @@ describe('parseEnv', () => {
   describe('preview/production database isolation (§1.4)', () => {
     const prodHost = 'ep-prod.ap-southeast-2.aws.neon.tech';
     const devHost = 'ep-dev.ap-southeast-2.aws.neon.tech';
-    const url = (host: string) => `postgres://home_app:pw@${host}/neondb?sslmode=require`;
+    const url = (host: string) => `postgres://home_app:pw@${host}/neondb?sslmode=verify-full`;
 
     it('preview refuses the production database host', () => {
       expect(() =>
@@ -241,5 +241,135 @@ describe('parseEnv', () => {
     it('requires mail credentials when using the provider transport', () => {
       expect(() => parseEnv({ ...prod, MAIL_API_KEY: undefined })).toThrow(/MAIL_API_KEY/);
     });
+  });
+
+  describe('database TLS mode on Vercel', () => {
+    const host = 'ep-x-pooler.ap-southeast-2.aws.neon.tech';
+    const vercel = (query: string) => ({
+      ...valid,
+      VERCEL_ENV: 'production',
+      DATABASE_URL: `postgres://home_app:pw@${host}/neondb${query}`,
+    });
+
+    it('accepts exactly one sslmode=verify-full', () => {
+      expect(() => parseEnv(vercel('?sslmode=verify-full'))).not.toThrow();
+    });
+
+    it.each([
+      ['require', '?sslmode=require'],
+      ['prefer', '?sslmode=prefer'],
+      ['verify-ca', '?sslmode=verify-ca'],
+      ['no-verify', '?sslmode=no-verify'],
+      ['disable', '?sslmode=disable'],
+      ['an unknown value', '?sslmode=verify_full'],
+      ['no sslmode', ''],
+      ['a second sslmode that pg would apply instead', '?sslmode=verify-full&sslmode=require'],
+      ['a duplicated verify-full', '?sslmode=verify-full&sslmode=verify-full'],
+    ])('refuses %s, naming the variable and the parsed mode', (_name, query) => {
+      try {
+        parseEnv(vercel(query));
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(EnvError);
+        expect((e as EnvError).variables).toEqual(['DATABASE_URL']);
+        expect((e as Error).message).toMatch(/DATABASE_URL .*sslmode=verify-full; found sslmode=/);
+        expect((e as Error).message).not.toContain(host);
+        expect((e as Error).message).not.toContain('home_app');
+      }
+    });
+
+    it('applies in preview deployments too', () => {
+      expect(() =>
+        parseEnv({
+          ...vercel('?sslmode=require'),
+          VERCEL_ENV: 'preview',
+          HOME_PRODUCTION_DB_HOST: 'ep-prod.ap-southeast-2.aws.neon.tech',
+        }),
+      ).toThrow(/DATABASE_URL .*sslmode=verify-full/);
+    });
+
+    it('does not apply off Vercel (local databases have no sslmode)', () => {
+      expect(() =>
+        parseEnv({ ...valid, DATABASE_URL: 'postgres://home:home@localhost:5432/home' }),
+      ).not.toThrow();
+      expect(() =>
+        parseEnv({ ...valid, DATABASE_URL: `postgres://u:p@${host}/db?sslmode=require` }),
+      ).not.toThrow();
+    });
+  });
+});
+
+describe('describeDbSsl', () => {
+  const user = 'secretuser';
+  const password = 'hunter2-secret-password';
+  const host = 'ep-secret-host.ap-southeast-2.aws.neon.tech';
+  const database = 'secretdb';
+  const url = (query: string) => `postgres://${user}:${password}@${host}:5432/${database}${query}`;
+
+  it.each([
+    ['?sslmode=verify-full', 'verify-full', 1],
+    ['?sslmode=require', 'require', 1],
+    ['?sslmode=prefer&foo=bar', 'prefer', 1],
+    ['?sslmode=verify-full&sslmode=require', 'require', 2],
+    ['?sslmode=require&sslmode=verify-full', 'verify-full', 2],
+    ['', 'absent', 0],
+    ['?foo=bar', 'absent', 0],
+    ['?sslmode=verify_full', 'unrecognised', 1],
+    ['?sslmode=VERIFY-FULL', 'unrecognised', 1],
+    ['?sslmode=verify-full%20', 'unrecognised', 1],
+  ])('%s → sslmode=%s, %i occurrence(s)', (query, sslmode, occurrences) => {
+    expect(describeDbSsl(url(query))).toEqual({ sslmode, occurrences });
+  });
+
+  it('reports an unparseable string without echoing it', () => {
+    expect(describeDbSsl('not a url ' + password)).toEqual({
+      sslmode: 'unparseable',
+      occurrences: 0,
+    });
+  });
+
+  it('never contains the username, password, hostname or database, whatever sslmode holds', () => {
+    // Includes an sslmode value that *is* a credential-shaped string: the
+    // report must still say only `unrecognised`.
+    const queries = [
+      '?sslmode=verify-full',
+      '?sslmode=require',
+      '',
+      `?sslmode=${password}`,
+      `?sslmode=${host}`,
+      `?sslmode=${user}@${host}`,
+    ];
+    for (const query of queries) {
+      const text = JSON.stringify(describeDbSsl(url(query)));
+      for (const secret of [user, password, host, database, 'neon', '5432']) {
+        expect(text, `report for ${query.replace(password, '<pw>')}`).not.toContain(secret);
+      }
+    }
+  });
+
+  it('only ever reports a value from the fixed vocabulary', () => {
+    const vocabulary = new Set([
+      'disable',
+      'allow',
+      'prefer',
+      'require',
+      'verify-ca',
+      'verify-full',
+      'no-verify',
+      'absent',
+      'unrecognised',
+      'unparseable',
+    ]);
+    for (const value of [
+      'verify-full',
+      'require',
+      'x',
+      password,
+      '',
+      'require%20',
+      'require&a=b',
+    ]) {
+      expect(vocabulary.has(describeDbSsl(url(`?sslmode=${value}`)).sslmode)).toBe(true);
+    }
   });
 });
