@@ -1,6 +1,6 @@
 # ADR 0005 — M2 knowledge core: scope and deviations
 
-Status: **Accepted** for D-M2-1…8, 2026-10-02 (owner). P-1…P-6 are **proposed** in `docs/m2/M2-BUILD-CONTRACT.md` §3.2 and are recorded here as accepted or amended at contract review.
+Status: **Accepted**, 2026-10-02 (owner): D-M2-1…8, and contract rules P-1…P-6 with the owner's refinement of P-1. Full wording of P-1…P-6: `docs/m2/M2-BUILD-CONTRACT.md` §3.2.
 
 ## Context
 
@@ -16,6 +16,16 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 6. **Retention is modelled now, executed later (D-M2-6).** No purge mechanism in M2, but every timestamp, state and foreign-key behaviour the approved retention rules need is in the M2 schema (contract §4.4), so the mechanism needs no schema retrofit.
 7. **PRs are owner-merged (D-M2-7).** M2 implementation PRs stop when CI is green; the owner approves each merge. This differs from M1 and M1.1, where green PRs merged automatically.
 8. **No real household data (D-M2-8),** restating D18 for M2's fixtures and seed.
+
+### Contract rules accepted at review
+
+9. **P-1, refined by the owner: audit visibility follows the affected record.** Invariant: audit metadata never reveals more than the underlying record would reveal. Domain audit rows name the affected record and store a snapshot of its visibility (`audit_log.visibility`, `audit_log.visible_to_user_id`, both additive). The Activity list shows a row only to someone who can currently see that record, so a private record's events stay private whoever acted (its owner, an approved proposal, a future system process); the snapshot decides once the record no longer exists. Domain audit summaries and meta are structural only: never user-written content, titles, captured text, proposal payloads or summaries, or other record payload.
+10. **P-2:** proposals are private to the requesting user, who alone can approve or reject them.
+11. **P-3:** pending proposals expire 7 days after creation, evaluated on read; no job.
+12. **P-4:** a 29 February birthday falls on 28 February in common years.
+13. **P-5:** context category `other` uses the 12-month staleness period.
+14. **P-6:** context created in M2 starts `active`; the pending state lives in the Proposal; `proposed` is reserved.
+15. **`kev_usage` stores the provider's cost in micro-US-dollars.** M2 introduces no NZD conversion; conversion for the NZ$ spend cap belongs to M8.
 
 ## Consequences
 

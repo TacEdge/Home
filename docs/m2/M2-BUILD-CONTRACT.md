@@ -1,6 +1,6 @@
 # M2 — Knowledge Core: Build Contract
 
-Status: **Draft for owner review** (PR 1). Scope decisions D-M2-1…8 approved by the owner on 2026-10-02 (ADR 0005). Items in §3.2 are proposed by this contract and need confirmation at review.
+Status: **Draft for owner review** (PR 1). Scope decisions D-M2-1…8 and contract rules P-1…P-6 (P-1 as refined by the owner) approved on 2026-10-02 (ADR 0005).
 Implementer: Fable 5.1. Reviewer at completion: Opus (code + architecture review before M3).
 
 M2 builds HOME's family data layer: the schema, the domain services that every screen and every Kev tool will go through, the `profile` and `staleness` engines, the synthetic fixture family, and the tests that prove private and sensitive records never leak. **M2 has no screens, no Kev and no integrations.** At the end of M2 production has the new, empty tables and behaves exactly as it does today.
@@ -26,7 +26,7 @@ M1 is deployed to production but **not accepted**. The outstanding M1 acceptance
 | Area | What |
 |---|---|
 | **Domain foundation** | `src/domain/common/`: shared column helpers, shared enum constants, domain errors, the transaction-plus-audit write helper. |
-| **Trust extensions** | Sensitivity predicate in `src/trust/visibility.ts`. Content-free, visibility-aware audit for private records (§3.2, P-1). |
+| **Trust extensions** | Sensitivity predicate in `src/trust/visibility.ts`. Structural, content-free audit whose visibility follows the affected record (§3.2, P-1). |
 | **Schema + migrations** | `person`, `event`, `event_person`, `project`, `task`, `note`, `capture`, `context`, `proposal`, `conversation`, `message`, `kev_usage`, `insight_response`. Forward-only and additive (§4). |
 | **Domain services** | One service per entity under `src/domain/<entity>/`, each with its Zod input schemas (§5). |
 | **Proposal approval** | Create, approve, reject and expire proposals; approval executes through the domain services (§5.7). No Kev code. |
@@ -60,7 +60,7 @@ Four implementation PRs after this one. **Each PR stops when CI is green and is 
 | PR | Contents | Migration |
 |---|---|---|
 | **1** | This contract, the Fable prompt, ADR 0005, status and roadmap updates. Docs only. | none |
-| **2 — Foundation and People** | `src/domain/common/`; sensitivity predicate; P-1 audit visibility; `person` + service including `linkSelf`; `profile` engine; fixture people. | `0003` |
+| **2 — Foundation and People** | `src/domain/common/`; sensitivity predicate; P-1 audit columns and record-following `listAudit`, with `person` registered; `person` + service including `linkSelf`; `profile` engine; fixture people. PRs 3–5 register each new entity with `listAudit` in the same PR that creates it. | `0003` |
 | **3 — Events, projects, tasks, notes** | `event`, `event_person`, `project`, `task`, `note` + services; reference rules (§3.6); fixture events, projects, tasks, notes; leak tests for each. | `0004` |
 | **4 — Capture, context, proposals** | `capture`, `context`, `proposal`; adds `origin_capture_id` to `event`, `project`, `task`, `note`; `staleness` engine; proposal approval for every action in §5.7; fixture captures, context, proposals. | `0005` |
 | **5 — Kev bookkeeping, seed, privacy suite** | `conversation`, `message`, `kev_usage` (append-only), `insight_response`; `capture.message_id` foreign key; `pnpm db:seed:fixtures`; the cross-entity privacy suite (§8.3); docs (§9). | `0006` |
@@ -82,11 +82,11 @@ Four implementation PRs after this one. **Each PR stops when CI is green and is 
 | **D-M2-7** | PRs 2–5 do not auto-merge. Each stops when CI is green; the owner approves each merge. |
 | **D-M2-8** | M2 contains no real household or family data. Development, tests, seeds and examples use the synthetic fixture family only. |
 
-### 3.2 Proposed by this contract — confirm at review
+### 3.2 Contract rules, approved by the owner, 2026-10-02 (ADR 0005)
 
 | # | Proposal | Why |
 |---|---|---|
-| **P-1** | **Audit rows about private records are private.** Add `audit_log.visibility` (`household` \| `private`, default `household`; additive, the trigger is unaffected). Writes to a private record are audited with `visibility = 'private'`. `listAudit` shows a private row only to the user who acted. Separately, **no domain audit row ever contains user-authored content** (titles, text, bodies, names): only the event, subject type and id, changed field names and enum values. | Settings › Activity shows every row's summary to both adults today. Without this, a private record's existence, timing and possibly its title would reach the other adult, which breaks rule 1 and the "surprise weekend" threat in SYSTEM-ARCHITECTURE §5.1. |
+| **P-1** (refined) | **Audit visibility follows the affected record.** Invariant: *audit metadata never reveals more than the underlying record would reveal.* (a) Every domain audit row names the affected record (`subject_type`, `subject_id`) and stores a write-time snapshot of its visibility in two additive columns: `audit_log.visibility` (`household` \| `private`, default `household`) and `audit_log.visible_to_user_id` (the owner of a private or owner-only record; null for household). (b) `listAudit` shows a domain row to an actor **only if that actor can currently see the affected record**, by the same predicate the record's own service uses (owner-only for captures, proposals, conversations, messages and insight responses; `event_person` follows its event). If the record no longer exists, the snapshot decides. (c) So a private record's events stay private **whoever or whatever acted**: the owner, the proposal executor, a future system process (sync, purge) or any other permitted path. If a household record later becomes private, its earlier rows are hidden from the other adult; if a private record becomes household, its rows become visible with it. (d) **Domain audit summaries and meta are structural only**: event name, subject type and id, actor and approver ids, changed field names, enum values, counts. Never user-written content, titles, names, captured text, proposal payloads or proposal summaries, or any other record payload. (e) Rows with no domain subject (`auth.*`) are unchanged and stay household. | Settings › Activity shows every row's summary to both adults today. Without this, a private record's existence, timing or title would reach the other adult, which breaks rule 1 and the "surprise weekend" threat in SYSTEM-ARCHITECTURE §5.1. Evaluating against the record's current visibility, not only the snapshot, keeps the invariant when visibility changes, because append-only rows cannot be rewritten. |
 | **P-2** | **Proposals are private to the requesting user**, and only that user can approve or reject them. | Conversations are private per user (D9), and proposals come from conversations. Cross-adult approval can be added later as a decision. |
 | **P-3** | **Pending proposals expire 7 days after creation**, evaluated on read: a proposal past `expires_at` cannot be approved and is reported as `expired`. Its stored status is updated when next touched; no job. | The data model has an `expired` state but no period. Read-time evaluation needs no background job. |
 | **P-4** | **A 29 February birthday falls on 28 February in common years.** | The `profile` engine needs one rule; this keeps the birthday in its own month. |
@@ -121,7 +121,7 @@ Field meanings follow FAMILY-DATA-MODEL §3 unless stated.
 - **`proposal`** [4]: `conversation_id` (uuid, null; FK added in PR 5, `ON DELETE SET NULL`), `requested_by_user_id`, `capture_id` (FK `ON DELETE SET NULL`), `action`, `payload` (`jsonb`), `summary`, `status` (`pending` \| `approved` \| `rejected` \| `expired` \| `failed`), **`expires_at`**, `decided_by`, `decided_at`, `decided_channel`, `result_ref` (`jsonb`), `failure_reason` (fixed code, never free text). `visibility` is always `private` (P-2).
 - **`conversation`** [5]: `user_id` (owner, FK `ON DELETE CASCADE`), `created_at`, `updated_at`, **`last_message_at`**, `archived_at`. Private to its owner by `user_id`.
 - **`message`** [5]: `conversation_id` (FK `ON DELETE CASCADE`), `role` (`user` \| `kev`), `channel`, `content` (`jsonb`, provider-neutral, validated by a versioned Zod schema `{ v: 1, text, citations?, toolSummaries?, proposalIds?, captureIds? }`), `tier`, `model` (null on user messages), `created_at`.
-- **`kev_usage`** [5]: `at`, `user_id`, `conversation_id` (null), `tier` (`fast` \| `deep`), `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd_micros` (bigint), `escalated` (boolean). **Append-only:** follow the MIGRATIONS.md rule (revoke `UPDATE`, `DELETE`, `TRUNCATE` from `home_app`, plus an append-only trigger), with the matching `app-role` integration test. Currency conversion for the NZ$ spend cap is an M8 concern.
+- **`kev_usage`** [5]: `at`, `user_id`, `conversation_id` (null), `tier` (`fast` \| `deep`), `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd_micros` (bigint), `escalated` (boolean). **Append-only:** follow the MIGRATIONS.md rule (revoke `UPDATE`, `DELETE`, `TRUNCATE` from `home_app`, plus an append-only trigger), with the matching `app-role` integration test. Cost is stored as the provider's cost in **micro-US-dollars**. M2 introduces **no NZD conversion**; converting for the NZ$ spend cap is an M8 concern.
 - **`insight_response`** [5]: `user_id`, `insight_key`, `response` (`dismissed` \| `not_useful`), `responded_at`; unique `(user_id, insight_key)`, upserted.
 
 ### 4.3 Migrations
@@ -141,7 +141,7 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 | Dismissed captures purged after 30 days | `capture.dismissed_at` |
 | Conversations and messages deleted after 90 days | `message.created_at`, `conversation.last_message_at` |
 | Hard delete on request | Foreign keys chosen so a record can be deleted without orphaning or blocking: `ON DELETE SET NULL` for provenance links (`origin_capture_id`, `capture_id`, `message_id`, `conversation_id`, `project_id`, person references on tasks), `ON DELETE CASCADE` for owned children (`event_person`, `message`) |
-| Audit stays complete after a purge | Audit rows hold no user-authored content (P-1), so purging a record leaves nothing private behind in the append-only log |
+| Audit stays complete after a purge | Audit rows are structural only (P-1 d), so purging a record leaves nothing private behind in the append-only log; once the record is gone, the row's snapshot keeps it private (P-1 b) |
 
 ---
 
@@ -164,7 +164,7 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 ### 5.3 Writes
 
 - Each write runs in one transaction with its audit row. If the audit insert fails, the write does not happen.
-- Audit events are `<entity>.<verb>` (e.g. `task.create`, `task.archive`). Summary and meta follow P-1: no user-authored content.
+- Audit events are `<entity>.<verb>` (e.g. `task.create`, `task.archive`). Every domain audit row carries the affected record and its visibility snapshot, and summary and meta are structural only (P-1). The shared write helper records them, so no service writes audit rows by hand.
 - **Kev never writes directly** (CLAUDE.md rule 3): every write function rejects an actor with `via: 'kev'`, except `captures.captureVerbatim` and `proposals.create`.
 - `created_via` is `ui` for direct writes and `kev` only when the write is executed by an approved proposal; only the proposal executor may set it.
 - Only the creator may edit a private record, change any record's visibility, or archive a private record. Household records are editable by either adult.
@@ -236,7 +236,7 @@ Pure functions with exhaustive unit tests. No database, no clock, no environment
 - The sensitivity predicate against a scratch table, as M1's `visibility.test.ts` does.
 - Proposals: approve executes and audits requester and approver; reject, expiry and failure never write; the other adult cannot see, approve or reject; `via: 'kev'` cannot approve; capture organised after its last proposal; partial failure leaves no write.
 - `kev_usage`: as `home_app`, `UPDATE`, `DELETE` and `TRUNCATE` fail with permission errors.
-- P-1: private-record audit rows are listed only to their actor.
+- P-1: a private record's audit rows are hidden from the other adult when written by the owner, by the proposal executor and by a test-only system-actor write; after household→private, earlier rows are hidden; after private→household, they appear; for a deleted subject, the snapshot decides; `auth.*` rows are unchanged.
 
 ### 8.3 Privacy suite (PR 5)
 
@@ -245,7 +245,7 @@ One test file seeds the full fixture family, then for **every** service and list
 - none of the other adult's canary strings appear in any result;
 - no sensitive record appears unless `includeSensitive: true` is passed by its creator;
 - no canary string appears in any `audit_log` row's summary or meta;
-- `listAudit` for one adult returns none of the other adult's private-record rows.
+- `listAudit` for one adult returns no row about any record that adult cannot currently see.
 
 ### 8.4 Unchanged
 
@@ -256,7 +256,7 @@ The existing unit, integration and e2e suites and the Vercel bundle check stay g
 ## 9. Documentation
 
 - `docs/FAMILY-DATA-MODEL.md`: implementation notes for the choices in §4 (text user ids, text+CHECK enums, exclusive all-day end, scheduled window columns, `event_person` visibility, retention columns) and pointers to ADR 0005 for the deferrals.
-- ADR 0005: record P-1…P-6 as accepted or amended after review, and any implementation clarification, as ADR 0003 did.
+- ADR 0005: record any implementation clarification of D-M2-1…8 and P-1…P-6, as ADR 0003 did.
 - `docs/runbooks/LOCAL-DEV.md`: `pnpm db:seed:fixtures`. `docs/runbooks/MIGRATIONS.md`: the additive rule now applies to a live production database.
 - `CLAUDE.md` and `docs/ROADMAP.md`: M2 code complete, awaiting review, when PR 5 is ready. The M1 acceptance status stays as recorded in DEPLOY.md §E until the owner confirms it.
 
@@ -276,5 +276,6 @@ M2 is done when **all** of these are true:
 - [ ] `kev_usage` is append-only for `home_app`.
 - [ ] No UI, Kev, integration, calendar-table, recurrence, purge, backup, export or Better Auth table change (§1.2).
 - [ ] No new runtime dependency; no real household data; gitleaks and the private-terms scan are clean.
-- [ ] Docs updated per §9; P-1…P-6 recorded in ADR 0005.
+- [ ] Audit rows follow P-1: record-following visibility and structural content only.
+- [ ] Docs updated per §9.
 - [ ] Handed back for Opus code and architecture review before M3.
