@@ -1,6 +1,6 @@
 # M2 — Knowledge Core: Build Contract
 
-Status: **Draft for owner review** (PR 1). Scope decisions D-M2-1…8 and contract rules P-1…P-6 (P-1 as refined by the owner) approved on 2026-10-02 (ADR 0005).
+Status: **Approved** (merged in #16). Scope decisions D-M2-1…8 and contract rules P-1…P-6 (P-1 as refined by the owner) approved on 2026-10-02 (ADR 0005). Amended 2026-10-02 by **migration-first deployment** (§2.1, ADR 0005 §16).
 Implementer: Fable 5.1. Reviewer at completion: Opus (code + architecture review before M3).
 
 M2 builds HOME's family data layer: the schema, the domain services that every screen and every Kev tool will go through, the `profile` and `staleness` engines, the synthetic fixture family, and the tests that prove private and sensitive records never leak. **M2 has no screens, no Kev and no integrations.** At the end of M2 production has the new, empty tables and behaves exactly as it does today.
@@ -55,17 +55,44 @@ M1 is deployed to production but **not accepted**. The outstanding M1 acceptance
 
 ## 2. Implementation order
 
-Four implementation PRs after this one. **Each PR stops when CI is green and is ready for review; the owner merges it** (D-M2-7). The next PR starts only after the previous one is merged. Each PR adds exactly one migration. After each merge the **Migrate production database** workflow queues the migration for owner approval; it is additive and no screen reads the new tables, so approving it does not change production behaviour.
+### 2.1 Migration-first deployment (ADR 0005 §16)
 
-| PR | Contents | Migration |
-|---|---|---|
-| **1** | This contract, the Fable prompt, ADR 0005, status and roadmap updates. Docs only. | none |
-| **2 — Foundation and People** | `src/domain/common/`; sensitivity predicate; P-1 audit columns and record-following `listAudit`, with `person` registered; `person` + service including `linkSelf`; `profile` engine; fixture people. PRs 3–5 register each new entity with `listAudit` in the same PR that creates it. | `0003` |
-| **3 — Events, projects, tasks, notes** | `event`, `event_person`, `project`, `task`, `note` + services; reference rules (§3.6); fixture events, projects, tasks, notes; leak tests for each. | `0004` |
-| **4 — Capture, context, proposals** | `capture`, `context`, `proposal`; adds `origin_capture_id` to `event`, `project`, `task`, `note`; `staleness` engine; proposal approval for every action in §5.7; fixture captures, context, proposals. | `0005` |
-| **5 — Kev bookkeeping, seed, privacy suite** | `conversation`, `message`, `kev_usage` (append-only), `insight_response`; `capture.message_id` foreign key; `pnpm db:seed:fixtures`; the cross-entity privacy suite (§8.3); docs (§9). | `0006` |
+Vercel deploys `main` as soon as a PR merges, while the production migration waits for owner approval. Expand-then-contract keeps the *previously deployed* app safe against a *newer* schema; nothing keeps *new* app code safe against the *older* schema it meets in that window. So, for every schema-dependent change:
 
----
+1. A migration that introduces schema required by new application code lands in a **migration-only PR** first.
+2. That PR contains **no application code that requires the new schema**. It may contain the migration, its Drizzle schema definitions, migration and privilege tests, and code that works on both the old and the new schema. A new column in an *existing* table's Drizzle definition is itself schema-dependent code if any query selects or returns every column of that table: such queries must name their columns first, or the column definition waits for the application PR. The previous-schema check (rule 7) catches any that remain.
+3. After review and green CI, the owner merges the migration PR to `main`.
+4. The production migration stays **explicitly owner-approved** through the protected **Migrate production database** workflow.
+5. **Only after the production migration has succeeded** may application code that depends on that schema merge. The application PR's description links the successful workflow run. To review that PR's Vercel preview against `home-dev`, dispatch **Migrate preview database** first.
+6. **`recordAudit` returns only the columns its caller needs**, `id` unless another field is explicitly required, so sign-in and auditing never depend on future additive `audit_log` columns.
+7. **CI runs a previous-schema compatibility check**: the PR's application code against a database migrated only to the base branch's migrations, enough to catch code that would break while production is still on `main`'s prior schema (§4.3).
+8. Each M2 work package therefore uses **separate migration and application PRs** wherever the code depends on new schema. A package with no schema dependency stays one PR.
+9. None of this relaxes the additive-only, expand-first migration rules (§4.3).
+
+### 2.2 Work packages
+
+Every PR stops when CI is green and is ready for review; **the owner merges it** (D-M2-7). The next PR starts only after the previous one is merged and, after a migration PR, after its production migration has succeeded.
+
+| Package | PR | Contents | Migration |
+|---|---|---|---|
+| **1** | 1 | This contract, the Fable prompt, ADR 0005, status and roadmap updates. Docs only. **Merged (#16).** | none |
+| **1.1** | — | Migration-first process (this section, ADR 0005 §16, `MIGRATIONS.md`). Docs only. | none |
+| **S — Deployment safety** | one PR | Rule 6: `recordAudit` returns `id` only, every caller checked. Every other query on `audit_log`, including `listAudit`, names its columns, so 2a can add columns to its Drizzle definition safely. Rule 7: the previous-schema compatibility job in CI. No schema change. Must merge **before** the first M2 migration PR. | none |
+| **2 — Foundation and People** | **2a** migration-only | `person`; the P-1 columns on `audit_log`; their Drizzle schema; migration and `home_app` privilege tests. | `0003` |
+| | **2b** application | `src/domain/common/`; sensitivity predicate; record-following `listAudit` with `person` registered; `person` service including `linkSelf`; `profile` engine; fixture people. Opened only after `0003` has succeeded in production. PRs for packages 3–5 register each new entity with `listAudit` in the application PR that uses it. | none |
+| **3 — Events, projects, tasks, notes** | 3a / 3b | `event`, `event_person`, `project`, `task`, `note`; then their services, reference rules (§5.5), fixtures and leak tests. | `0004` |
+| **4 — Capture, context, proposals** | 4a / 4b | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; then the `staleness` engine, proposal approval (§5.7) and fixtures. | `0005` |
+| **5 — Kev bookkeeping, seed, privacy suite** | 5a / 5b | `conversation`, `message`, `kev_usage` (append-only), `insight_response`, `capture.message_id` foreign key; then their services, `pnpm db:seed:fixtures`, the privacy suite (§8.3) and docs (§9). | `0006` |
+
+### 2.3 Status of the first Package 2 attempt (PR #17)
+
+PR #17 implemented Package 2 as a single PR (migration `0003` together with the code that needs it). It was opened against `docs/m2-build-contract` after that branch had already merged to `main`, and on 2026-10-02 it was merged **only into that obsolete branch** (merge commit `b1113f8`). **Its implementation is not on `main`, migration `0003` has not run in any environment, and none of it is approved for production.** It must never be merged from that branch.
+
+Its review found a blocker that this section exists to prevent: deployed before its migration, PR #17's `recordAudit` asked for the new `audit_log` columns and would have failed every audit write, including sign-in. Package 2 is rebuilt from `main` as 2a and 2b, and 2b also carries these review findings:
+
+- a test proving a failed audit insert rolls back the write (not a failure elsewhere in the transaction);
+- the visibility predicate in every `UPDATE`'s `WHERE`, not only in the preceding read, so a concurrent visibility change cannot let the other adult write into a now-private record;
+- a test that every table with a `visibility` column is registered with `listAudit`.
 
 ## 3. Decisions
 
@@ -79,7 +106,7 @@ Four implementation PRs after this one. **Each PR stops when CI is green and is 
 | **D-M2-4** | Regular-week derivation in `profile` is deferred until recurrence support arrives. No RRULE dependency is added for M2. |
 | **D-M2-5** | The fixture seed runs against local and CI databases only. `home-dev` and production are not seeded in M2. |
 | **D-M2-6** | The purge mechanism is deferred, but M2 models every timestamp, state and foreign-key behaviour the approved retention rules need, so they can be implemented later without a schema retrofit. |
-| **D-M2-7** | PRs 2–5 do not auto-merge. Each stops when CI is green; the owner approves each merge. |
+| **D-M2-7** | M2 implementation PRs do not auto-merge (originally PRs 2–5; now every PR in §2.2). Each stops when CI is green; the owner approves each merge. |
 | **D-M2-8** | M2 contains no real household or family data. Development, tests, seeds and examples use the synthetic fixture family only. |
 
 ### 3.2 Contract rules, approved by the owner, 2026-10-02 (ADR 0005)
@@ -106,7 +133,7 @@ Four implementation PRs after this one. **Each PR stops when CI is green and is 
 - **Free-text limits** in the Zod schemas: titles 200 characters, names 100, notes, bodies, descriptions, capture text and context content 10,000.
 - **Indexes:** every foreign key, plus `(visibility, created_by)` on each user-facing table and `archived_at` where lists filter on it.
 
-### 4.2 Tables (PR in brackets)
+### 4.2 Tables (work package in brackets)
 
 Field meanings follow FAMILY-DATA-MODEL §3 unless stated.
 
@@ -116,9 +143,9 @@ Field meanings follow FAMILY-DATA-MODEL §3 unless stated.
 - **`project`** [3]: `title`, `summary`, `domain` (V0.1 services accept only `home`), `status` (`idea` \| `active` \| `paused` \| `done`), `target_date`.
 - **`task`** [3]: `title`, `notes`, `status` (`open` \| `done` \| `dropped`), `project_id` (FK `ON DELETE SET NULL`), `domain`, `assignee_person_id`, `about_person_id` (FKs `ON DELETE SET NULL`), `due_date`, `estimate_minutes` (positive), `needs` (`jsonb` array of `dry_weather` \| `daylight` \| `two_people` \| `shops_open`), `scheduled_starts_at`, `scheduled_ends_at` (both or neither), `completed_at`.
 - **`note`** [3]: `body` (markdown), `subject_type` (`project` \| `person` \| `event` \| null), `subject_id` (uuid, null; no FK, validated by the service).
-- **`capture`** [4]: `text` (verbatim, never trimmed or rewritten), `captured_by` (= `created_by`), `channel` (`web`), `message_id` (uuid, null; FK added in PR 5, `ON DELETE SET NULL`), `status` (`new` \| `proposed` \| `organised` \| `dismissed`), `organised_into` (`jsonb` list of `{type, id}`), **`organised_at`**, **`dismissed_at`**. `CHECK (visibility = 'private')`.
+- **`capture`** [4]: `text` (verbatim, never trimmed or rewritten), `captured_by` (= `created_by`), `channel` (`web`), `message_id` (uuid, null; FK added in Package 5, `ON DELETE SET NULL`), `status` (`new` \| `proposed` \| `organised` \| `dismissed`), `organised_into` (`jsonb` list of `{type, id}`), **`organised_at`**, **`dismissed_at`**. `CHECK (visibility = 'private')`.
 - **`context`** [4]: `subject_type` (`person` \| `household` \| `project`), `subject_id` (null for household), `content`, `category` (`interest` \| `preference` \| `routine` \| `intention` \| `practical` \| `other`), `source_type` (`told_kev` \| `manual` \| `capture`), `source_user_id`, `source_ref`, `last_confirmed_at`, `valid_until` (date), `sensitivity` (`normal` \| `sensitive`), `status` (`proposed` \| `active` \| `retired`), **`retired_at`**.
-- **`proposal`** [4]: `conversation_id` (uuid, null; FK added in PR 5, `ON DELETE SET NULL`), `requested_by_user_id`, `capture_id` (FK `ON DELETE SET NULL`), `action`, `payload` (`jsonb`), `summary`, `status` (`pending` \| `approved` \| `rejected` \| `expired` \| `failed`), **`expires_at`**, `decided_by`, `decided_at`, `decided_channel`, `result_ref` (`jsonb`), `failure_reason` (fixed code, never free text). `visibility` is always `private` (P-2).
+- **`proposal`** [4]: `conversation_id` (uuid, null; FK added in Package 5, `ON DELETE SET NULL`), `requested_by_user_id`, `capture_id` (FK `ON DELETE SET NULL`), `action`, `payload` (`jsonb`), `summary`, `status` (`pending` \| `approved` \| `rejected` \| `expired` \| `failed`), **`expires_at`**, `decided_by`, `decided_at`, `decided_channel`, `result_ref` (`jsonb`), `failure_reason` (fixed code, never free text). `visibility` is always `private` (P-2).
 - **`conversation`** [5]: `user_id` (owner, FK `ON DELETE CASCADE`), `created_at`, `updated_at`, **`last_message_at`**, `archived_at`. Private to its owner by `user_id`.
 - **`message`** [5]: `conversation_id` (FK `ON DELETE CASCADE`), `role` (`user` \| `kev`), `channel`, `content` (`jsonb`, provider-neutral, validated by a versioned Zod schema `{ v: 1, text, citations?, toolSummaries?, proposalIds?, captureIds? }`), `tier`, `model` (null on user messages), `created_at`.
 - **`kev_usage`** [5]: `at`, `user_id`, `conversation_id` (null), `tier` (`fast` \| `deep`), `model`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd_micros` (bigint), `escalated` (boolean). **Append-only:** follow the MIGRATIONS.md rule (revoke `UPDATE`, `DELETE`, `TRUNCATE` from `home_app`, plus an append-only trigger), with the matching `app-role` integration test. Cost is stored as the provider's cost in **micro-US-dollars**. M2 introduces **no NZD conversion**; converting for the NZ$ spend cap is an M8 concern.
@@ -128,6 +155,8 @@ Field meanings follow FAMILY-DATA-MODEL §3 unless stated.
 
 - Generated by drizzle-kit; hand-written SQL (CHECKs Drizzle cannot express, triggers, revokes) appended after a `--> statement-breakpoint`, as in `0001` and `0002`.
 - **Additive only.** Every migration must be safe against the currently deployed app, because deploy and migrate are not atomic and production is live. No drops, renames or tightened constraints on existing columns.
+- **Migration-first (§2.1).** A migration whose schema new application code requires lands in a migration-only PR, and the code that needs it merges only after the production migration has succeeded. This adds to the additive rule; it never replaces it.
+- **Previous-schema compatibility (§2.1 rule 7).** CI builds a database from the base branch's migrations only and runs, as `home_app`, at least the sign-in gate, session, auth and audit integration suites and the boot-validation check with the PR's code. Tests that assert the PR's own new schema are excluded from this job. A PR whose application code needs schema that `main` does not yet have fails it.
 - `home_app` reaches new tables through migration `0002`'s default privileges; no new grants except the `kev_usage` revoke. Role-dependent SQL is guarded by `IF EXISTS (… pg_roles … 'home_app')`.
 - Each migration applies from empty and on top of the previous one in `tests/integration/migrations.test.ts`.
 
@@ -238,7 +267,7 @@ Pure functions with exhaustive unit tests. No database, no clock, no environment
 - `kev_usage`: as `home_app`, `UPDATE`, `DELETE` and `TRUNCATE` fail with permission errors.
 - P-1: a private record's audit rows are hidden from the other adult when written by the owner, by the proposal executor and by a test-only system-actor write; after household→private, earlier rows are hidden; after private→household, they appear; for a deleted subject, the snapshot decides; `auth.*` rows are unchanged.
 
-### 8.3 Privacy suite (PR 5)
+### 8.3 Privacy suite (Package 5b)
 
 One test file seeds the full fixture family, then for **every** service and list function, as each adult:
 
@@ -258,7 +287,7 @@ The existing unit, integration and e2e suites and the Vercel bundle check stay g
 - `docs/FAMILY-DATA-MODEL.md`: implementation notes for the choices in §4 (text user ids, text+CHECK enums, exclusive all-day end, scheduled window columns, `event_person` visibility, retention columns) and pointers to ADR 0005 for the deferrals.
 - ADR 0005: record any implementation clarification of D-M2-1…8 and P-1…P-6, as ADR 0003 did.
 - `docs/runbooks/LOCAL-DEV.md`: `pnpm db:seed:fixtures`. `docs/runbooks/MIGRATIONS.md`: the additive rule now applies to a live production database.
-- `CLAUDE.md` and `docs/ROADMAP.md`: M2 code complete, awaiting review, when PR 5 is ready. The M1 acceptance status stays as recorded in DEPLOY.md §E until the owner confirms it.
+- `CLAUDE.md` and `docs/ROADMAP.md`: M2 code complete, awaiting review, when Package 5b is ready. The M1 acceptance status stays as recorded in DEPLOY.md §E until the owner confirms it.
 
 ---
 
@@ -266,7 +295,8 @@ The existing unit, integration and e2e suites and the Vercel bundle check stay g
 
 M2 is done when **all** of these are true:
 
-- [ ] PRs 2–5 merged by the owner, each with CI green on its final commit.
+- [ ] Every M2 work package merged by the owner, each PR with CI green on its final commit; migration PRs before their application PRs, and each application PR merged only after its production migration succeeded (§2.1).
+- [ ] `recordAudit` returns only `id` unless a caller needs more, and CI runs the previous-schema compatibility check (§2.1 rules 6–7).
 - [ ] Every table in §4.2 exists with the §4.1 conventions; migrations are additive and applied to production through the protected workflow; production still boots and serves as before.
 - [ ] Every service follows §5: `UserActor` first, query-level visibility, archive and sensitivity filtering, transactional content-free audit, Kev write refusal, creator-only rules, reference rules.
 - [ ] Proposal approval works for every action in §5.7 with the guarantees listed there.
