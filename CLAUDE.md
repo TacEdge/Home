@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 concepts approved. M0 complete (ADR 0002). **M1 — Foundations: code complete** per `docs/m1/M1-BUILD-CONTRACT.md` (ADR 0003 holds the technical choices and implementation clarifications). **M1.1 — Security & Deployment Hardening: implemented** per `docs/m1/M1.1-FIX-CONTRACT.md` (ADR 0003 §20–28), awaiting Opus verification of exactly those items. Remaining: that verification, owner deployment setup (`docs/runbooks/DEPLOY.md`), production smoke checklist. **Do not start M2 until the verification and smoke checklist are done.** Runbooks: `docs/runbooks/`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 complete (ADR 0002). **M1 — Foundations** (`docs/m1/`, ADR 0003) and **M1.1 — Security & Deployment Hardening** are implemented, verified and **deployed to production, but M1 is not accepted**: the outstanding acceptance items are in `docs/runbooks/DEPLOY.md` §E. **M2 — Knowledge Core** proceeds in parallel (ADR 0005) per `docs/m2/M2-BUILD-CONTRACT.md`; its PRs stop when CI is green and the owner merges each one. **No M3 real-user or real-data work until M1 is accepted and the Neon recovery condition in §E is met.** Runbooks: `docs/runbooks/`.
 
 ## Read first
 

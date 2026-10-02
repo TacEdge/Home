@@ -61,8 +61,12 @@ An authenticated login. Adults only in V0.1.
 | `person_id` | the Person this user is |
 | `preferences` | JSON (e.g. Week Ahead day) |
 
+Implementation (ADR 0005): the link is `person.user_id` in HOME's own table, so Better Auth's `user` table is never modified. `preferences` is deferred until a feature uses it.
+
 ### CalendarConnection
 A connection to an external calendar provider. Provider-agnostic.
+
+Built in **M4** with the ICS adapter and credential encryption, together with CalendarSource (ADR 0005). Until then `event.calendar_source_id` has no foreign key.
 
 | Field | Notes |
 |---|---|
