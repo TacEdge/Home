@@ -45,4 +45,4 @@ Run it whenever a migration has merged and a preview needs the new schema.
 
 1. In the Neon console for `home-dev`, SQL Editor, as the owner role: `drop schema public cascade; create schema public; drop schema if exists drizzle cascade;`
 2. Dispatch **Migrate preview database** from `main`.
-3. Fixtures: none are needed in M1 (users are created on first sign-in from the preview allowlist). Later milestones add a fixture script here; it loads the synthetic fixture family only, never real data.
+3. Fixtures: none. Users are created on first sign-in from the preview allowlist. M2's fixture seed runs against local and CI databases only and refuses any other host (ADR 0005); seeding `home-dev` is a later decision, and would load the synthetic fixture family only, never real data.

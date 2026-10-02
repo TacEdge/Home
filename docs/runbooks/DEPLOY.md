@@ -98,3 +98,27 @@ Notes:
 - Rotate the runtime/app credential with `ALTER ROLE home_app PASSWORD '…'` (as the migration/admin role), then update Vercel's `DATABASE_URL`.
 - Remove an address from `HOME_ALLOWED_EMAILS` and redeploy: that person is signed out on their next request.
 - Restore: Neon point-in-time restore to a new branch **of the production project**, verify, then switch the runtime/app credential's host. Never restore production data into `home-dev`.
+
+## E. Production status and M1 acceptance
+
+**M1 is deployed to production but not accepted.** M2 proceeds in parallel (ADR 0005); **M3 real-user and real-data work waits until every item below is closed.**
+
+Confirmed by the owner, 2026-10-02:
+
+- Production runs on Node.js 22 and connects to the `home` Neon project as `home_app`.
+- `DATABASE_URL` carries exactly one `sslmode=verify-full`; the TLS boot guard passes; the runtime shows no environment or TLS errors.
+- Postmark DKIM and Return-Path are verified for the sending subdomain.
+- A sign-in request from HOME reaches Postmark.
+
+Outstanding M1 acceptance items. Record the date and result of each here when it passes.
+
+| # | Item | Proves |
+|---|---|---|
+| 1 | **Postmark live sending approved** for the production server. | Sign-in email can reach a real inbox. |
+| 2 | **Each parent completes a magic-link sign-in** on their phone, from `home@auth.<domain>`, and lands on Today. The link points directly at the HOME domain, not a Postmark tracking host. | The whole sign-in path works end to end. |
+| 3 | **The signed-in smoke checks in §C**: link reuse shows "That link didn't work."; a non-household address gets the same confirmation and no email; Settings › Activity shows both sign-ins, the link requests and the refused attempt (hash only); sign-out works and `/today` then redirects to sign-in; the session cookie expires 30 days after sign-in and is not extended by use. | Allowlist, audit, sign-out and fixed sessions behave as designed in production. |
+| 4 | **The remaining unsigned §C checks**, if not already recorded: HTTPS, `robots.txt`, the security headers, `POST /api/auth/sign-in/magic-link` returning 404, and the preview deployment prompting for Vercel authentication and using `home-dev`. | The production surface matches M1. |
+| 5 | **Rate-limit verification on the live deployment**, unless already recorded: from one network, repeated link requests hit the per-IP limit (5 per 15 minutes), and the limit is keyed on Vercel's `x-real-ip` (ADR 0003 §22). | Rate limiting sees real client addresses in production. |
+| 6 | **Neon recovery capability for `home`**: the project is on a plan with at least 7 days of point-in-time restore, confirmed in the Neon console (M1-D5), before any real family data. | Real data can be recovered. |
+
+Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.
