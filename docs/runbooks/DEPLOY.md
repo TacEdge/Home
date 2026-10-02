@@ -74,8 +74,9 @@ Notes:
 ## B. Each release
 
 1. Merge the PR into `main` (CI green).
-2. If it touched `src/db/migrations/**`, approve the **Migrate production database** run in Actions.
-3. Vercel deploys `main` automatically. A misconfigured deployment **fails at boot**: `src/instrumentation.ts` validates the environment and the database role before the server accepts requests, so the failure (naming the variable, never its value) is in the deployment's runtime logs and the deployment serves nothing.
+2. If it touched `src/db/migrations/**`, approve the **Migrate production database** run in Actions and confirm it succeeded.
+3. Schema-dependent changes are **migration-first** (`MIGRATIONS.md`): the application PR that uses new schema merges only after step 2 has succeeded for its migration PR.
+4. Vercel deploys `main` automatically. A misconfigured deployment **fails at boot**: `src/instrumentation.ts` validates the environment and the database role before the server accepts requests, so the failure (naming the variable, never its value) is in the deployment's runtime logs and the deployment serves nothing.
 
 ## C. Production smoke checklist (after setup, before any real data)
 

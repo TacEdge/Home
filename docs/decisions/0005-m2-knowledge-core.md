@@ -27,8 +27,14 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 14. **P-6:** context created in M2 starts `active`; the pending state lives in the Proposal; `proposed` is reserved.
 15. **`kev_usage` stores the provider's cost in micro-US-dollars.** M2 introduces no NZD conversion; conversion for the NZ$ spend cap belongs to M8.
 
+### Amendment, 2026-10-02: migration-first deployment
+
+16. **Schema lands before the code that needs it** (owner decision after the PR #17 review). Vercel deploys `main` on merge while the production migration waits for owner approval, so new code can meet the old schema. For every schema-dependent change: a migration-only PR, containing no code that requires the new schema, merges first; the production migration stays owner-approved through the protected workflow; only after it succeeds may the dependent application code merge. `recordAudit` returns only the columns its caller needs (`id` unless more is explicitly required), so authentication and auditing never depend on future additive `audit_log` columns. CI runs a previous-schema compatibility check against a database migrated only to the base branch's migrations. M2 work packages therefore use separate migration and application PRs where needed. The additive-only, expand-first rules are unchanged. Details: `docs/m2/M2-BUILD-CONTRACT.md` §2.1, `docs/runbooks/MIGRATIONS.md`.
+17. **PR #17 is not part of M2's history on `main`.** It was merged only into the obsolete `docs/m2-build-contract` branch; none of it is on `main` or approved for production, and migration `0003` has not run. Package 2 is rebuilt from `main` under decision 16 (contract §2.3).
+
 ## Consequences
 
 - The roadmap's M2 and M4 rows are updated to show the moved tables and the regular-week deferral.
-- Production receives four additive migrations during M2, each approved by the owner in the migration workflow. No screen reads the new tables until M3.
+- Production receives four additive migrations during M2, each in its own migration-only PR and approved by the owner in the migration workflow before any code that depends on it merges. No screen reads the new tables until M3.
+- One extra PR before the first migration (contract §2.2, Package S) makes `recordAudit` schema-independent and adds the previous-schema CI check.
 - The M1 acceptance items remain open and are tracked in DEPLOY.md §E, independently of M2.
