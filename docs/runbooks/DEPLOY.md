@@ -19,13 +19,13 @@ Two **separate projects**, not two branches of one project: **`home`** (producti
 
 For **each** project:
 
-1. Note the owner role's **direct** connection string (`sslmode=require`). That is the **migration/admin credential**.
+1. Note the owner role's **direct** connection string. Change its trailing `sslmode=require` to `sslmode=verify-full` (same TLS verification `pg` 8 already performs, stated explicitly so a future `pg` 9 cannot weaken it). That is the **migration/admin credential**.
 2. From a trusted machine, connected with the migration/admin credential, create the runtime/app role with a generated password that is never committed:
    ```sql
    CREATE ROLE home_app LOGIN PASSWORD '<openssl rand -base64 36>' NOINHERIT NOCREATEDB NOCREATEROLE;
    ```
 3. Apply the migrations with the migration/admin credential, through GitHub Actions so no machine needs the credential: for `home`, the **Migrate production database** workflow (`production` environment, required reviewer); for `home-dev`, the **Migrate preview database** workflow (`preview` environment). Both are dispatched from *Actions → <workflow> → Run workflow* on `main`, and each reads its own environment's `DATABASE_URL_MIGRATE`. Migration `0002_app_role` grants `home_app` exactly what the app needs.
-4. Build the **runtime/app credential**: the project's **pooled** connection string with the user and password replaced by `home_app` and its password. Keep it for the Vercel step below.
+4. Build the **runtime/app credential**: the project's **pooled** connection string with the user and password replaced by `home_app` and its password, ending in **exactly one** `sslmode=verify-full` (Neon's console gives `sslmode=require`; change it). Keep it for the Vercel step below.
 5. Verify from the trusted machine, connected as `home_app`: `update audit_log set summary = 'x'` must fail with *permission denied*; `alter table audit_log disable trigger all` must fail with *must be owner*.
 
 Order matters: create `home_app` → migrate (grants apply) → configure Vercel with the runtime/app credential → deploy.
@@ -55,6 +55,7 @@ Order matters: create `home_app` → migrate (grants apply) → configure Vercel
 | `HOME_TIMEZONE` | `Pacific/Auckland` | same |
 
 Notes:
+- On Vercel, HOME refuses to boot unless `DATABASE_URL` carries exactly one `sslmode=verify-full` (`src/lib/env.ts`). The runtime log's first line, `[home] database tls: sslmode=… (n occurrence(s))`, reports what `pg` parsed from the URL and nothing else from it, so a wrong mode is diagnosed without exposing the credential. `pg` 8 verifies the certificate for `require` too; `verify-full` states it so `pg` 9, which will not, cannot weaken the connection silently.
 - `HOME_PRODUCTION_DB_HOST` is always derived from Production's `DATABASE_URL`, never typed from memory. For this check HOME treats Neon's pooled (`ep-x-pooler.<region>.aws.neon.tech`) and direct (`ep-x.<region>.aws.neon.tech`) names of one endpoint as the same database, so it does not matter which form is in which variable.
 - The migration/admin credential is **never** entered in Vercel. `DATABASE_URL_MIGRATE` exists only as a GitHub secret.
 - No `NEXT_PUBLIC_*` variables exist. `BETTER_AUTH_URL` must be `https` in production (`env.ts` refuses otherwise). `VERCEL_ENV` is set by Vercel itself.

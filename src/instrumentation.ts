@@ -4,7 +4,11 @@
 // runtime applies: HOME has no edge code.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  const { parseEnv } = await import('@/lib/env');
+  const { parseEnv, describeDbSsl } = await import('@/lib/env');
+  // One diagnostic line: the TLS mode `pg` will parse from DATABASE_URL and
+  // how many times it appears. Nothing else from the URL is ever logged.
+  const tls = describeDbSsl(process.env.DATABASE_URL ?? '');
+  console.log(`[home] database tls: sslmode=${tls.sslmode} (${tls.occurrences} occurrence(s))`);
   // Throws EnvError naming the bad variables (never their values).
   const env = parseEnv(process.env);
   const [{ getDb }, { assertRuntimeRole }] = await Promise.all([

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EnvError } from '@/lib/env';
 import { register } from '@/instrumentation';
 
@@ -16,6 +16,26 @@ describe('instrumentation.register', () => {
     delete process.env.BETTER_AUTH_SECRET;
     await expect(register()).rejects.toThrow(EnvError);
     await expect(register()).rejects.toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it('logs the parsed database TLS mode and nothing else from DATABASE_URL', async () => {
+    const user = 'secretuser';
+    const password = 'hunter2-secret-password';
+    const host = 'ep-secret-host.ap-southeast-2.aws.neon.tech';
+    process.env.NEXT_RUNTIME = 'nodejs';
+    process.env.DATABASE_URL = `postgres://${user}:${password}@${host}/secretdb?sslmode=require`;
+    // A missing secret makes register() stop before it opens a connection.
+    delete process.env.BETTER_AUTH_SECRET;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await expect(register()).rejects.toThrow(EnvError);
+      const lines = log.mock.calls.map((c) => c.map(String).join(' '));
+      expect(lines).toContain('[home] database tls: sslmode=require (1 occurrence(s))');
+      for (const line of lines)
+        for (const secret of [user, password, host, 'secretdb']) expect(line).not.toContain(secret);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('does nothing outside the Node runtime', async () => {

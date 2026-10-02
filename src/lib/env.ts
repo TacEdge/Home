@@ -102,7 +102,51 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         'DATABASE_URL (production must use the HOME_PRODUCTION_DB_HOST database host)',
       );
   }
+  // TLS on Vercel: exactly one `sslmode=verify-full`. `pg` 8 treats `require`
+  // as `verify-full`, but `pg` 9 will give it libpq semantics (no certificate
+  // check), so the mode that verifies the server must be stated explicitly.
+  // The report names the mode only, never any other part of the URL.
+  if (env.VERCEL_ENV) {
+    const tls = describeDbSsl(env.DATABASE_URL);
+    if (tls.occurrences !== 1 || tls.sslmode !== 'verify-full')
+      throw new EnvError(
+        ['DATABASE_URL'],
+        `DATABASE_URL (a Vercel deployment must carry exactly one sslmode=verify-full; found sslmode=${tls.sslmode}, ${tls.occurrences} occurrence(s))`,
+      );
+  }
   return env;
+}
+
+const sslModes = ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full', 'no-verify'];
+
+export interface DbSslReport {
+  /** A known libpq/node-postgres mode, or `absent`, `unrecognised`, `unparseable`. */
+  sslmode: string;
+  /** How many `sslmode` parameters the query string carries. */
+  occurrences: number;
+}
+
+/**
+ * What `pg` will take as `sslmode` from a connection URL, and nothing else.
+ * Reads only the query string's `sslmode` entries: user, password, host, port
+ * and database are never touched. The value is reported only when it is one
+ * of the known modes, otherwise as `unrecognised`, so the result is safe to
+ * log and to put in an error. `pg-connection-string` applies the last
+ * occurrence, so that is the one reported.
+ */
+export function describeDbSsl(url: string): DbSslReport {
+  let values: string[];
+  try {
+    values = new URL(url).searchParams.getAll('sslmode');
+  } catch {
+    return { sslmode: 'unparseable', occurrences: 0 };
+  }
+  const last = values.at(-1);
+  if (last === undefined) return { sslmode: 'absent', occurrences: 0 };
+  return {
+    sslmode: sslModes.includes(last) ? last : 'unrecognised',
+    occurrences: values.length,
+  };
 }
 
 /**
