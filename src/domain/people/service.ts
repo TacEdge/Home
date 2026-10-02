@@ -91,7 +91,7 @@ export async function listPeople(
     .select()
     .from(person)
     .where(readable(actor, opts))
-    .orderBy(asc(person.name), asc(person.id));
+    .orderBy(asc(sql`lower(${person.name})`), asc(person.id)); // case-insensitive, then stable
 }
 
 export async function updatePerson(

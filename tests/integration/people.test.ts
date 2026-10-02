@@ -135,9 +135,11 @@ describe('reading people', () => {
     expect(ids).not.toContain(alexPrivate);
   });
 
-  it('lists in name order', async () => {
-    const names = (await listPeople(h.sam, {}, deps)).map((p) => p.name);
-    expect(names).toEqual([...names].sort());
+  it('lists in case-insensitive name order, whatever the database collation', async () => {
+    const names = (await listPeople(h.sam, {}, deps)).map((p) => p.name.toLowerCase());
+    // Letters only: collations differ on punctuation and case, not on a-z.
+    const letters = names.map((n) => n.replace(/[^a-z]/g, ''));
+    expect(letters).toEqual([...letters].sort());
   });
 });
 
