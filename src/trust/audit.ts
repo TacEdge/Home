@@ -1,9 +1,11 @@
 import 'server-only';
-import { desc, sql } from 'drizzle-orm';
+import { and, desc, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
-import type { Db } from '@/db/create';
+import type { DbOrTx } from '@/db/create';
 import { auditLog } from '@/db/schema';
 import type { Actor } from './actor';
+import { auditVisibleTo } from './audit-subjects';
+import type { Visibility } from './visibility';
 
 export type AuditEvent = {
   event: string; // dotted, e.g. auth.sign_in
@@ -11,9 +13,15 @@ export type AuditEvent = {
   subjectId?: string;
   summary?: string; // human-readable, never contains an email or token
   meta?: Record<string, unknown>;
+  /**
+   * P-1: the affected record's visibility after the write, and its owner when
+   * private. Set by the domain write helper only; auth events leave it unset,
+   * so their SQL is exactly what it was before migration 0003.
+   */
+  snapshot?: { visibility: Visibility; visibleToUserId: string | null };
 };
 
-type Deps = { db?: Db };
+type Deps = { db?: DbOrTx };
 
 // Every query on audit_log names its columns (M2 contract §2.1, rules 2 and
 // 6). Under migration-first, a migration PR adds a column to the Drizzle
@@ -57,10 +65,7 @@ export async function recordAudit(
 ): Promise<{ id: string }> {
   const db = deps.db ?? getDb();
   const meta = e.meta === undefined || e.meta === null ? null : JSON.stringify(e.meta);
-  const result = await db.execute<{ id: string }>(sql`
-    insert into audit_log
-      (actor_user_id, actor_via, actor_channel, event, subject_type, subject_id, summary, meta)
-    values (
+  const values = sql`
       ${actor.kind === 'user' ? actor.userId : null},
       ${actor.via},
       ${actor.kind === 'user' ? actor.channel : null},
@@ -68,9 +73,20 @@ export async function recordAudit(
       ${e.subjectType ?? null},
       ${e.subjectId ?? null},
       ${e.summary ?? null},
-      ${meta}::jsonb
-    )
-    returning id`);
+      ${meta}::jsonb`;
+  // The P-1 columns (migration 0003) are named only for domain writes.
+  const result = await db.execute<{ id: string }>(
+    e.snapshot
+      ? sql`insert into audit_log
+          (actor_user_id, actor_via, actor_channel, event, subject_type, subject_id, summary, meta,
+           visibility, visible_to_user_id)
+        values (${values}, ${e.snapshot.visibility}, ${e.snapshot.visibleToUserId})
+        returning id`
+      : sql`insert into audit_log
+          (actor_user_id, actor_via, actor_channel, event, subject_type, subject_id, summary, meta)
+        values (${values})
+        returning id`,
+  );
   const row = result.rows[0];
   if (!row) throw new Error('audit insert returned no row');
   return { id: row.id };
@@ -92,11 +108,12 @@ export type AuditPage = { rows: AuditRow[]; next: AuditCursor | null };
  * sub-millisecond timestamps are never skipped or repeated (M1.1 contract
  * §2.9). The comparison happens entirely in Postgres at full precision.
  * `next` is null once the last page has been read; a cursor naming no row
- * returns an empty page. Any household member may read the household's
- * activity (it is shared by design, SYSTEM-ARCHITECTURE §5.8).
+ * returns an empty page. The household's activity is shared by design
+ * (SYSTEM-ARCHITECTURE §5.8), except that a row about a record the actor
+ * cannot currently see is never listed (P-1, `auditVisibleTo`).
  */
 export async function listAudit(
-  _actor: Actor,
+  actor: Actor,
   opts: { limit?: number; before?: AuditCursor } = {},
   deps: Deps = {},
 ): Promise<AuditPage> {
@@ -107,9 +124,12 @@ export async function listAudit(
     .select(auditRowColumns)
     .from(auditLog)
     .where(
-      cursor
-        ? sql`(${auditLog.at}, ${auditLog.id}) < (select c.at, c.id from audit_log c where c.id = ${cursor.id}::uuid)`
-        : undefined,
+      and(
+        auditVisibleTo(actor),
+        cursor
+          ? sql`(${auditLog.at}, ${auditLog.id}) < (select c.at, c.id from audit_log c where c.id = ${cursor.id}::uuid)`
+          : undefined,
+      ),
     )
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(limit + 1);

@@ -32,6 +32,13 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 16. **Schema lands before the code that needs it** (owner decision after the PR #17 review). Vercel deploys `main` on merge while the production migration waits for owner approval, so new code can meet the old schema. For every schema-dependent change: a migration-only PR, containing no code that requires the new schema, merges first; the production migration stays owner-approved through the protected workflow; only after it succeeds may the dependent application code merge. `recordAudit` returns only the columns its caller needs (`id` unless more is explicitly required), so authentication and auditing never depend on future additive `audit_log` columns. CI runs a previous-schema compatibility check against a database migrated only to the base branch's migrations. M2 work packages therefore use separate migration and application PRs where needed. The additive-only, expand-first rules are unchanged. Details: `docs/m2/M2-BUILD-CONTRACT.md` §2.1, `docs/runbooks/MIGRATIONS.md`.
 17. **PR #17 is not part of M2's history on `main`.** It was merged only into the obsolete `docs/m2-build-contract` branch; none of it is on `main` or approved for production, and migration `0003` has not run. Package 2 is rebuilt from `main` under decision 16 (contract §2.3).
 
+### Implementation clarifications, Package 2b (for review with its PR)
+
+18. **Writes lock what they check.** Every People write locks the row with the visibility predicate (`SELECT … FOR UPDATE`) and repeats the predicate in the `UPDATE` itself, so a concurrent change to private can never let the other adult write into the record. Timestamps come from the database clock, one value per write.
+19. **A linked person stays what `linkSelf` required**: a household-visible parent. While `user_id` is set, changing its visibility to private, its role away from `parent`, or archiving it is refused (`linked_person`). There is no unlink in M2; a wrong link needs an owner-approved decision (and, today, a database fix).
+20. **Restore applies only to an archived record** (`not_archived` otherwise). A malformed id reads as `NotFoundError`, like a missing or invisible one.
+21. **Auth audit rows keep their pre-0003 SQL.** `recordAudit` names the P-1 columns only for domain writes that carry a snapshot; sign-in and other auth events are written exactly as Package S left them.
+
 ## Consequences
 
 - The roadmap's M2 and M4 rows are updated to show the moved tables and the regular-week deferral.

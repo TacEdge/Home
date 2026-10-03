@@ -125,12 +125,14 @@ describe('audit_log', () => {
     ).rows.map((r) => r.event as string);
     expect(expected).toHaveLength(micros.length);
 
-    // Every page size, including one that ends a page on every row.
+    // Every page size, including one that ends a page on every row. Paged as
+    // the system actor, which sees every row: this is about pagination, and
+    // a user's Activity rightly omits rows about others' private records (P-1).
     for (const limit of [1, 2, 3, 4, 5, 7]) {
       const seen: { id: string; event: string }[] = [];
       let cursor: AuditCursor | undefined;
       for (let guard = 0; guard < 10_000; guard++) {
-        const page = await listAudit(sam, { limit, before: cursor }, { db });
+        const page = await listAudit(systemActor, { limit, before: cursor }, { db });
         seen.push(...page.rows.map((r) => ({ id: r.id, event: r.event })));
         if (!page.next) break;
         cursor = page.next;
