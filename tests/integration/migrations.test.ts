@@ -5,9 +5,13 @@ import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '@/db/create';
+import { createEvent, listEvents, updateEvent } from '@/domain/events/service';
+import { createNote, listNotes } from '@/domain/notes/service';
 import { createPerson, listPeople } from '@/domain/people/service';
+import { createProject, listProjects } from '@/domain/projects/service';
+import { createTask, listTasks, updateTask } from '@/domain/tasks/service';
 import { systemActor, type UserActor } from '@/trust/actor';
-import { recordAudit } from '@/trust/audit';
+import { listAudit, recordAudit } from '@/trust/audit';
 import { assertTestDatabase } from '../db-guard';
 import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL } from '../env';
 import { adminDb, testDb } from './db';
@@ -57,6 +61,23 @@ async function expectCode(p: PromiseLike<unknown>, code: string) {
   );
   expect(error, `expected SQLSTATE ${code}`).not.toBeNull();
   expect(error?.cause?.code ?? error?.code).toBe(code);
+}
+
+/**
+ * Drops a scratch database once its connections are gone. `pool.end()`
+ * resolves before its clients' sockets close, so a forced drop straight after
+ * would kill a backend that is still disconnecting and surface as an
+ * unhandled 57P01 on that client. Force is kept only as a last resort.
+ */
+async function dropDatabase(name: string) {
+  for (let i = 0; i < 50; i++) {
+    const r = await admin.db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = ${name}`,
+    );
+    if (r.rows[0]?.n === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
 }
 
 /** Runs `fn` as home_app in a transaction that is always rolled back. */
@@ -404,7 +425,7 @@ describe('0003 upgrades the production schema (0000–0002) in place', () => {
       await upApp.close();
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
-      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+      await dropDatabase(name);
     }
   });
 });
@@ -456,6 +477,7 @@ describe('0004: tables and columns', () => {
       ['calendar_source_id', 'uuid', 'YES', null],
       ['external_uid', 'text', 'YES', null],
       ['external_etag', 'text', 'YES', null],
+      ['origin_capture_id', 'uuid', 'YES', null], // added by 0005
     ]);
   });
 
@@ -479,6 +501,7 @@ describe('0004: tables and columns', () => {
       ['domain', 'text', 'NO', "'home'::text"],
       ['status', 'text', 'NO', "'idea'::text"],
       ['target_date', 'date', 'YES', null],
+      ['origin_capture_id', 'uuid', 'YES', null], // added by 0005
     ]);
   });
 
@@ -498,6 +521,7 @@ describe('0004: tables and columns', () => {
       ['scheduled_starts_at', TS, 'YES', null],
       ['scheduled_ends_at', TS, 'YES', null],
       ['completed_at', TS, 'YES', null],
+      ['origin_capture_id', 'uuid', 'YES', null], // added by 0005
     ]);
   });
 
@@ -507,6 +531,7 @@ describe('0004: tables and columns', () => {
       ['body', 'text', 'NO', null],
       ['subject_type', 'text', 'YES', null],
       ['subject_id', 'uuid', 'YES', null],
+      ['origin_capture_id', 'uuid', 'YES', null], // added by 0005
     ]);
   });
 
@@ -579,14 +604,18 @@ describe('0004: constraints and indexes', () => {
       r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
     ).toEqual([
       'event.created_by -> user RESTRICT',
+      'event.origin_capture_id -> capture SET NULL', // 0005
       'event_person.created_by -> user RESTRICT',
       'event_person.event_id -> event CASCADE',
       'event_person.person_id -> person CASCADE',
       'note.created_by -> user RESTRICT',
+      'note.origin_capture_id -> capture SET NULL', // 0005
       'project.created_by -> user RESTRICT',
+      'project.origin_capture_id -> capture SET NULL', // 0005
       'task.about_person_id -> person SET NULL',
       'task.assignee_person_id -> person SET NULL',
       'task.created_by -> user RESTRICT',
+      'task.origin_capture_id -> capture SET NULL', // 0005
       'task.project_id -> project SET NULL',
     ]);
   });
@@ -598,6 +627,7 @@ describe('0004: constraints and indexes', () => {
     expect(r.rows.map((x) => x.indexname)).toEqual([
       'event_archived_at_idx',
       'event_created_by_idx',
+      'event_origin_capture_id_idx', // 0005
       'event_pkey',
       'event_start_date_idx',
       'event_starts_at_idx',
@@ -608,17 +638,20 @@ describe('0004: constraints and indexes', () => {
       'event_person_pkey',
       'note_archived_at_idx',
       'note_created_by_idx',
+      'note_origin_capture_id_idx', // 0005
       'note_pkey',
       'note_subject_idx',
       'note_visibility_created_by_idx',
       'project_archived_at_idx',
       'project_created_by_idx',
+      'project_origin_capture_id_idx', // 0005
       'project_pkey',
       'project_visibility_created_by_idx',
       'task_about_person_id_idx',
       'task_archived_at_idx',
       'task_assignee_person_id_idx',
       'task_created_by_idx',
+      'task_origin_capture_id_idx', // 0005
       'task_pkey',
       'task_project_id_idx',
       'task_visibility_created_by_idx',
@@ -977,7 +1010,767 @@ describe('0004 upgrades the production schema (0000–0003) in place', () => {
       await upApp.close();
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
-      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+      await dropDatabase(name);
     }
   });
 });
+
+// 0005: capture, context, proposal; origin_capture_id on event, project,
+// task, note (Package 4a, migration only)
+// ---------------------------------------------------------------------------
+
+const TABLES_0005 = ['capture', 'context', 'proposal'];
+const ORIGIN_TABLES = ['event', 'project', 'task', 'note'];
+const PRIVATE_COMMON: Col[] = COMMON.map((c) =>
+  c[0] === 'visibility' ? ['visibility', 'text', 'NO', "'private'::text"] : c,
+);
+
+describe('0005: tables and columns', () => {
+  it('capture: private common fields; verbatim text; organisation recorded beside it', async () => {
+    expect(await columnsOf('capture')).toEqual([
+      ...PRIVATE_COMMON,
+      ['text', 'text', 'NO', null],
+      ['channel', 'text', 'NO', null],
+      ['message_id', 'uuid', 'YES', null],
+      ['status', 'text', 'NO', "'new'::text"],
+      ['organised_into', 'jsonb', 'NO', "'[]'::jsonb"],
+      ['organised_at', TS, 'YES', null],
+      ['dismissed_at', TS, 'YES', null],
+    ]);
+  });
+
+  it('context: subject, content, source, confirmation, validity, sensitivity and status', async () => {
+    expect(await columnsOf('context')).toEqual([
+      ...COMMON,
+      ['origin_capture_id', 'uuid', 'YES', null],
+      ['subject_type', 'text', 'NO', null],
+      ['subject_id', 'uuid', 'YES', null],
+      ['content', 'text', 'NO', null],
+      ['category', 'text', 'NO', null],
+      ['source_type', 'text', 'NO', null],
+      ['source_user_id', 'text', 'NO', null],
+      ['source_ref', 'uuid', 'YES', null],
+      ['last_confirmed_at', TS, 'NO', 'now()'],
+      ['valid_until', 'date', 'YES', null],
+      ['sensitivity', 'text', 'NO', "'normal'::text"],
+      ['status', 'text', 'NO', "'active'::text"],
+      ['retired_at', TS, 'YES', null],
+    ]);
+  });
+
+  it('proposal: private to its requester, with expiry, decision and execution result', async () => {
+    expect(await columnsOf('proposal')).toEqual([
+      ...PRIVATE_COMMON,
+      ['conversation_id', 'uuid', 'YES', null],
+      ['requested_by_user_id', 'text', 'NO', null],
+      ['capture_id', 'uuid', 'YES', null],
+      ['action', 'text', 'NO', null],
+      ['payload', 'jsonb', 'NO', null],
+      ['summary', 'text', 'NO', null],
+      ['status', 'text', 'NO', "'pending'::text"],
+      ['expires_at', TS, 'NO', "(now() + '7 days'::interval)"],
+      ['decided_by', 'text', 'YES', null],
+      ['decided_at', TS, 'YES', null],
+      ['decided_channel', 'text', 'YES', null],
+      ['result_ref', 'jsonb', 'YES', null],
+      ['failure_reason', 'text', 'YES', null],
+    ]);
+  });
+
+  it('adds a nullable origin_capture_id, with no default, as the last column of event, project, task and note', async () => {
+    for (const t of ORIGIN_TABLES)
+      expect((await columnsOf(t)).at(-1), t).toEqual(['origin_capture_id', 'uuid', 'YES', null]);
+  });
+
+  it('no conversation or message tables yet, so no foreign key on message_id or conversation_id (Package 5)', async () => {
+    const r = await db.execute(sql`
+      select table_name from information_schema.tables
+      where table_schema = 'public' and table_name in ('conversation', 'message')`);
+    expect(r.rows).toEqual([]);
+  });
+});
+
+describe('0005: constraints, foreign keys, indexes and trigger', () => {
+  const checksOf = async (table: string) =>
+    (
+      await db.execute(
+        sql`select conname from pg_constraint where conrelid = ${table}::regclass and contype = 'c' order by 1`,
+      )
+    ).rows.map((r) => r.conname);
+
+  it('has the CHECK constraints for every enum, shape and state rule', async () => {
+    expect(await checksOf('capture')).toEqual([
+      'capture_channel_check',
+      'capture_created_by_check',
+      'capture_created_via_check',
+      'capture_dismissed_check',
+      'capture_organised_check',
+      'capture_organised_into_check',
+      'capture_status_check',
+      'capture_text_check',
+      'capture_visibility_check',
+    ]);
+    expect(await checksOf('context')).toEqual([
+      'context_category_check',
+      'context_content_check',
+      'context_created_via_check',
+      'context_retired_check',
+      'context_sensitivity_check',
+      'context_source_type_check',
+      'context_status_check',
+      'context_subject_check',
+      'context_subject_type_check',
+      'context_visibility_check',
+    ]);
+    expect(await checksOf('proposal')).toEqual([
+      'proposal_action_check',
+      'proposal_created_via_check',
+      'proposal_decided_channel_check',
+      'proposal_decider_check',
+      'proposal_expiry_check',
+      'proposal_failure_reason_check',
+      'proposal_payload_check',
+      'proposal_requester_check',
+      'proposal_status_check',
+      'proposal_status_shape_check',
+      'proposal_summary_check',
+      'proposal_visibility_check',
+    ]);
+    // No new CHECK on an existing table.
+    for (const t of ORIGIN_TABLES)
+      expect(
+        (await checksOf(t)).filter((c) => String(c).includes('origin')),
+        t,
+      ).toEqual([]);
+  });
+
+  it('has exactly these foreign keys and delete rules (§4.4: provenance SET NULL, users RESTRICT)', async () => {
+    const r = await admin.db.execute(sql`
+      select tc.table_name, kcu.column_name, ccu.table_name as target, rc.delete_rule
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu using (constraint_schema, constraint_name)
+      join information_schema.referential_constraints rc using (constraint_schema, constraint_name)
+      join information_schema.constraint_column_usage ccu using (constraint_schema, constraint_name)
+      where tc.constraint_type = 'FOREIGN KEY'
+        and (tc.table_name in ('capture', 'context', 'proposal') or kcu.column_name = 'origin_capture_id')
+      order by 1, 2`);
+    expect(
+      r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
+    ).toEqual([
+      'capture.created_by -> user RESTRICT',
+      'context.created_by -> user RESTRICT',
+      'context.origin_capture_id -> capture SET NULL',
+      'context.source_user_id -> user RESTRICT',
+      'event.origin_capture_id -> capture SET NULL',
+      'note.origin_capture_id -> capture SET NULL',
+      'project.origin_capture_id -> capture SET NULL',
+      'proposal.capture_id -> capture SET NULL',
+      'proposal.created_by -> user RESTRICT',
+      'proposal.decided_by -> user RESTRICT',
+      'proposal.requested_by_user_id -> user RESTRICT',
+      'task.origin_capture_id -> capture SET NULL',
+    ]);
+  });
+
+  it('indexes every foreign key and future one, (visibility, created_by), archived_at and the purge clock', async () => {
+    const r = await db.execute(sql`
+      select indexname from pg_indexes
+      where tablename in ('capture', 'context', 'proposal') or indexname like '%origin_capture_id%'
+      order by tablename, indexname`);
+    expect(r.rows.map((x) => x.indexname)).toEqual([
+      'capture_archived_at_idx',
+      'capture_created_by_status_idx',
+      'capture_dismissed_at_idx',
+      'capture_message_id_idx',
+      'capture_pkey',
+      'capture_visibility_created_by_idx',
+      'context_archived_at_idx',
+      'context_created_by_idx',
+      'context_origin_capture_id_idx',
+      'context_pkey',
+      'context_source_user_id_idx',
+      'context_subject_idx',
+      'context_visibility_created_by_idx',
+      'event_origin_capture_id_idx',
+      'note_origin_capture_id_idx',
+      'project_origin_capture_id_idx',
+      'proposal_archived_at_idx',
+      'proposal_capture_id_idx',
+      'proposal_conversation_id_idx',
+      'proposal_created_by_idx',
+      'proposal_decided_by_idx',
+      'proposal_pkey',
+      'proposal_requested_by_status_idx',
+      'proposal_visibility_created_by_idx',
+      'task_origin_capture_id_idx',
+    ]);
+  });
+
+  it('has one row trigger on capture, owned by the migration role, and no unique index on an existing table', async () => {
+    const t = await admin.db.execute(sql`
+      select tgname, tgenabled, pg_get_userbyid(p.proowner) as owner
+      from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+      where tgrelid = 'capture'::regclass and not tgisinternal`);
+    expect(t.rows).toEqual([
+      {
+        tgname: 'capture_source_immutable',
+        tgenabled: 'O',
+        owner: expect.not.stringMatching(/^home_app$/),
+      },
+    ]);
+    const u = await db.execute(sql`
+      select indexname from pg_indexes
+      where tablename in ('event', 'project', 'task', 'note') and indexdef ilike '%unique%'
+        and indexname <> tablename || '_pkey'`);
+    expect(u.rows).toEqual([]);
+  });
+});
+
+describe('0005: constraint behaviour for the runtime role (each case rolled back)', () => {
+  const U = 'u-0005';
+  const V = 'u-0005-other';
+  type Ids = { capture: string; project: string; person: string };
+  /** In a rolled-back transaction, as home_app: two users, a project, a person and a capture. */
+  const withBase = (fn: (tx: Db, ids: Ids) => Promise<void>, as: Db = db) =>
+    rolledBackAs(as, async (tx) => {
+      await tx.execute(sql`insert into "user" (id, name, email) values
+        (${U}, 'U', 'u-0005@example.test'), (${V}, 'V', 'v-0005@example.test')`);
+      const pr = await tx.execute(
+        sql`insert into project (created_by, created_via, title) values (${U}, 'ui', 'Garage') returning id`,
+      );
+      const pe = await tx.execute(
+        sql`insert into person (created_by, created_via, name, role) values (${U}, 'ui', 'Milo', 'child') returning id`,
+      );
+      const c = await tx.execute(
+        sql`insert into capture (created_by, created_via, text, channel) values (${U}, 'ui', 'x', 'web') returning id`,
+      );
+      await fn(tx, {
+        capture: c.rows[0]?.id as string,
+        project: pr.rows[0]?.id as string,
+        person: pe.rows[0]?.id as string,
+      });
+    });
+  /** Expects the statement to fail with this SQLSTATE, inside a savepoint so the case can go on. */
+  const fails = (tx: Db, q: ReturnType<typeof sql>, code: string) =>
+    expectCode(
+      tx.transaction(async (sp) => {
+        await sp.execute(q);
+      }),
+      code,
+    );
+  const CHECK = '23514';
+  const RAISED = 'P0001';
+
+  describe('capture', () => {
+    it('stores the text exactly as given: spacing, line breaks, case, punctuation and emoji', () =>
+      withBase(async (tx) => {
+        const words = "  remember the WOF —\n\tand the car's tyres 🚗  \n";
+        const r = await tx.execute(sql`
+          insert into capture (created_by, created_via, text, channel) values (${U}, 'kev', ${words}, 'web')
+          returning text, status, visibility, organised_into, organised_at, dismissed_at`);
+        expect(r.rows[0]).toEqual({
+          text: words,
+          status: 'new',
+          visibility: 'private',
+          organised_into: [],
+          organised_at: null,
+          dismissed_at: null,
+        });
+      }));
+
+    it('organising records the result beside the words and never changes them', () =>
+      withBase(async (tx, ids) => {
+        const ref = [{ type: 'task', id: ids.project }];
+        await tx.execute(
+          sql`update capture set status = 'proposed', updated_at = now() where id = ${ids.capture}`,
+        );
+        await tx.execute(sql`update capture set status = 'organised', organised_at = now(),
+          organised_into = ${JSON.stringify(ref)}::jsonb where id = ${ids.capture}`);
+        const r = await tx.execute(
+          sql`select text, status, organised_into from capture where id = ${ids.capture}`,
+        );
+        expect(r.rows[0]).toEqual({ text: 'x', status: 'organised', organised_into: ref });
+      }));
+
+    it.each([
+      ['its text', sql`text = 'rewritten'`],
+      ['its text, even by a trailing space', sql`text = text || ' '`],
+      ['who said it', sql`created_by = ${V}`],
+      ['when it was said', sql`created_at = now() - interval '1 day'`],
+      ['how it was created', sql`created_via = 'kev'`],
+      ['its channel', sql`channel = 'sms'`],
+    ])(
+      'refuses any change to %s, for the runtime role (the trigger runs before any CHECK)',
+      (_label, set) =>
+        withBase(async (tx, ids) => {
+          await fails(tx, sql`update capture set ${set} where id = ${ids.capture}`, RAISED);
+        }),
+    );
+
+    it('keeps message_id writable, so Package 5 can attach or backfill the message', () =>
+      withBase(async (tx, ids) => {
+        const m = '00000000-0000-4000-8000-000000000001';
+        await tx.execute(sql`update capture set message_id = ${m} where id = ${ids.capture}`);
+        expect(
+          (await tx.execute(sql`select message_id from capture where id = ${ids.capture}`)).rows,
+        ).toEqual([{ message_id: m }]);
+        await tx.execute(sql`update capture set message_id = null where id = ${ids.capture}`);
+        const r = await tx.execute(
+          sql`select text, message_id from capture where id = ${ids.capture}`,
+        );
+        expect(r.rows[0]).toEqual({ text: 'x', message_id: null });
+      }));
+
+    it('refuses changing the words even for the migration/admin role (trigger, not permission)', () =>
+      withBase(async (tx, ids) => {
+        await fails(
+          tx,
+          sql`update capture set text = 'rewritten' where id = ${ids.capture}`,
+          RAISED,
+        );
+        await fails(
+          tx,
+          sql`update capture set created_via = 'kev' where id = ${ids.capture}`,
+          RAISED,
+        );
+        // Setting the same words is not a change, and other columns stay writable.
+        await tx.execute(
+          sql`update capture set text = text, status = 'proposed' where id = ${ids.capture}`,
+        );
+      }, admin.db));
+
+    it('can still be deleted (a later purge), clearing every provenance link to it', () =>
+      withBase(async (tx, ids) => {
+        const ctx = await tx.execute(sql`
+          insert into context (created_by, created_via, origin_capture_id, subject_type, content, category, source_type, source_user_id, source_ref)
+          values (${U}, 'kev', ${ids.capture}, 'household', 'Bins go out on Tuesday', 'routine', 'capture', ${U}, ${ids.capture})
+          returning id`);
+        const pr = await tx.execute(sql`
+          insert into proposal (created_by, created_via, requested_by_user_id, capture_id, action, payload, summary)
+          values (${U}, 'kev', ${U}, ${ids.capture}, 'task.create', '{"title":"WOF"}', 'Add a task: WOF')
+          returning id`);
+        for (const t of ORIGIN_TABLES)
+          await tx.execute(
+            sql.raw(
+              `update ${t} set origin_capture_id = '${ids.capture}' where created_by = '${U}'`,
+            ),
+          );
+        await tx.execute(sql`insert into task (created_by, created_via, title, origin_capture_id)
+          values (${U}, 'kev', 'WOF', ${ids.capture})`);
+        await tx.execute(sql`delete from capture where id = ${ids.capture}`);
+        expect(
+          (
+            await tx.execute(
+              sql`select origin_capture_id from context where id = ${ctx.rows[0]?.id}`,
+            )
+          ).rows,
+        ).toEqual([{ origin_capture_id: null }]);
+        expect(
+          (await tx.execute(sql`select capture_id from proposal where id = ${pr.rows[0]?.id}`))
+            .rows,
+        ).toEqual([{ capture_id: null }]);
+        for (const t of ORIGIN_TABLES) {
+          const r = await tx.execute(
+            sql.raw(
+              `select count(*)::int as n from ${t} where origin_capture_id is not null and created_by = '${U}'`,
+            ),
+          );
+          expect(r.rows[0]?.n, t).toBe(0);
+        }
+      }));
+
+    it.each([
+      ['empty text', sql`(${U}, 'ui', '', 'web')`],
+      ['whitespace-only text', sql`(${U}, 'ui', ${' \n\t '}, 'web')`],
+      ['an unknown channel', sql`(${U}, 'ui', 'x', 'sms')`],
+      ['no author', sql`(null, 'ui', 'x', 'web')`],
+      ['a sync author', sql`(${U}, 'sync', 'x', 'web')`],
+    ])('refuses %s', (_label, values) =>
+      withBase(async (tx) => {
+        await fails(
+          tx,
+          sql`insert into capture (created_by, created_via, text, channel) values ${values}`,
+          CHECK,
+        );
+      }),
+    );
+
+    it.each([
+      ['household visibility', sql`visibility = 'household'`],
+      ['organised with nothing organised into', sql`status = 'organised', organised_at = now()`],
+      [
+        'organised with no time',
+        sql`status = 'organised', organised_into = '[{"type":"task","id":"00000000-0000-4000-8000-000000000000"}]'`,
+      ],
+      ['dismissed with no time', sql`status = 'dismissed'`],
+      ['a dismissal time while not dismissed', sql`dismissed_at = now()`],
+      ['an unknown status', sql`status = 'sorted'`],
+      ['organised_into that is not an array', sql`organised_into = '{}'`],
+      [
+        'an unknown record type',
+        sql`organised_into = '[{"type":"photo","id":"00000000-0000-4000-8000-000000000000"}]'`,
+      ],
+      ['a reference without an id', sql`organised_into = '[{"type":"task"}]'`],
+      ['a reference whose id is not a uuid', sql`organised_into = '[{"type":"task","id":"42"}]'`],
+      ['a reference that is not an object', sql`organised_into = '["task"]'`],
+    ])('refuses %s', (_label, set) =>
+      withBase(async (tx, ids) => {
+        await fails(tx, sql`update capture set ${set} where id = ${ids.capture}`, CHECK);
+      }),
+    );
+
+    it('a dismissed capture records when, for the 30-day purge, and clears it if undismissed', () =>
+      withBase(async (tx, ids) => {
+        await tx.execute(
+          sql`update capture set status = 'dismissed', dismissed_at = now() where id = ${ids.capture}`,
+        );
+        await tx.execute(
+          sql`update capture set status = 'new', dismissed_at = null where id = ${ids.capture}`,
+        );
+        const r = await tx.execute(
+          sql`select status, dismissed_at from capture where id = ${ids.capture}`,
+        );
+        expect(r.rows[0]).toEqual({ status: 'new', dismissed_at: null });
+      }));
+  });
+
+  describe('context', () => {
+    /** Inserts a context row: sensible defaults, overridden column by column (SQL literals). */
+    const ctx = (tx: Db, over: Record<string, string>) => {
+      const row: Record<string, string> = {
+        created_by: `'${U}'`,
+        created_via: `'ui'`,
+        subject_type: `'household'`,
+        content: `'Enjoys dinosaurs at the moment'`,
+        category: `'interest'`,
+        source_type: `'manual'`,
+        source_user_id: `'${U}'`,
+        ...over,
+      };
+      return tx.execute(
+        sql.raw(`insert into context (${Object.keys(row).join(', ')}) values (${Object.values(row).join(', ')})
+        returning subject_type, sensitivity, status, visibility, valid_until, retired_at,
+                  last_confirmed_at = now() as confirmed_now`),
+      );
+    };
+
+    it('defaults to normal, active (P-6), household, confirmed now, with no expiry', () =>
+      withBase(async (tx, ids) => {
+        const r = await ctx(tx, { subject_type: `'person'`, subject_id: `'${ids.person}'` });
+        expect(r.rows[0]).toEqual({
+          subject_type: 'person',
+          sensitivity: 'normal',
+          status: 'active',
+          visibility: 'household',
+          valid_until: null,
+          retired_at: null,
+          confirmed_now: true,
+        });
+      }));
+
+    it('accepts household context, sensitive context, a valid_until date and retirement', () =>
+      withBase(async (tx) => {
+        await ctx(tx, {});
+        await ctx(tx, {
+          sensitivity: `'sensitive'`,
+          visibility: `'private'`,
+          valid_until: `'2026-10-31'`,
+        });
+        await ctx(tx, { status: `'retired'`, retired_at: 'now()' });
+        await ctx(tx, {
+          subject_type: `'project'`,
+          subject_id: 'gen_random_uuid()',
+          category: `'other'`,
+        });
+      }));
+
+    it.each([
+      ['a household subject with an id', { subject_id: 'gen_random_uuid()' }],
+      ['a person subject without an id', { subject_type: `'person'` }],
+      ['an unknown subject type', { subject_type: `'place'`, subject_id: 'gen_random_uuid()' }],
+      ['an unknown category', { category: `'mood'` }],
+      ['an unknown sensitivity', { sensitivity: `'secret'` }],
+      ['an unknown status', { status: `'stale'` }],
+      ['retired with no time', { status: `'retired'` }],
+      ['a retirement time while active', { retired_at: 'now()' }],
+      ['an unknown source type', { source_type: `'inferred'` }],
+      ['blank content', { content: `'   '` }],
+      ['an unknown visibility', { visibility: `'everyone'` }],
+    ])('refuses %s', (_label, over) =>
+      withBase(async (tx) => {
+        await expectCode(
+          tx.transaction(async (sp) => {
+            await ctx(sp as unknown as Db, over);
+          }),
+          CHECK,
+        );
+      }),
+    );
+
+    it('refuses a missing source user (who said it)', () =>
+      withBase(async (tx) => {
+        await expectCode(
+          tx.transaction(async (sp) => {
+            await ctx(sp as unknown as Db, { source_user_id: 'null' });
+          }),
+          '23502',
+        );
+      }));
+  });
+
+  describe('proposal', () => {
+    /** A proposal insert: a pending task proposal, overridden column by column (SQL literals). */
+    const insert = (over: Record<string, string> = {}) => {
+      const row: Record<string, string> = {
+        created_by: `'${U}'`,
+        created_via: `'kev'`,
+        requested_by_user_id: `'${U}'`,
+        action: `'task.create'`,
+        payload: `'{"title":"Book the WOF"}'`,
+        summary: `'Add a task: book the WOF'`,
+        ...over,
+      };
+      return sql.raw(
+        `insert into proposal (${Object.keys(row).join(', ')}) values (${Object.values(row).join(', ')}) returning id`,
+      );
+    };
+    const decided = (by = `'${U}'`, channel = `'web'`) => ({
+      decided_by: by,
+      decided_at: 'now()',
+      decided_channel: channel,
+    });
+    const REF = `'[{"type":"task","id":"00000000-0000-4000-8000-000000000000"}]'`;
+
+    it('starts pending and private, expiring exactly 7 days after creation (P-3)', () =>
+      withBase(async (tx) => {
+        const id = (await tx.execute(insert())).rows[0]?.id as string;
+        const r = await tx.execute(sql`
+          select status, visibility, expires_at - created_at = interval '7 days' as week,
+                 decided_by, decided_at, decided_channel, result_ref, failure_reason
+          from proposal where id = ${id}`);
+        expect(r.rows[0]).toEqual({
+          status: 'pending',
+          visibility: 'private',
+          week: true,
+          decided_by: null,
+          decided_at: null,
+          decided_channel: null,
+          result_ref: null,
+          failure_reason: null,
+        });
+      }));
+
+    it('records each decision with who, when, where and its outcome', () =>
+      withBase(async (tx) => {
+        await tx.execute(insert({ status: `'approved'`, ...decided(), result_ref: REF }));
+        await tx.execute(insert({ status: `'rejected'`, ...decided() }));
+        await tx.execute(
+          insert({ status: `'failed'`, ...decided(), failure_reason: `'not_found'` }),
+        );
+        await tx.execute(insert({ status: `'expired'` }));
+        await tx.execute(
+          insert({ action: `'capture.dismiss'`, payload: `'{}'`, created_via: `'ui'` }),
+        );
+      }));
+
+    it.each([
+      ['household visibility', { visibility: `'household'` }],
+      ['a requester other than the creator', { requested_by_user_id: `'${V}'` }],
+      ['a sync creator', { created_via: `'sync'` }],
+      ['a decider other than the requester (P-2)', { status: `'rejected'`, ...decided(`'${V}'`) }],
+      ['an unknown action', { action: `'task.delete'` }],
+      ['a payload that is not an object', { payload: `'[]'` }],
+      ['a blank summary', { summary: `' '` }],
+      ['an expiry not after creation', { expires_at: 'now()' }],
+      ['an unknown decision channel', { status: `'rejected'`, ...decided(`'${U}'`, `'sms'`) }],
+      [
+        'free text as a failure reason',
+        { status: `'failed'`, ...decided(), failure_reason: `'Could not find it'` },
+      ],
+      ['approved without a result', { status: `'approved'`, ...decided() }],
+      ['approved without a decider', { status: `'approved'`, ...decided('null'), result_ref: REF }],
+      ['rejected with a result', { status: `'rejected'`, ...decided(), result_ref: REF }],
+      ['rejected with no time', { status: `'rejected'`, ...decided(), decided_at: 'null' }],
+      ['failed without a reason', { status: `'failed'`, ...decided() }],
+      [
+        'failed with a result',
+        { status: `'failed'`, ...decided(), failure_reason: `'not_found'`, result_ref: REF },
+      ],
+      ['pending with a decision', { ...decided() }],
+      ['expired with a decision', { status: `'expired'`, ...decided() }],
+      ['an unknown status', { status: `'withdrawn'` }],
+    ])('refuses %s', (_label, over) =>
+      withBase(async (tx) => {
+        await fails(tx, insert(over), CHECK);
+      }),
+    );
+
+    it('refuses a missing creator', () =>
+      withBase(async (tx) => {
+        await fails(tx, insert({ created_by: 'null' }), CHECK);
+      }));
+  });
+
+  it('a user with captures, context or proposals cannot be deleted (RESTRICT)', () =>
+    withBase(async (tx) => {
+      await fails(tx, sql`delete from "user" where id = ${U}`, '23503');
+    }));
+});
+
+describe('0005 upgrades the production schema (0000–0004) in place', () => {
+  it('applies on top of 0004 with data the deployed app wrote, changing nothing that was there, and the deployed app keeps working', async () => {
+    const name = 'home_upgrade_0005_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const upApp = createDb(appUrl);
+    const production = migrationsUpTo('0004_events_projects_tasks_notes');
+    const deps = { db: upApp.db };
+    const sam: UserActor = {
+      kind: 'user',
+      userId: 'u-up5',
+      email: 'sam@example.test',
+      via: 'ui',
+      channel: 'web',
+    };
+    const timed = {
+      allDay: false as const,
+      startsAt: '2026-10-14T15:30:00+13:00',
+      endsAt: '2026-10-14T16:15:00+13:00',
+      timeZone: 'UTC',
+    };
+    try {
+      // Production today: 0000–0004, written through the deployed services.
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upApp.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up5', 'Sam', 'sam@example.test')`,
+      );
+      const milo = await createPerson(sam, { name: 'Milo', role: 'child' }, deps);
+      const fence = await createProject(sam, { title: 'Back fence' }, deps);
+      const swim = await createEvent(
+        sam,
+        { title: 'Swimming', kind: 'activity', time: timed },
+        deps,
+      );
+      const paint = await createTask(
+        sam,
+        { title: 'Paint', projectId: fence.id, assigneePersonId: milo.id, needs: ['daylight'] },
+        deps,
+      );
+      await createNote(
+        sam,
+        { body: 'Measure the gate', subject: { type: 'project', id: fence.id } },
+        deps,
+      );
+      await createTask(sam, { title: 'Private', visibility: 'private' }, deps);
+      await recordAudit(systemActor, { event: 'auth.sign_in' }, { db: upApp.db });
+
+      const rows = async (t: string) =>
+        (
+          await upAdmin.db.execute(
+            sql.raw(`select to_jsonb(r) - 'origin_capture_id' as row from ${t} r order by id`),
+          )
+        ).rows;
+      const snapshot = async () => ({
+        ...Object.fromEntries(
+          await Promise.all(
+            ['person', 'event', 'event_person', 'project', 'task', 'note'].map(
+              async (t) => [t, await rows(t)] as const,
+            ),
+          ),
+        ),
+        audit: (await upAdmin.db.execute(sql`select * from audit_log order by at, id`)).rows,
+        users: (await upAdmin.db.execute(sql`select id, email from "user" order by id`)).rows,
+      });
+      const before = await snapshot();
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.capture') as t`)).rows[0]?.t,
+      ).toBeNull();
+
+      // Apply only what is new: 0005.
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      // Existing rows are unchanged; the only addition is an empty origin_capture_id.
+      expect(await snapshot()).toEqual(before);
+      for (const t of ORIGIN_TABLES) {
+        const r = await upAdmin.db.execute(
+          sql.raw(`select count(*)::int as n from ${t} where origin_capture_id is not null`),
+        );
+        expect(r.rows[0]?.n, t).toBe(0);
+      }
+      for (const t of TABLES_0005) {
+        const r = await upAdmin.db.execute(sql.raw(`select count(*)::int as n from ${t}`));
+        expect(r.rows[0]?.n, t).toBe(0);
+      }
+
+      // The runtime role reaches every new table through 0002's default privileges.
+      for (const t of TABLES_0005) {
+        const g = await upApp.db.execute(
+          sql.raw(`
+          select has_table_privilege('home_app', '${t}', 'SELECT') as s,
+                 has_table_privilege('home_app', '${t}', 'INSERT') as i,
+                 has_table_privilege('home_app', '${t}', 'UPDATE') as u,
+                 has_table_privilege('home_app', '${t}', 'DELETE') as d,
+                 has_table_privilege('home_app', '${t}', 'TRUNCATE') as tr`),
+        );
+        expect(g.rows[0], t).toEqual({ s: true, i: true, u: true, d: true, tr: false });
+      }
+
+      // The deployed app keeps working on the upgraded schema: every 3b service
+      // that inserts, returns or lists every column of a table that gained one.
+      await expect(
+        updateEvent(sam, swim.id, { title: 'Swimming lessons' }, deps),
+      ).resolves.toMatchObject({ title: 'Swimming lessons' });
+      await expect(
+        createEvent(sam, { title: 'Football', kind: 'activity', time: timed }, deps),
+      ).resolves.toBeDefined();
+      await expect(updateTask(sam, paint.id, { status: 'done' }, deps)).resolves.toMatchObject({
+        status: 'done',
+      });
+      await expect(createProject(sam, { title: 'Garage' }, deps)).resolves.toBeDefined();
+      await expect(createNote(sam, { body: 'Buy hinges' }, deps)).resolves.toBeDefined();
+      expect((await listEvents(sam, {}, deps)).map((e) => e.title).sort()).toEqual([
+        'Football',
+        'Swimming lessons',
+      ]);
+      expect((await listProjects(sam, {}, deps)).map((p) => p.title).sort()).toEqual([
+        'Back fence',
+        'Garage',
+      ]);
+      expect((await listTasks(sam, {}, deps)).map((t) => t.title).sort()).toEqual([
+        'Paint',
+        'Private',
+      ]);
+      expect(await listNotes(sam, {}, deps)).toHaveLength(2);
+      expect((await listPeople(sam, {}, deps)).map((p) => p.name)).toEqual(['Milo']);
+      expect((await listAudit(sam, {}, deps)).rows.length).toBeGreaterThan(0);
+      await expect(
+        recordAudit(systemActor, { event: 'auth.sign_out' }, { db: upApp.db }),
+      ).resolves.toBeDefined();
+    } finally {
+      await upApp.close();
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+});
+
+/** Runs `fn` on `on` in a transaction that is always rolled back. */
+async function rolledBackAs(on: Db, fn: (tx: Db) => Promise<void>) {
+  const rollback = new Error('rollback');
+  await on
+    .transaction(async (tx) => {
+      await fn(tx as unknown as Db);
+      throw rollback;
+    })
+    .catch((e: unknown) => {
+      if (e !== rollback) throw e;
+    });
+}

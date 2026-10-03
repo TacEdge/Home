@@ -18,9 +18,13 @@ export type Visibility = (typeof VISIBILITY)[number];
 export const DOMAINS = ['family', 'home', 'us', 'admin'] as const;
 export type Domain = (typeof DOMAINS)[number];
 
-/** Context sensitivity (D15). No table carries it until Package 4a. */
+/** Context sensitivity (D15), carried by `context`. */
 export const SENSITIVITY = ['normal', 'sensitive'] as const;
 export type Sensitivity = (typeof SENSITIVITY)[number];
+
+/** Where something was said or decided (FAMILY-DATA-MODEL §3, Capture). `web` only in V0.1. */
+export const CHANNELS = ['web'] as const;
+export type Channel = (typeof CHANNELS)[number];
 
 /** `<column> in ('a', 'b', …)` for a CHECK constraint, from a constant list. */
 export function oneOf(column: PgColumn, values: readonly string[]): SQL {
