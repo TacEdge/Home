@@ -9,7 +9,7 @@ import { createEvent, listEvents, updateEvent } from '@/domain/events/service';
 import { createNote, listNotes } from '@/domain/notes/service';
 import { createPerson, listPeople } from '@/domain/people/service';
 import { createProject, listProjects } from '@/domain/projects/service';
-import { createTask, listTasks, updateTask } from '@/domain/tasks/service';
+import { listTasks, updateTask } from '@/domain/tasks/service';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit, recordAudit } from '@/trust/audit';
 import { assertTestDatabase } from '../db-guard';
@@ -1618,7 +1618,7 @@ describe('0005: constraint behaviour for the runtime role (each case rolled back
 });
 
 describe('0005 upgrades the production schema (0000–0004) in place', () => {
-  it('applies on top of 0004 with data the deployed app wrote, changing nothing that was there, and the deployed app keeps working', async () => {
+  it('applies on top of 0004 with data the 3b app wrote, changing nothing that was there, and the app works on it', async () => {
     const name = 'home_upgrade_0005_test';
     const adminUrl = onDatabase(TEST_DATABASE_URL, name);
     const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
@@ -1642,29 +1642,30 @@ describe('0005 upgrades the production schema (0000–0004) in place', () => {
       timeZone: 'UTC',
     };
     try {
-      // Production today: 0000–0004, written through the deployed services.
+      // Production before 0005: 0000–0004, with rows as the 3b app wrote them
+      // (plain SQL: today's services already expect 0005's columns).
       await migrate(upAdmin.db, { migrationsFolder: production });
       await upApp.db.execute(
         sql`insert into "user" (id, name, email) values ('u-up5', 'Sam', 'sam@example.test')`,
       );
-      const milo = await createPerson(sam, { name: 'Milo', role: 'child' }, deps);
-      const fence = await createProject(sam, { title: 'Back fence' }, deps);
-      const swim = await createEvent(
-        sam,
-        { title: 'Swimming', kind: 'activity', time: timed },
-        deps,
-      );
-      const paint = await createTask(
-        sam,
-        { title: 'Paint', projectId: fence.id, assigneePersonId: milo.id, needs: ['daylight'] },
-        deps,
-      );
-      await createNote(
-        sam,
-        { body: 'Measure the gate', subject: { type: 'project', id: fence.id } },
-        deps,
-      );
-      await createTask(sam, { title: 'Private', visibility: 'private' }, deps);
+      const one = async (q: ReturnType<typeof sql>) =>
+        (await upApp.db.execute(q)).rows[0]?.id as string;
+      const milo = await one(sql`insert into person (created_by, created_via, name, role)
+        values ('u-up5', 'ui', 'Milo', 'child') returning id`);
+      const fence = await one(sql`insert into project (created_by, created_via, title)
+        values ('u-up5', 'ui', 'Back fence') returning id`);
+      const swim = {
+        id: await one(sql`insert into event (created_by, created_via, title, kind, starts_at, ends_at, time_zone)
+        values ('u-up5', 'ui', 'Swimming', 'activity', ${timed.startsAt}, ${timed.endsAt}, ${timed.timeZone}) returning id`),
+      };
+      const paint = {
+        id: await one(sql`insert into task (created_by, created_via, title, project_id, assignee_person_id, needs)
+        values ('u-up5', 'ui', 'Paint', ${fence}, ${milo}, '["daylight"]') returning id`),
+      };
+      await one(sql`insert into note (created_by, created_via, body, subject_type, subject_id)
+        values ('u-up5', 'ui', 'Measure the gate', 'project', ${fence}) returning id`);
+      await one(sql`insert into task (created_by, created_via, title, visibility)
+        values ('u-up5', 'ui', 'Private', 'private') returning id`);
       await recordAudit(systemActor, { event: 'auth.sign_in' }, { db: upApp.db });
 
       const rows = async (t: string) =>
@@ -1722,8 +1723,8 @@ describe('0005 upgrades the production schema (0000–0004) in place', () => {
         expect(g.rows[0], t).toEqual({ s: true, i: true, u: true, d: true, tr: false });
       }
 
-      // The deployed app keeps working on the upgraded schema: every 3b service
-      // that inserts, returns or lists every column of a table that gained one.
+      // The app works on the upgraded schema: every service that inserts,
+      // returns or lists every column of a table that gained one.
       await expect(
         updateEvent(sam, swim.id, { title: 'Swimming lessons' }, deps),
       ).resolves.toMatchObject({ title: 'Swimming lessons' });

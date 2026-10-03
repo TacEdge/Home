@@ -8,7 +8,7 @@ import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { assertNotReferencedByHousehold, checkReferences } from '../common/references';
-import { auditedWrite, type Deps } from '../common/write';
+import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import {
   createEventInput,
   eventPersonInput,
@@ -61,7 +61,7 @@ export async function createEvent(
         ...timeColumns(time),
         source: 'manual',
         createdBy: actor.userId,
-        createdVia: 'ui',
+        ...provenanceOf(deps),
       })
       .returning();
     if (!row) throw new Error('event insert returned no row');
@@ -189,7 +189,7 @@ export async function setEventPerson(
     ]);
     const [created] = await tx
       .insert(eventPerson)
-      .values({ ...data, createdBy: actor.userId, createdVia: 'ui' })
+      .values({ ...data, createdBy: actor.userId, createdVia: provenanceOf(deps).createdVia })
       .onConflictDoNothing()
       .returning();
     const row =

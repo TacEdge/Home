@@ -1,7 +1,17 @@
 import 'server-only';
 import { and, eq, exists, getTableName, not, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
-import { auditLog, event, note, person, project, task } from '@/db/schema';
+import {
+  auditLog,
+  capture,
+  context,
+  event,
+  note,
+  person,
+  project,
+  proposal,
+  task,
+} from '@/db/schema';
 import type { Actor } from './actor';
 import { visibleTo, type VisibilityColumns } from './visibility';
 
@@ -34,6 +44,11 @@ export const auditSubjects: Record<string, AuditSubject> = register(
   { table: project },
   { table: task },
   { table: note },
+  // Captures and proposals are always private to their creator, so the
+  // default rule already makes them owner-only (P-1 b).
+  { table: capture },
+  { table: context },
+  { table: proposal },
 );
 
 /** The write-time snapshot: household, or private to its recorded owner. */

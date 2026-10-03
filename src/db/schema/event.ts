@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth';
+import { capture } from './capture';
 import { commonColumns, CREATED_VIA, DOMAINS, oneOf, VISIBILITY } from './common';
 import { person } from './person';
 
@@ -46,6 +47,10 @@ export const event = pgTable(
   'event',
   {
     ...commonColumns(() => user.id),
+    // Provenance: the capture it was organised from (migration 0005, §4.4).
+    originCaptureId: uuid('origin_capture_id').references(() => capture.id, {
+      onDelete: 'set null',
+    }),
     title: text('title').notNull(),
     description: text('description'),
     location: text('location'),
@@ -88,6 +93,7 @@ export const event = pgTable(
       'event_synced_check',
       sql`${t.source} <> 'synced' or (${t.calendarSourceId} is not null and ${t.externalUid} is not null)`,
     ),
+    index('event_origin_capture_id_idx').on(t.originCaptureId),
     index('event_created_by_idx').on(t.createdBy),
     index('event_visibility_created_by_idx').on(t.visibility, t.createdBy),
     index('event_archived_at_idx').on(t.archivedAt),

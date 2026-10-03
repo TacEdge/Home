@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth';
+import { capture } from './capture';
 import { commonColumns, CREATED_VIA, DOMAINS, oneOf, VISIBILITY } from './common';
 import { person } from './person';
 import { project } from './project';
@@ -31,6 +32,10 @@ export const task = pgTable(
   'task',
   {
     ...commonColumns(() => user.id),
+    // Provenance: the capture it was organised from (migration 0005, §4.4).
+    originCaptureId: uuid('origin_capture_id').references(() => capture.id, {
+      onDelete: 'set null',
+    }),
     title: text('title').notNull(),
     notes: text('notes'),
     status: text('status').notNull().default('open'),
@@ -70,6 +75,7 @@ export const task = pgTable(
     index('task_project_id_idx').on(t.projectId),
     index('task_assignee_person_id_idx').on(t.assigneePersonId),
     index('task_about_person_id_idx').on(t.aboutPersonId),
+    index('task_origin_capture_id_idx').on(t.originCaptureId),
     index('task_created_by_idx').on(t.createdBy),
     index('task_visibility_created_by_idx').on(t.visibility, t.createdBy),
     index('task_archived_at_idx').on(t.archivedAt),

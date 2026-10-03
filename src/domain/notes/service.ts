@@ -7,7 +7,7 @@ import { NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { checkReferences, type Ref } from '../common/references';
-import { auditedWrite, type Deps } from '../common/write';
+import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import {
   createNoteInput,
   noteSubject,
@@ -50,7 +50,12 @@ export async function createNote(
     await checkReferences(tx, actor, data.visibility, [refOf(subject)]);
     const [row] = await tx
       .insert(note)
-      .values({ ...data, ...subjectColumns(subject), createdBy: actor.userId, createdVia: 'ui' })
+      .values({
+        ...data,
+        ...subjectColumns(subject),
+        createdBy: actor.userId,
+        ...provenanceOf(deps),
+      })
       .returning();
     if (!row) throw new Error('note insert returned no row');
     return {
