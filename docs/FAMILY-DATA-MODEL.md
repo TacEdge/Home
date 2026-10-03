@@ -50,6 +50,8 @@ The **profile** Kev and the People screen see is mostly *derived*, not stored:
 | Things to know (interests, preferences, practical details) | `Context` records with this person as subject |
 | Coming up | Agenda for this person; next birthday |
 
+Implementation (migration `0003`, M2 Package 2a): table `person` with the common fields, text columns with `CHECK` constraints for `role`, `visibility`, `created_via` and `colour` (keys `moss`, `sky`, `sun-soft`, `plum`, `sage`, `mist`), `created_by` → `user.id` `ON DELETE RESTRICT`, and `user_id` → `user.id` unique, `ON DELETE SET NULL`.
+
 Recurring activities are therefore **recurring events**, not a separate table. This is deliberately not a development record: no measurements, assessments, progress or observations.
 
 ### User
@@ -217,7 +219,7 @@ A change Kev wants to make, awaiting approval.
 | `decided_by`, `decided_at`, `decided_channel`, `result_ref` | |
 
 ### AuditLog, KevUsage
-- `audit_log` — append-only record of writes and Kev tool calls.
+- `audit_log` — append-only record of writes and Kev tool calls. Migration `0003` adds `visibility` (default `household`) and `visible_to_user_id`: a write-time snapshot of the affected record's visibility, so Activity never reveals more than the record would (ADR 0005 §9).
 - `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap (NZ$50/month initially) and the Usage view in Settings.
 
 ### WeatherCache
