@@ -220,6 +220,8 @@ Kev chat history, owned by one user, retained 90 days, not used as memory.
 | `content` | provider-neutral structure: text, citations, tool-call summaries, proposal and capture refs |
 | `tier`, `model` | on Kev messages |
 
+Implementation (migration `0006`, M2 Package 5a): `conversation` has `user_id` (→ `user`, `ON DELETE CASCADE`), `created_at`, `updated_at`, `last_message_at` (the 90-day retention clock) and `archived_at`; it is private to its owner by `user_id`, so it has no visibility column. `message` belongs to its conversation (`ON DELETE CASCADE`); `content` is a JSON object carrying a numeric `v` (the application validates each version's schema); a Kev message has `tier` (`fast` \| `deep`) and `model`, a person's has neither (`CHECK`). Deleting a conversation clears `capture.message_id` and `proposal.conversation_id` (`ON DELETE SET NULL`) and never touches a capture's words.
+
 ### Proposal
 A change Kev wants to make, awaiting approval.
 
@@ -238,6 +240,8 @@ Implementation (`0005`): common fields with `visibility` always `private`; `crea
 - `audit_log` — append-only record of writes and Kev tool calls. Migration `0003` adds `visibility` (default `household`) and `visible_to_user_id`: a write-time snapshot of the affected record's visibility, so Activity never reveals more than the record would (ADR 0005 §9).
 - `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap (NZ$50/month initially) and the Usage view in Settings.
 
+Implementation (`0006`): `kev_usage` is append-only: `home_app` has only `SELECT` and `INSERT`, and a trigger refuses update, delete and truncate for every role, as for `audit_log`. It holds no content. Cost is the provider's cost in micro-US-dollars (`cost_usd_micros`, bigint); there is no NZD column or conversion in M2 (the NZ$ spend cap is M8's). `user_id` and `conversation_id` are plain values with no foreign key, so deleting a user or conversation never blocks on or rewrites the log. Token counts and cost are non-negative.
+
 ### WeatherCache
 Cached forecast (location, fetched_at, hourly JSON).
 
@@ -252,6 +256,8 @@ The only persisted part of insights. Insights themselves are derived on read (se
 | `responded_at` | |
 
 A dismissed insight doesn't reappear for that user. `not_useful` also feeds detector tuning (by us, deliberately) — never automatic inference.
+
+Implementation (`0006`): `insight_response` has a uuid id, `user_id` (→ `user`, `RESTRICT`), `insight_key`, `response` (`CHECK`) and `responded_at`; unique `(user_id, insight_key)`, so a response is upserted. Private to that user by `user_id`.
 
 ## 4. Relationships (V0.1)
 

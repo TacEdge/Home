@@ -78,6 +78,10 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
     - **Dismissed captures.** New proposals against a dismissed capture are refused (`not_eligible`, §35).
     - **Context vocabulary.** `restoreContext` means un-archive; `reinstateContext` means retired → active (§36).
 
+### Implementation clarifications, Package 5a (for review with its PR)
+
+38. **Bookkeeping schema (migration `0006`).** `conversation`, `message`, `kev_usage` and `insight_response` are owner-private by `user_id` and carry no visibility column; `conversation` cascades from its user and `message` from its conversation, as owned children (§4.4). `kev_usage` is append-only (revoke plus trigger) and stores cost only in micro-US-dollars; it has no foreign keys at all, so neither a user nor a conversation delete can block on or rewrite it. A message's content is a versioned JSON object, and a Kev message always names its tier and model while a person's never does. The two foreign keys the contract planned on existing columns, `capture.message_id` → `message` and `proposal.conversation_id` → `conversation`, are both `ON DELETE SET NULL`. They are the only constraints any M2 migration adds to an existing column, and the additive guard (`tests/unit/migrations-additive.test.ts`) allows exactly these two, with exactly that delete rule. No deployed code sets either column, and should a row nevertheless hold an id with no target, the migration fails validation and rolls back without changing data. The capture trigger keeps `message_id` writable (§32), so a message purge can clear it.
+
 ## Consequences
 
 - The roadmap's M2 and M4 rows are updated to show the moved tables and the regular-week deferral.

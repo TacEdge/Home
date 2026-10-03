@@ -17,6 +17,18 @@ const BETTER_AUTH_TABLES = ['user', 'session', 'account', 'verification', 'rate_
 
 type Problem = string;
 
+/**
+ * Foreign keys the contract planned on columns that already exist (M2
+ * contract §4.2): provenance links whose target table arrived later. Each is
+ * ON DELETE SET NULL, and no deployed code path sets the column before its
+ * table exists, so no live row or write can break; were one to dangle, the
+ * migration would fail validation and roll back, never change data.
+ */
+export const APPROVED_EXISTING_COLUMN_FKS: Record<string, string> = {
+  'capture.message_id': 'message, Package 5 (contract §4.2)',
+  'proposal.conversation_id': 'conversation, Package 5 (contract §4.2)',
+};
+
 /** Why a migration is not additive, if it is not. Empty when it is. */
 export function nonAdditive(sqlText: string, existingTables: Set<string>): Problem[] {
   const problems: Problem[] = [];
@@ -55,12 +67,25 @@ export function nonAdditive(sqlText: string, existingTables: Set<string>): Probl
           kind.toUpperCase() === 'CHECK'
             ? [...body.matchAll(new RegExp(`"${table}"\\."([^"]+)"`, 'g'))].map((x) => x[1] ?? '')
             : [body.match(/^\("([^"]+)"\)/)?.[1] ?? ''];
-        for (const c of cols)
-          if (!added.get(table)?.has(c))
-            problems.push(`constraint on existing column ${table}.${c}: ${head}`);
+        for (const c of cols) {
+          if (added.get(table)?.has(c)) continue;
+          const planned =
+            kind.toUpperCase() === 'FOREIGN KEY' &&
+            `${table}.${c}` in APPROVED_EXISTING_COLUMN_FKS &&
+            /ON DELETE set null/i.test(body);
+          if (!planned) problems.push(`constraint on existing column ${table}.${c}: ${head}`);
+        }
       }
     } else if (/^DO \$\$/i.test(st) || /^CREATE (OR REPLACE )?(FUNCTION|TRIGGER)/i.test(st)) {
-      if (/\b(DROP|RENAME|ALTER COLUMN|DELETE FROM|UPDATE "|TRUNCATE)\b/i.test(st))
+      // Taking privileges from the runtime role (the append-only rule) and a
+      // trigger's event clause (one that refuses changes) are not changes.
+      const body = st
+        .replace(/REVOKE [A-Z, ]+ ON TABLE "[^"]+" FROM home_app;/gi, '')
+        .replace(
+          /BEFORE (INSERT|UPDATE|DELETE|TRUNCATE)( OR (INSERT|UPDATE|DELETE|TRUNCATE))* ON "[^"]+"/gi,
+          '',
+        );
+      if (/\b(DROP|RENAME|ALTER COLUMN|DELETE FROM|UPDATE "|TRUNCATE|GRANT)\b/i.test(body))
         problems.push(`destructive statement in block: ${head}`);
     } else {
       problems.push(`not an additive statement: ${head}`);
@@ -85,8 +110,36 @@ describe('the additive-migration guard', () => {
       'ALTER TABLE "audit_log" ADD COLUMN "v" text;--> statement-breakpoint\nALTER TABLE "audit_log" ADD CONSTRAINT "c" CHECK ("audit_log"."v" in (\'a\'));',
       [],
     ],
+    [
+      'DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = \'home_app\') THEN REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "x" FROM home_app; END IF; END $$;',
+      [],
+    ],
+    ['CREATE TRIGGER t BEFORE TRUNCATE ON "x" FOR EACH STATEMENT EXECUTE FUNCTION f();', []],
+    [
+      'ALTER TABLE "capture" ADD CONSTRAINT "f" FOREIGN KEY ("message_id") REFERENCES "public"."message"("id") ON DELETE set null ON UPDATE no action;',
+      [],
+    ],
   ])('accepts %s', (text, expected) => {
-    expect(nonAdditive(text, existing)).toEqual(expected);
+    expect(nonAdditive(text, new Set([...existing, 'capture']))).toEqual(expected);
+  });
+
+  it.each([
+    [
+      'an approved column with another delete rule',
+      'ALTER TABLE "capture" ADD CONSTRAINT "f" FOREIGN KEY ("message_id") REFERENCES "public"."message"("id") ON DELETE cascade;',
+    ],
+    [
+      'an unapproved existing column',
+      'ALTER TABLE "capture" ADD CONSTRAINT "f" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null;',
+    ],
+    [
+      'a CHECK on an approved column',
+      'ALTER TABLE "capture" ADD CONSTRAINT "c" CHECK ("capture"."message_id" is null);',
+    ],
+    ['a grant in a block', 'DO $$ BEGIN GRANT ALL ON TABLE "x" TO home_app; END $$;'],
+    ['a truncate in a block', 'DO $$ BEGIN TRUNCATE "capture"; END $$;'],
+  ])('rejects %s', (_l, text) => {
+    expect(nonAdditive(text, new Set([...existing, 'capture']))).not.toEqual([]);
   });
 
   it.each([

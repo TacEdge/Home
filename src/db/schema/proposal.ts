@@ -3,6 +3,7 @@ import { check, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm
 import { user } from './auth';
 import { capture } from './capture';
 import { CHANNELS, commonColumns, CREATED_VIA, oneOf } from './common';
+import { conversation } from './conversation';
 
 // A change Kev wants to make, awaiting a person's approval (FAMILY-DATA-MODEL
 // §3, Proposal; M2 contract §4.2, §5.7). Private to the user who asked
@@ -39,9 +40,10 @@ export const proposal = pgTable(
   {
     ...commonColumns(() => user.id),
     visibility: text('visibility').notNull().default('private'),
-    // The conversation it came from; its foreign key arrives with
-    // `conversation` in Package 5 (ON DELETE SET NULL).
-    conversationId: uuid('conversation_id'),
+    // The conversation it came from (provenance, ON DELETE SET NULL).
+    conversationId: uuid('conversation_id').references(() => conversation.id, {
+      onDelete: 'set null',
+    }),
     requestedByUserId: text('requested_by_user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'restrict' }),
