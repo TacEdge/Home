@@ -40,12 +40,16 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 21. **Auth audit rows keep their pre-0003 SQL.** `recordAudit` names the P-1 columns only for domain writes that carry a snapshot; sign-in and other auth events are written exactly as Package S left them.
 22. **`unlinkSelf(actor)`, owner-approved 2026-10-03,** is the recovery path for a wrong link. It clears only the acting user's own `user_id`; there is no way to name another person or user, so no one can unlink another adult. It changes no other field (`updated_at` aside), runs in one transaction with a structural audit row (`person.unlink_self`, no meta), and refuses Kev and the system actor. The row is locked under the visibility rule and the `UPDATE` repeats both that rule and `user_id = actor`, so a concurrent unlink or relink cannot clear someone else's link. Every domain write now also refuses a system actor at runtime (`not_a_user`), not only by type.
 
-### Implementation clarifications, Package 3b (for review with its PR)
+### Implementation clarifications, Package 3b (§23–26; §27 accepted by the owner, 2026-10-03)
 
 23. **Reference rules hold both ways.** A write that sets a reference locks the referenced row (`FOR SHARE`) under the actor's visibility: invisible or archived targets read as `NotFoundError`, and a household record pointing at a private one is refused (`references_private`). A person, project or event that household records reference — archived ones included, since they can be restored — cannot be made private (`referenced_by_household`); for a person this now includes the People service. The two locks order against each other, so neither side can win a race.
 24. **EventPerson follows its event.** An annotation has no visibility of its own: it is visible, written and audited as its event (`subjectType: 'event'`, events `event_person.set` / `event_person.remove`), and a household event cannot annotate a private person. Setting an existing annotation is an idempotent no-op with no audit row.
 25. **Synced events are read-only in M2.** Services never set `source` or the sync fields; update, archive and restore of a `synced` event are refused (`synced_event`). Only M4's sync path will write them.
 26. **Event time is validated where it enters.** Timed events need instants with an offset and a zone accepted by `Intl` (`isValidTimeZone`); all-day events need real dates with an exclusive end after the start. Changing an event's time replaces the whole shape and clears the other one's columns. Events list by local date with all-day items first in their day. `completed_at` on a task is set from the database clock when its status becomes `done` and cleared when it leaves `done`.
+27. **Accepted by the owner, 2026-10-03, at the PR #24 review:**
+    - **People reference rule.** A person referenced by household-visible tasks, notes or event participation cannot be made private while those household references exist (§23).
+    - **Event ordering.** Within a calendar day, all-day events sort before timed events; timed events then sort chronologically (§26).
+    - **Duplicate EventPerson.** Setting an annotation that already exists is a true no-op: no state changes, so no audit row is written (§24).
 
 ## Consequences
 
