@@ -29,6 +29,13 @@
       "when": 1791013470977,
       "tag": "0003_person_and_audit_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791016708221,
+      "tag": "0004_events_projects_tasks_notes",
+      "breakpoints": true
     }
   ]
 }

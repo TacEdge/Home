@@ -5,7 +5,8 @@ import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '@/db/create';
-import { systemActor } from '@/trust/actor';
+import { createPerson, listPeople } from '@/domain/people/service';
+import { systemActor, type UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
 import { assertTestDatabase } from '../db-guard';
 import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL } from '../env';
@@ -399,6 +400,574 @@ describe('0003 upgrades the production schema (0000–0002) in place', () => {
       await expect(
         recordAudit(systemActor, { event: 'auth.sign_in' }, { db: upApp.db }),
       ).resolves.toBeDefined();
+    } finally {
+      await upApp.close();
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0004: event, event_person, project, task, note (Package 3a, migration only)
+// ---------------------------------------------------------------------------
+
+type Col = [name: string, type: string, nullable: 'YES' | 'NO', dflt: string | null];
+
+async function columnsOf(table: string): Promise<Col[]> {
+  const r = await db.execute(sql`
+    select column_name, case when data_type = 'ARRAY' then udt_name else data_type end as t,
+           is_nullable, column_default
+    from information_schema.columns where table_schema = 'public' and table_name = ${table}
+    order by ordinal_position`);
+  return r.rows.map((c) => [c.column_name, c.t, c.is_nullable, c.column_default] as Col);
+}
+
+const TS = 'timestamp with time zone';
+const COMMON: Col[] = [
+  ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+  ['created_at', TS, 'NO', 'now()'],
+  ['updated_at', TS, 'NO', 'now()'],
+  ['created_by', 'text', 'YES', null],
+  ['created_via', 'text', 'NO', null],
+  ['visibility', 'text', 'NO', "'household'::text"],
+  ['archived_at', TS, 'YES', null],
+];
+
+describe('0004: tables and columns', () => {
+  it('event: common fields, provider-neutral time and sync fields', async () => {
+    expect(await columnsOf('event')).toEqual([
+      ...COMMON,
+      ['title', 'text', 'NO', null],
+      ['description', 'text', 'YES', null],
+      ['location', 'text', 'YES', null],
+      ['all_day', 'boolean', 'NO', 'false'],
+      ['starts_at', TS, 'YES', null],
+      ['ends_at', TS, 'YES', null],
+      ['time_zone', 'text', 'YES', null],
+      ['start_date', 'date', 'YES', null],
+      ['end_date', 'date', 'YES', null],
+      ['rrule', 'text', 'YES', null],
+      ['exdates', '_text', 'YES', null],
+      ['kind', 'text', 'NO', null],
+      ['domain', 'text', 'YES', null],
+      ['source', 'text', 'NO', "'manual'::text"],
+      ['calendar_source_id', 'uuid', 'YES', null],
+      ['external_uid', 'text', 'YES', null],
+      ['external_etag', 'text', 'YES', null],
+    ]);
+  });
+
+  it('event_person: an annotation with no visibility, archive or update columns', async () => {
+    expect(await columnsOf('event_person')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['event_id', 'uuid', 'NO', null],
+      ['person_id', 'uuid', 'NO', null],
+      ['role', 'text', 'NO', null],
+      ['created_at', TS, 'NO', 'now()'],
+      ['created_by', 'text', 'YES', null],
+      ['created_via', 'text', 'NO', null],
+    ]);
+  });
+
+  it('project', async () => {
+    expect(await columnsOf('project')).toEqual([
+      ...COMMON,
+      ['title', 'text', 'NO', null],
+      ['summary', 'text', 'YES', null],
+      ['domain', 'text', 'NO', "'home'::text"],
+      ['status', 'text', 'NO', "'idea'::text"],
+      ['target_date', 'date', 'YES', null],
+    ]);
+  });
+
+  it('task', async () => {
+    expect(await columnsOf('task')).toEqual([
+      ...COMMON,
+      ['title', 'text', 'NO', null],
+      ['notes', 'text', 'YES', null],
+      ['status', 'text', 'NO', "'open'::text"],
+      ['project_id', 'uuid', 'YES', null],
+      ['domain', 'text', 'YES', null],
+      ['assignee_person_id', 'uuid', 'YES', null],
+      ['about_person_id', 'uuid', 'YES', null],
+      ['due_date', 'date', 'YES', null],
+      ['estimate_minutes', 'integer', 'YES', null],
+      ['needs', 'jsonb', 'NO', "'[]'::jsonb"],
+      ['scheduled_starts_at', TS, 'YES', null],
+      ['scheduled_ends_at', TS, 'YES', null],
+      ['completed_at', TS, 'YES', null],
+    ]);
+  });
+
+  it('note', async () => {
+    expect(await columnsOf('note')).toEqual([
+      ...COMMON,
+      ['body', 'text', 'NO', null],
+      ['subject_type', 'text', 'YES', null],
+      ['subject_id', 'uuid', 'YES', null],
+    ]);
+  });
+
+  it('no CalendarConnection or CalendarSource tables, and no foreign key on calendar_source_id (D-M2-3)', async () => {
+    const r = await db.execute(sql`
+      select table_name from information_schema.tables
+      where table_schema = 'public' and table_name like 'calendar%'`);
+    expect(r.rows).toEqual([]);
+  });
+});
+
+describe('0004: constraints and indexes', () => {
+  const checksOf = async (table: string) =>
+    (
+      await db.execute(
+        sql`select conname from pg_constraint where conrelid = ${table}::regclass and contype = 'c' order by 1`,
+      )
+    ).rows.map((r) => r.conname);
+
+  it('has the CHECK constraints the contract requires', async () => {
+    expect(await checksOf('event')).toEqual([
+      'event_created_via_check',
+      'event_domain_check',
+      'event_kind_check',
+      'event_source_check',
+      'event_synced_check',
+      'event_time_order_check',
+      'event_time_shape_check',
+      'event_visibility_check',
+    ]);
+    expect(await checksOf('event_person')).toEqual([
+      'event_person_created_via_check',
+      'event_person_role_check',
+    ]);
+    expect(await checksOf('project')).toEqual([
+      'project_created_via_check',
+      'project_domain_check',
+      'project_status_check',
+      'project_visibility_check',
+    ]);
+    expect(await checksOf('task')).toEqual([
+      'task_created_via_check',
+      'task_domain_check',
+      'task_estimate_positive_check',
+      'task_needs_check',
+      'task_scheduled_window_check',
+      'task_status_check',
+      'task_visibility_check',
+    ]);
+    expect(await checksOf('note')).toEqual([
+      'note_created_via_check',
+      'note_subject_pair_check',
+      'note_subject_type_check',
+      'note_visibility_check',
+    ]);
+  });
+
+  it('has exactly these foreign keys and delete rules (§4.4: provenance SET NULL, owned children CASCADE)', async () => {
+    // information_schema shows constraint details only to the table owner.
+    const r = await admin.db.execute(sql`
+      select tc.table_name, kcu.column_name, ccu.table_name as target, rc.delete_rule
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu using (constraint_schema, constraint_name)
+      join information_schema.referential_constraints rc using (constraint_schema, constraint_name)
+      join information_schema.constraint_column_usage ccu using (constraint_schema, constraint_name)
+      where tc.constraint_type = 'FOREIGN KEY'
+        and tc.table_name in ('event', 'event_person', 'project', 'task', 'note')
+      order by 1, 2`);
+    expect(
+      r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
+    ).toEqual([
+      'event.created_by -> user RESTRICT',
+      'event_person.created_by -> user RESTRICT',
+      'event_person.event_id -> event CASCADE',
+      'event_person.person_id -> person CASCADE',
+      'note.created_by -> user RESTRICT',
+      'project.created_by -> user RESTRICT',
+      'task.about_person_id -> person SET NULL',
+      'task.assignee_person_id -> person SET NULL',
+      'task.created_by -> user RESTRICT',
+      'task.project_id -> project SET NULL',
+    ]);
+  });
+
+  it('indexes every foreign key, (visibility, created_by), archived_at and the event time columns', async () => {
+    const r = await db.execute(sql`
+      select tablename, indexname from pg_indexes
+      where tablename in ('event', 'event_person', 'project', 'task', 'note') order by 1, 2`);
+    expect(r.rows.map((x) => x.indexname)).toEqual([
+      'event_archived_at_idx',
+      'event_created_by_idx',
+      'event_pkey',
+      'event_start_date_idx',
+      'event_starts_at_idx',
+      'event_visibility_created_by_idx',
+      'event_person_created_by_idx',
+      'event_person_event_person_role_unique',
+      'event_person_person_id_idx',
+      'event_person_pkey',
+      'note_archived_at_idx',
+      'note_created_by_idx',
+      'note_pkey',
+      'note_subject_idx',
+      'note_visibility_created_by_idx',
+      'project_archived_at_idx',
+      'project_created_by_idx',
+      'project_pkey',
+      'project_visibility_created_by_idx',
+      'task_about_person_id_idx',
+      'task_archived_at_idx',
+      'task_assignee_person_id_idx',
+      'task_created_by_idx',
+      'task_pkey',
+      'task_project_id_idx',
+      'task_visibility_created_by_idx',
+    ]);
+  });
+});
+
+describe('0004: constraint behaviour for the runtime role (each case rolled back)', () => {
+  const U = 'u-0004';
+  /** In a rolled-back transaction: a user, a person, a project and a timed event to hang rows on. */
+  const withBase = (
+    fn: (tx: Db, ids: { person: string; project: string; event: string }) => Promise<void>,
+  ) =>
+    rolledBack(async (tx) => {
+      await tx.execute(
+        sql`insert into "user" (id, name, email) values (${U}, 'U', 'u-0004@example.test')`,
+      );
+      const p = await tx.execute(
+        sql`insert into person (created_by, created_via, name, role) values (${U}, 'ui', 'Milo', 'child') returning id`,
+      );
+      const pr = await tx.execute(
+        sql`insert into project (created_by, created_via, title) values (${U}, 'ui', 'Back fence') returning id`,
+      );
+      const ev = await tx.execute(sql`
+        insert into event (created_by, created_via, title, kind, starts_at, ends_at, time_zone)
+        values (${U}, 'ui', 'Swimming', 'activity', '2026-10-14T02:30:00Z', '2026-10-14T03:15:00Z', 'Pacific/Auckland')
+        returning id`);
+      await fn(tx, {
+        person: p.rows[0]?.id as string,
+        project: pr.rows[0]?.id as string,
+        event: ev.rows[0]?.id as string,
+      });
+    });
+  const ev = (tx: Db, cols: string) =>
+    tx.execute(
+      sql.raw(`insert into event (created_by, created_via, title, kind, ${cols.split('|')[0]})
+      values ('${U}', 'ui', 'E', 'other', ${cols.split('|')[1]})`),
+    );
+
+  it('event: accepts a timed and an all-day event, with defaults', () =>
+    withBase(async (tx) => {
+      await ev(
+        tx,
+        "starts_at, ends_at, time_zone|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'Pacific/Auckland'",
+      );
+      await ev(tx, "all_day, start_date, end_date|true, '2026-10-14', '2026-10-15'");
+      const r = await tx.execute(
+        sql`select source, all_day, visibility from event where title = 'E' order by all_day`,
+      );
+      expect(r.rows).toEqual([
+        { source: 'manual', all_day: false, visibility: 'household' },
+        { source: 'manual', all_day: true, visibility: 'household' },
+      ]);
+    }));
+
+  it.each([
+    ['timed without a zone', "starts_at, ends_at|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z'"],
+    [
+      'timed with a date as well',
+      "starts_at, ends_at, time_zone, start_date|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'UTC', '2026-10-14'",
+    ],
+    [
+      'all-day with an instant as well',
+      "all_day, start_date, end_date, starts_at|true, '2026-10-14', '2026-10-15', '2026-10-14T00:00:00Z'",
+    ],
+    ['all-day with no end', "all_day, start_date|true, '2026-10-14'"],
+    [
+      'a timed end before its start',
+      "starts_at, ends_at, time_zone|'2026-10-14T03:30:00Z', '2026-10-14T02:30:00Z', 'UTC'",
+    ],
+    [
+      'an all-day end not after its start (the end is exclusive)',
+      "all_day, start_date, end_date|true, '2026-10-14', '2026-10-14'",
+    ],
+    [
+      'a synced event with no calendar source',
+      "starts_at, ends_at, time_zone, source, external_uid|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'UTC', 'synced', 'uid-1'",
+    ],
+    [
+      'an unknown source',
+      "starts_at, ends_at, time_zone, source|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'UTC', 'imported'",
+    ],
+    [
+      'an unknown domain',
+      "starts_at, ends_at, time_zone, domain|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'UTC', 'work'",
+    ],
+  ])('event rejects %s (CHECK)', (_label, cols) =>
+    withBase(async (tx) => expectCode(ev(tx, cols), '23514')),
+  );
+
+  it('event: a synced event with a source and uid is accepted; RRULE and EXDATEs are stored as given', () =>
+    withBase(async (tx) => {
+      await ev(
+        tx,
+        "starts_at, ends_at, time_zone, source, calendar_source_id, external_uid, rrule, exdates|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'Pacific/Auckland', 'synced', gen_random_uuid(), 'uid-1', 'FREQ=WEEKLY;BYDAY=WE', array['2026-10-21T02:30:00Z']",
+      );
+      const r = await tx.execute(sql`select rrule, exdates from event where source = 'synced'`);
+      expect(r.rows[0]).toEqual({
+        rrule: 'FREQ=WEEKLY;BYDAY=WE',
+        exdates: ['2026-10-21T02:30:00Z'],
+      });
+    }));
+
+  it('event_person: one row per event, person and role', () =>
+    withBase(async (tx, ids) => {
+      const add = (role: string) =>
+        tx.execute(sql`insert into event_person (event_id, person_id, role, created_by, created_via)
+          values (${ids.event}, ${ids.person}, ${role}, ${U}, 'ui')`);
+      await add('attending');
+      await add('responsible');
+      await expectCode(add('attending'), '23505');
+    }));
+
+  it('event_person rows go when their event goes (CASCADE)', () =>
+    withBase(async (tx, ids) => {
+      await tx.execute(
+        sql`insert into event_person (event_id, person_id, role, created_via) values (${ids.event}, ${ids.person}, 'attending', 'ui')`,
+      );
+      await tx.execute(sql`delete from event where id = ${ids.event}`);
+      const left = await tx.execute(sql`select count(*)::int as n from event_person`);
+      expect(left.rows[0]?.n).toBe(0);
+    }));
+
+  it('event_person: an unknown role is rejected', () =>
+    withBase(async (tx, ids) => {
+      await expectCode(
+        tx.execute(
+          sql`insert into event_person (event_id, person_id, role, created_via) values (${ids.event}, ${ids.person}, 'driving', 'ui')`,
+        ),
+        '23514',
+      );
+    }));
+
+  it('event_person rows go when their person goes (CASCADE)', () =>
+    withBase(async (tx, ids) => {
+      await tx.execute(
+        sql`insert into event_person (event_id, person_id, role, created_via) values (${ids.event}, ${ids.person}, 'attending', 'ui')`,
+      );
+      await tx.execute(sql`delete from person where id = ${ids.person}`);
+      const left = await tx.execute(
+        sql`select count(*)::int as n from event_person where event_id = ${ids.event}`,
+      );
+      expect(left.rows[0]?.n).toBe(0);
+    }));
+
+  it('project: defaults home and idea; rejects an unknown status or domain', () =>
+    withBase(async (tx, ids) => {
+      const r = await tx.execute(sql`select domain, status from project where id = ${ids.project}`);
+      expect(r.rows[0]).toEqual({ domain: 'home', status: 'idea' });
+      await expectCode(
+        tx.execute(
+          sql`insert into project (created_via, title, status) values ('ui', 'P', 'someday')`,
+        ),
+        '23514',
+      );
+    }));
+
+  it('project: rejects an unknown domain', () =>
+    withBase(async (tx) => {
+      await expectCode(
+        tx.execute(
+          sql`insert into project (created_via, title, domain) values ('ui', 'P', 'garden')`,
+        ),
+        '23514',
+      );
+    }));
+
+  const task = (tx: Db, cols: string, vals: string) =>
+    tx.execute(
+      sql.raw(
+        `insert into task (created_via, title${cols ? ', ' + cols : ''}) values ('ui', 'T'${vals ? ', ' + vals : ''})`,
+      ),
+    );
+
+  it('task: defaults open with no needs; accepts known needs and a full window', () =>
+    withBase(async (tx) => {
+      await task(
+        tx,
+        'needs, estimate_minutes, scheduled_starts_at, scheduled_ends_at',
+        `'["dry_weather","daylight"]'::jsonb, 180, '2026-10-17T20:00:00Z', '2026-10-17T23:00:00Z'`,
+      );
+      await task(tx, '', '');
+      const r = await tx.execute(
+        sql`select status, needs from task where title = 'T' order by estimate_minutes nulls last`,
+      );
+      expect(r.rows).toEqual([
+        { status: 'open', needs: ['dry_weather', 'daylight'] },
+        { status: 'open', needs: [] },
+      ]);
+    }));
+
+  it.each([
+    ['an unknown need', 'needs', `'["sunshine"]'::jsonb`],
+    ['needs that are not an array', 'needs', `'{"dry_weather": true}'::jsonb`],
+    ['a zero estimate', 'estimate_minutes', '0'],
+    ['a negative estimate', 'estimate_minutes', '-5'],
+    ['a window with only a start', 'scheduled_starts_at', `'2026-10-17T20:00:00Z'`],
+    [
+      'a window that ends before it starts',
+      'scheduled_starts_at, scheduled_ends_at',
+      `'2026-10-17T20:00:00Z', '2026-10-17T19:00:00Z'`,
+    ],
+    ['an unknown status', 'status', `'later'`],
+    ['an unknown domain', 'domain', `'work'`],
+  ])('task rejects %s (CHECK)', (_label, cols, vals) =>
+    withBase(async (tx) => expectCode(task(tx, cols, vals), '23514')),
+  );
+
+  it('task: deleting its project or people clears the links and keeps the task (SET NULL)', () =>
+    withBase(async (tx, ids) => {
+      const t = await tx.execute(sql`
+        insert into task (created_via, title, project_id, assignee_person_id, about_person_id)
+        values ('ui', 'Paint', ${ids.project}, ${ids.person}, ${ids.person}) returning id`);
+      await tx.execute(sql`delete from project where id = ${ids.project}`);
+      await tx.execute(sql`delete from person where id = ${ids.person}`);
+      const r = await tx.execute(
+        sql`select project_id, assignee_person_id, about_person_id from task where id = ${t.rows[0]?.id}`,
+      );
+      expect(r.rows[0]).toEqual({
+        project_id: null,
+        assignee_person_id: null,
+        about_person_id: null,
+      });
+    }));
+
+  it('note: a subject is a type and an id together, or neither', () =>
+    withBase(async (tx, ids) => {
+      await tx.execute(sql`insert into note (created_via, body) values ('ui', 'free-standing')`);
+      await tx.execute(
+        sql`insert into note (created_via, body, subject_type, subject_id) values ('ui', 'about', 'project', ${ids.project})`,
+      );
+      await expectCode(
+        tx.execute(
+          sql`insert into note (created_via, body, subject_type) values ('ui', 'x', 'project')`,
+        ),
+        '23514',
+      );
+    }));
+
+  it('note: rejects an id without a type, and an unknown subject type', () =>
+    withBase(async (tx, ids) => {
+      await expectCode(
+        tx.execute(
+          sql`insert into note (created_via, body, subject_id) values ('ui', 'x', ${ids.project})`,
+        ),
+        '23514',
+      );
+    }));
+
+  it('note: rejects an unknown subject type', () =>
+    withBase(async (tx, ids) => {
+      await expectCode(
+        tx.execute(
+          sql`insert into note (created_via, body, subject_type, subject_id) values ('ui', 'x', 'task', ${ids.project})`,
+        ),
+        '23514',
+      );
+    }));
+
+  it('a creator who owns records cannot be deleted (RESTRICT)', () =>
+    withBase(async (tx) => {
+      await expectCode(tx.execute(sql`delete from "user" where id = ${U}`), '23503');
+    }));
+});
+
+describe('0004 upgrades the production schema (0000–0003) in place', () => {
+  it('applies on top of 0003 with existing People and audit data, changing nothing that was there', async () => {
+    const name = 'home_upgrade_0004_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const upApp = createDb(appUrl);
+    const production = migrationsUpTo('0003_person_and_audit_visibility');
+    const sam: UserActor = {
+      kind: 'user',
+      userId: 'u-up4',
+      email: 'sam@example.test',
+      via: 'ui',
+      channel: 'web',
+    };
+    try {
+      // Production today: 0000–0003, with People written through the real service.
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upApp.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up4', 'Sam', 'sam@example.test')`,
+      );
+      await createPerson(
+        sam,
+        { name: 'Milo', role: 'child', dateOfBirth: '2017-05-03' },
+        { db: upApp.db },
+      );
+      await createPerson(
+        sam,
+        { name: 'Private', role: 'other', visibility: 'private' },
+        { db: upApp.db },
+      );
+      await recordAudit(systemActor, { event: 'auth.sign_in' }, { db: upApp.db });
+      const snapshot = async () => ({
+        people: (await upAdmin.db.execute(sql`select * from person order by id`)).rows,
+        audit: (await upAdmin.db.execute(sql`select * from audit_log order by at, id`)).rows,
+        users: (await upAdmin.db.execute(sql`select id, email from "user" order by id`)).rows,
+      });
+      const before = await snapshot();
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.event') as t`)).rows[0]?.t,
+      ).toBeNull();
+
+      // Apply only what is new: 0004.
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      // Existing rows are byte-for-byte unchanged; the new tables exist and are empty.
+      expect(await snapshot()).toEqual(before);
+      for (const t of ['event', 'event_person', 'project', 'task', 'note']) {
+        const r = await upAdmin.db.execute(sql.raw(`select count(*)::int as n from ${t}`));
+        expect(r.rows[0]?.n, t).toBe(0);
+      }
+
+      // The runtime role reaches every new table through 0002's default privileges.
+      for (const t of ['event', 'event_person', 'project', 'task', 'note']) {
+        const g = await upApp.db.execute(
+          sql.raw(`
+          select has_table_privilege('home_app', '${t}', 'SELECT') as s,
+                 has_table_privilege('home_app', '${t}', 'INSERT') as i,
+                 has_table_privilege('home_app', '${t}', 'UPDATE') as u,
+                 has_table_privilege('home_app', '${t}', 'DELETE') as d,
+                 has_table_privilege('home_app', '${t}', 'TRUNCATE') as tr`),
+        );
+        expect(g.rows[0], t).toEqual({ s: true, i: true, u: true, d: true, tr: false });
+      }
+
+      // The deployed app keeps working on the upgraded schema: People and audit.
+      await expect(
+        createPerson(sam, { name: 'Isla', role: 'child' }, { db: upApp.db }),
+      ).resolves.toBeDefined();
+      expect((await listPeople(sam, {}, { db: upApp.db })).map((p) => p.name).sort()).toEqual([
+        'Isla',
+        'Milo',
+        'Private',
+      ]);
+      await expect(
+        recordAudit(systemActor, { event: 'auth.sign_out' }, { db: upApp.db }),
+      ).resolves.toBeDefined();
+      await expect(upAdmin.db.execute(sql`update audit_log set summary = 'x'`)).rejects.toThrow();
     } finally {
       await upApp.close();
       await upAdmin.close();

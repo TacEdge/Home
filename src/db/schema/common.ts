@@ -14,6 +14,10 @@ export type CreatedVia = (typeof CREATED_VIA)[number];
 export const VISIBILITY = ['household', 'private'] as const;
 export type Visibility = (typeof VISIBILITY)[number];
 
+/** Life domains a record can be tagged with (FAMILY-DATA-MODEL §1). Domains are views, not tables. */
+export const DOMAINS = ['family', 'home', 'us', 'admin'] as const;
+export type Domain = (typeof DOMAINS)[number];
+
 /** Context sensitivity (D15). No table carries it until Package 4a. */
 export const SENSITIVITY = ['normal', 'sensitive'] as const;
 export type Sensitivity = (typeof SENSITIVITY)[number];
