@@ -14,6 +14,10 @@ export type CreatedVia = (typeof CREATED_VIA)[number];
 export const VISIBILITY = ['household', 'private'] as const;
 export type Visibility = (typeof VISIBILITY)[number];
 
+/** Context sensitivity (D15). No table carries it until Package 4a. */
+export const SENSITIVITY = ['normal', 'sensitive'] as const;
+export type Sensitivity = (typeof SENSITIVITY)[number];
+
 /** `<column> in ('a', 'b', …)` for a CHECK constraint, from a constant list. */
 export function oneOf(column: PgColumn, values: readonly string[]): SQL {
   const list = values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');

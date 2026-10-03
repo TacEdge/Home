@@ -77,8 +77,8 @@ Every PR stops when CI is green and is ready for review; **the owner merges it**
 |---|---|---|---|
 | **1** | 1 | This contract, the Fable prompt, ADR 0005, status and roadmap updates. Docs only. **Merged (#16).** | none |
 | **1.1** | — | Migration-first process (this section, ADR 0005 §16, `MIGRATIONS.md`). Docs only. | none |
-| **S — Deployment safety** | one PR | Rule 6: `recordAudit` returns `id` only, every caller checked. Every other query on `audit_log`, including `listAudit`, names its columns, so 2a can add columns to its Drizzle definition safely. Rule 7: the previous-schema compatibility job in CI. No schema change. Must merge **before** the first M2 migration PR. | none |
-| **2 — Foundation and People** | **2a** migration-only | `person`; the P-1 columns on `audit_log`; their Drizzle schema; migration and `home_app` privilege tests. | `0003` |
+| **S — Deployment safety** | one PR, **merged (#20)** | Rule 6: `recordAudit` returns `id` only, every caller checked. Every other query on `audit_log`, including `listAudit`, names its columns, so 2a can add columns to its Drizzle definition safely. Rule 7: the previous-schema compatibility job in CI. No schema change. Must merge **before** the first M2 migration PR. | none |
+| **2 — Foundation and People** | **2a** migration-only, **merged (#21), migrated in production** | `person`; the P-1 columns on `audit_log`; their Drizzle schema; migration and `home_app` privilege tests. | `0003` |
 | | **2b** application | `src/domain/common/`; sensitivity predicate; record-following `listAudit` with `person` registered; `person` service including `linkSelf`; `profile` engine; fixture people. Opened only after `0003` has succeeded in production. PRs for packages 3–5 register each new entity with `listAudit` in the application PR that uses it. | none |
 | **3 — Events, projects, tasks, notes** | 3a / 3b | `event`, `event_person`, `project`, `task`, `note`; then their services, reference rules (§5.5), fixtures and leak tests. | `0004` |
 | **4 — Capture, context, proposals** | 4a / 4b | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; then the `staleness` engine, proposal approval (§5.7) and fixtures. | `0005` |
@@ -212,7 +212,7 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 
 ### 5.6 Entity specifics
 
-- **People:** `linkSelf(actor, personId)` sets `user_id` to the acting user only, on a household-visible person with role `parent`, and only if neither is already linked. Nothing else sets `user_id`.
+- **People:** `linkSelf(actor, personId)` sets `user_id` to the acting user only, on a household-visible person with role `parent`, and only if neither is already linked. `unlinkSelf(actor)` clears only the acting user's own link (ADR 0005 §22). Nothing else sets or clears `user_id`.
 - **Events:** M2 services create and edit `manual` events only. `synced` rows can be created only by M4's sync path.
 - **Captures:** `captureVerbatim(actor, { text, channel, messageId? })` stores `text` exactly as given (rejecting only empty or whitespace-only text and the length limit) and always `private`. Captures are listed only to their creator. Dismiss sets `status` and `dismissed_at`.
 - **Context:** `confirm` sets `last_confirmed_at`; `retire` sets `status = 'retired'` and `retired_at`. Retired and stale context is never deleted.
