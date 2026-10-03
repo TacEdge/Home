@@ -46,6 +46,22 @@ describe('GitHub workflows', () => {
     expect(text).toMatch(/DATABASE_URL_MIGRATE: \$\{\{ secrets\.DATABASE_URL_MIGRATE \}\}/);
   });
 
+  it('ci.yml runs the previous-schema check and its self-test with full history (migration-first)', () => {
+    const text = readFileSync(join(dir, 'ci.yml'), 'utf8');
+    const job = text.slice(
+      text.indexOf('Lint, typecheck, unit and integration tests'),
+      text.indexOf('\n  bundle:'),
+    );
+    expect(job).toMatch(/fetch-depth: 0/);
+    const build = job.indexOf('run: pnpm build');
+    const check = job.indexOf('run: node scripts/check-previous-schema.mts --boot');
+    const self = job.indexOf('run: node scripts/check-previous-schema.mts --self-test');
+    // The boot check needs the build; the self-test leaves a broken schema, so it runs last.
+    expect(build).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(build);
+    expect(self).toBeGreaterThan(check);
+  });
+
   it('dependabot covers github-actions', () => {
     const text = readFileSync('.github/dependabot.yml', 'utf8');
     expect(text).toMatch(/package-ecosystem:\s*github-actions/);

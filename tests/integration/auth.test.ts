@@ -2,6 +2,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { desc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditLog, session as sessionTable, user as userTable } from '@/db/schema';
+import { auditRowColumns } from '@/trust/audit';
 import { getAuth } from '@/trust/auth';
 import { TEST_MAILBOX_PATH } from '@/trust/mail';
 import { testDb } from './db';
@@ -64,7 +65,7 @@ describe('magic-link sign-in', () => {
     expect(linkFrom(mails[0]?.text ?? '')).toContain('/api/auth/magic-link/verify?token=');
 
     const [entry] = await db
-      .select()
+      .select(auditRowColumns)
       .from(auditLog)
       .where(eq(auditLog.event, 'auth.link_requested'))
       .orderBy(desc(auditLog.at))
@@ -116,7 +117,7 @@ describe('magic-link sign-in', () => {
     const sessions = await db.select().from(sessionTable);
     expect(sessions.length).toBeGreaterThan(0);
     const [signIn] = await db
-      .select()
+      .select(auditRowColumns)
       .from(auditLog)
       .where(eq(auditLog.event, 'auth.sign_in'))
       .orderBy(desc(auditLog.at))

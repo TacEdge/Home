@@ -2,6 +2,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditLog, verification } from '@/db/schema';
+import { auditRowColumns } from '@/trust/audit';
 import { TEST_MAILBOX_PATH } from '@/trust/mail';
 import {
   DENIED_AUDIT_MAX_PER_WINDOW,
@@ -80,7 +81,7 @@ describe('sign-in gate', () => {
       ),
     ).toBe(0);
     const [row] = await db
-      .select()
+      .select(auditRowColumns)
       .from(auditLog)
       .where(eq(auditLog.event, 'auth.sign_in_denied'))
       .orderBy(sql`at desc`)

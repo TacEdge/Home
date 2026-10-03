@@ -17,7 +17,7 @@ Migrations always run with the **migration/admin credential** (`DATABASE_URL_MIG
 ## Migration-first: schema before the code that needs it
 
 1. A migration that introduces schema required by new application code lands in a **migration-only PR**.
-2. That PR contains **no application code that requires the new schema**: only the migration, its Drizzle schema definitions, migration and privilege tests, and code that works on both the old and the new schema. Adding a column to an *existing* table's Drizzle definition changes every query that selects or returns all of that table's columns, so those queries must name their columns first.
+2. That PR contains **no application code that requires the new schema**: only the migration, its Drizzle schema definitions, migration and privilege tests, and code that works on both the old and the new schema. Adding a column to an *existing* table's Drizzle definition changes every query that selects or returns all of that table's columns, **and every Drizzle `insert` into it** (Drizzle lists every defined column, unset ones as `default`). Those queries must name their columns first, or the column definition waits for the application PR.
 3. After review and green CI, the owner merges it to `main`.
 4. The production migration runs only through **Migrate production database**, approved by the owner (below).
 5. **Only after that run succeeds** may the application PR that depends on the schema merge. Its description links the successful run. Dispatch **Migrate preview database** too, so the application PR's preview on `home-dev` has the schema.
@@ -25,6 +25,8 @@ Migrations always run with the **migration/admin credential** (`DATABASE_URL_MIG
 7. CI's **previous-schema compatibility check** runs the PR's code (at least the sign-in gate, session, auth and audit integration suites and boot validation, as `home_app`) against a database built from the base branch's migrations only. It fails a PR whose application code needs schema that `main` does not yet have.
 
 A change with no schema dependency is one ordinary PR. Nothing here relaxes the rules below.
+
+**The previous-schema check** (`scripts/check-previous-schema.mts`, `pnpm check:previous-schema`) runs in CI after the normal suites. It finds the base (the PR's merge base with `main`, or the previous `main` after a merge), refuses if a migration that reached the base was edited, removed or reordered, rebuilds the test database from the base's migrations only, and runs every integration suite against it as `home_app`, plus boot validation. `tests/integration/migrations.test.ts` and `app-role.test.ts` are left out because they assert the new schema itself: a migration PR puts its schema assertions there. `--self-test` proves the check fails when schema the code needs is missing. Locally, run it after `pnpm test:integration`; it leaves the test database on the base schema.
 
 ## Rules
 

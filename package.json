@@ -23,7 +23,8 @@
     "db:studio": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "db:reset:test": "node scripts/db-reset-test.mjs",
     "test:e2e": "playwright test",
-    "check:private-terms": "node scripts/check-private-terms.mts"
+    "check:private-terms": "node scripts/check-private-terms.mts",
+    "check:previous-schema": "node scripts/check-previous-schema.mts"
   },
   "dependencies": {
     "better-auth": "^1.7.7",
