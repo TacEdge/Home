@@ -35,9 +35,10 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 ### Implementation clarifications, Package 2b (for review with its PR)
 
 18. **Writes lock what they check.** Every People write locks the row with the visibility predicate (`SELECT … FOR UPDATE`) and repeats the predicate in the `UPDATE` itself, so a concurrent change to private can never let the other adult write into the record. Timestamps come from the database clock, one value per write.
-19. **A linked person stays what `linkSelf` required**: a household-visible parent. While `user_id` is set, changing its visibility to private, its role away from `parent`, or archiving it is refused (`linked_person`). There is no unlink in M2; a wrong link needs an owner-approved decision (and, today, a database fix).
+19. **A linked person stays what `linkSelf` required**: a household-visible parent. While `user_id` is set, changing its visibility to private, its role away from `parent`, or archiving it is refused (`linked_person`). Once unlinked (§22), the record is an ordinary person again.
 20. **Restore applies only to an archived record** (`not_archived` otherwise). A malformed id reads as `NotFoundError`, like a missing or invisible one.
 21. **Auth audit rows keep their pre-0003 SQL.** `recordAudit` names the P-1 columns only for domain writes that carry a snapshot; sign-in and other auth events are written exactly as Package S left them.
+22. **`unlinkSelf(actor)`, owner-approved 2026-10-03,** is the recovery path for a wrong link. It clears only the acting user's own `user_id`; there is no way to name another person or user, so no one can unlink another adult. It changes no other field (`updated_at` aside), runs in one transaction with a structural audit row (`person.unlink_self`, no meta), and refuses Kev and the system actor. The row is locked under the visibility rule and the `UPDATE` repeats both that rule and `user_id = actor`, so a concurrent unlink or relink cannot clear someone else's link. Every domain write now also refuses a system actor at runtime (`not_a_user`), not only by type.
 
 ## Consequences
 

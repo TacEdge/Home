@@ -7,5 +7,8 @@ import { NotPermittedError } from './errors';
  * are the verbatim capture and creating a proposal.
  */
 export function assertCanWrite(actor: UserActor): void {
+  // The types already say UserActor; this holds at runtime too, so a system
+  // actor passed through a cast can never write as a person.
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
   if (actor.via === 'kev') throw new NotPermittedError('kev_cannot_write');
 }

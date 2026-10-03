@@ -196,7 +196,8 @@ export async function restorePerson(
 /**
  * Links the acting user to their own Person (ADR 0005, D-M2-2). Only for an
  * unarchived, household-visible parent with no login yet, and only for a
- * user not yet linked to anyone. Nothing else ever sets `user_id`. Races are
+ * user not yet linked to anyone. Only linkSelf sets `user_id`, and only
+ * unlinkSelf clears it (the actor's own link). Races are
  * settled by the row lock, the UPDATE's own conditions and the unique index.
  */
 export async function linkSelf(actor: UserActor, id: string, deps: Deps = {}): Promise<Person> {
@@ -237,4 +238,30 @@ export async function linkSelf(actor: UserActor, id: string, deps: Deps = {}): P
     if (code === '23505') throw new NotPermittedError('already_linked');
     throw e;
   }
+}
+
+/**
+ * Clears the acting user's own link (ADR 0005 §22): the recovery path for a
+ * wrong linkSelf. It touches only the person linked to this user, and only
+ * `user_id` (and `updated_at`); it can never unlink another adult. The row
+ * is locked under the visibility rule and the UPDATE repeats both the
+ * visibility and `user_id = actor` conditions, so a concurrent unlink or
+ * relink cannot clear someone else's link. NotFoundError when the user has
+ * no link. Afterwards the person is an ordinary record again: the
+ * linked-person rules (§19) no longer apply.
+ */
+export async function unlinkSelf(actor: UserActor, deps: Deps = {}): Promise<Person> {
+  assertCanWrite(actor);
+  return auditedWrite(actor, deps, async (tx) => {
+    const mine = eq(person.userId, actor.userId);
+    const [current] = await tx
+      .select()
+      .from(person)
+      .where(and(mine, visibleTo(actor, person)))
+      .for('update')
+      .limit(1);
+    if (!current) throw new NotFoundError(SUBJECT);
+    const row = await update(tx, actor, current.id, 'include', { userId: null }, mine);
+    return { result: row, audit: audit('unlink_self', row) };
+  });
 }

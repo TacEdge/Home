@@ -11,6 +11,7 @@ export class NotFoundError extends Error {
 
 export type NotPermittedCode =
   | 'kev_cannot_write' // CLAUDE.md rule 3: Kev proposes, people approve
+  | 'not_a_user' // domain writes are by a signed-in person, never the system actor
   | 'not_creator' // only the creator may change a record's visibility
   | 'not_eligible' // the record does not meet the operation's rules
   | 'not_archived' // restore applies only to an archived record

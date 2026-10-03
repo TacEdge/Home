@@ -212,7 +212,7 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 
 ### 5.6 Entity specifics
 
-- **People:** `linkSelf(actor, personId)` sets `user_id` to the acting user only, on a household-visible person with role `parent`, and only if neither is already linked. Nothing else sets `user_id`.
+- **People:** `linkSelf(actor, personId)` sets `user_id` to the acting user only, on a household-visible person with role `parent`, and only if neither is already linked. `unlinkSelf(actor)` clears only the acting user's own link (ADR 0005 §22). Nothing else sets or clears `user_id`.
 - **Events:** M2 services create and edit `manual` events only. `synced` rows can be created only by M4's sync path.
 - **Captures:** `captureVerbatim(actor, { text, channel, messageId? })` stores `text` exactly as given (rejecting only empty or whitespace-only text and the length limit) and always `private`. Captures are listed only to their creator. Dismiss sets `status` and `dismissed_at`.
 - **Context:** `confirm` sets `last_confirmed_at`; `retire` sets `status = 'retired'` and `retired_at`. Retired and stale context is never deleted.
