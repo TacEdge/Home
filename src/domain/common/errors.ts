@@ -16,7 +16,11 @@ export type NotPermittedCode =
   | 'not_eligible' // the record does not meet the operation's rules
   | 'not_archived' // restore applies only to an archived record
   | 'already_linked' // the person or the user is already linked
-  | 'linked_person'; // a linked person must stay a household parent
+  | 'linked_person' // a linked person must stay a household parent
+  | 'references_private' // a household record may not point at a private one (contract §5.5)
+  | 'referenced_by_household' // a record household records point at cannot become private
+  | 'synced_event' // synced events are read-only until M4's sync path
+  | 'not_home_domain'; // V0.1 projects are home projects
 
 export class NotPermittedError extends Error {
   constructor(public readonly code: NotPermittedCode) {

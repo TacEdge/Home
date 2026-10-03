@@ -16,12 +16,7 @@ import { auditSubjects } from '@/trust/audit-subjects';
 // table may be PENDING between its migration PR and its application PR, and
 // only while nothing outside src/db refers to it. The application PR that
 // starts using a table registers it and removes it from this list.
-const PENDING_REGISTRATION: Record<string, string> = {
-  event: 'Package 3b',
-  project: 'Package 3b',
-  task: 'Package 3b',
-  note: 'Package 3b',
-};
+const PENDING_REGISTRATION: Record<string, string> = {};
 
 const tables = (Object.values(schema) as unknown[]).filter((v): v is PgTable => is(v, PgTable));
 const visibilityTables = tables
