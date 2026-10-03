@@ -149,16 +149,18 @@ CREATE INDEX "task_origin_capture_id_idx" ON "task" USING btree ("origin_capture
 CREATE INDEX "note_origin_capture_id_idx" ON "note" USING btree ("origin_capture_id");--> statement-breakpoint
 -- Capture first, organise second (CLAUDE.md): a capture keeps the user's own
 -- words exactly as given. Organising adds to the row (status, organised_into,
--- organised_at) but nothing may change what was said, who said it, when, or
--- through which channel, whichever role or path tries. Deleting the row (a
--- later purge) is unaffected.
+-- organised_at) but nothing may change what was said, who said it, when, how
+-- it was created, or through which channel, whichever role or path tries.
+-- message_id stays writable (Package 5 attaches the message). Deleting the
+-- row (a later purge) is unaffected.
 CREATE OR REPLACE FUNCTION capture_source_immutable() RETURNS trigger AS $$
 BEGIN
   IF NEW."text" IS DISTINCT FROM OLD."text"
      OR NEW."created_by" IS DISTINCT FROM OLD."created_by"
      OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+     OR NEW."created_via" IS DISTINCT FROM OLD."created_via"
      OR NEW."channel" IS DISTINCT FROM OLD."channel" THEN
-    RAISE EXCEPTION 'a capture keeps its original words: text, created_by, created_at and channel cannot change';
+    RAISE EXCEPTION 'a capture keeps its original words: text, created_by, created_at, created_via and channel cannot change';
   END IF;
   RETURN NEW;
 END;

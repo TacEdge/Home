@@ -6,8 +6,9 @@ import { CHANNELS, commonColumns, CREATED_VIA, oneOf } from './common';
 // Something a user told HOME, stored verbatim before anyone decides what it
 // is (FAMILY-DATA-MODEL §3, Capture; M2 contract §4.2). Capture first,
 // organise second: `text` is the user's own words, exactly as given, and a
-// trigger (migration 0005) refuses any change to it, or to who said it and
-// when, for every role. Organising records the result alongside the text
+// trigger (migration 0005) refuses any change to it, or to who said it, when,
+// how (created_via) and through which channel, for every role. `message_id`
+// stays writable so Package 5 can attach the message. Organising records the result alongside the text
 // (`status`, `organised_into`, `organised_at`); it never rewrites it.
 // `created_by` is the person who captured it (captured_by). Captures are
 // always private to their creator.

@@ -63,6 +63,23 @@ async function expectCode(p: PromiseLike<unknown>, code: string) {
   expect(error?.cause?.code ?? error?.code).toBe(code);
 }
 
+/**
+ * Drops a scratch database once its connections are gone. `pool.end()`
+ * resolves before its clients' sockets close, so a forced drop straight after
+ * would kill a backend that is still disconnecting and surface as an
+ * unhandled 57P01 on that client. Force is kept only as a last resort.
+ */
+async function dropDatabase(name: string) {
+  for (let i = 0; i < 50; i++) {
+    const r = await admin.db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = ${name}`,
+    );
+    if (r.rows[0]?.n === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+}
+
 /** Runs `fn` as home_app in a transaction that is always rolled back. */
 async function rolledBack(fn: (tx: Db) => Promise<void>) {
   const rollback = new Error('rollback');
@@ -408,7 +425,7 @@ describe('0003 upgrades the production schema (0000–0002) in place', () => {
       await upApp.close();
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
-      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+      await dropDatabase(name);
     }
   });
 });
@@ -993,7 +1010,7 @@ describe('0004 upgrades the production schema (0000–0003) in place', () => {
       await upApp.close();
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
-      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+      await dropDatabase(name);
     }
   });
 });
@@ -1280,6 +1297,7 @@ describe('0005: constraint behaviour for the runtime role (each case rolled back
       ['its text, even by a trailing space', sql`text = text || ' '`],
       ['who said it', sql`created_by = ${V}`],
       ['when it was said', sql`created_at = now() - interval '1 day'`],
+      ['how it was created', sql`created_via = 'kev'`],
       ['its channel', sql`channel = 'sms'`],
     ])(
       'refuses any change to %s, for the runtime role (the trigger runs before any CHECK)',
@@ -1289,11 +1307,30 @@ describe('0005: constraint behaviour for the runtime role (each case rolled back
         }),
     );
 
+    it('keeps message_id writable, so Package 5 can attach or backfill the message', () =>
+      withBase(async (tx, ids) => {
+        const m = '00000000-0000-4000-8000-000000000001';
+        await tx.execute(sql`update capture set message_id = ${m} where id = ${ids.capture}`);
+        expect(
+          (await tx.execute(sql`select message_id from capture where id = ${ids.capture}`)).rows,
+        ).toEqual([{ message_id: m }]);
+        await tx.execute(sql`update capture set message_id = null where id = ${ids.capture}`);
+        const r = await tx.execute(
+          sql`select text, message_id from capture where id = ${ids.capture}`,
+        );
+        expect(r.rows[0]).toEqual({ text: 'x', message_id: null });
+      }));
+
     it('refuses changing the words even for the migration/admin role (trigger, not permission)', () =>
       withBase(async (tx, ids) => {
         await fails(
           tx,
           sql`update capture set text = 'rewritten' where id = ${ids.capture}`,
+          RAISED,
+        );
+        await fails(
+          tx,
+          sql`update capture set created_via = 'kev' where id = ${ids.capture}`,
           RAISED,
         );
         // Setting the same words is not a change, and other columns stay writable.
@@ -1720,7 +1757,7 @@ describe('0005 upgrades the production schema (0000–0004) in place', () => {
       await upApp.close();
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
-      await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
+      await dropDatabase(name);
     }
   });
 });
