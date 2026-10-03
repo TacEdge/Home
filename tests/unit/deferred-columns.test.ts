@@ -14,13 +14,8 @@ import * as schema from '@/db/schema';
 // definitions and empties this list. Running `pnpm db:generate` meanwhile
 // would emit DROP statements for them; the additive-migration guard refuses
 // such a migration.
-const DEFERRED: Record<string, string[]> = {
-  // Migration 0005 (Package 4a); Package 4b adds the definitions.
-  event: ['origin_capture_id'],
-  project: ['origin_capture_id'],
-  task: ['origin_capture_id'],
-  note: ['origin_capture_id'],
-};
+// None at present: Package 4b defined origin_capture_id after 0005 ran.
+const DEFERRED: Record<string, string[]> = {};
 
 const dir = 'src/db/migrations';
 const journal = JSON.parse(readFileSync(join(dir, 'meta/_journal.json'), 'utf8')) as {

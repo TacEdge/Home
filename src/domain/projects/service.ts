@@ -8,7 +8,7 @@ import { NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { assertNotReferencedByHousehold } from '../common/references';
-import { auditedWrite, type Deps } from '../common/write';
+import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import {
   createProjectInput,
   updateProjectInput,
@@ -42,7 +42,7 @@ export async function createProject(
   return auditedWrite(actor, deps, async (tx) => {
     const [row] = await tx
       .insert(project)
-      .values({ ...data, createdBy: actor.userId, createdVia: 'ui' })
+      .values({ ...data, createdBy: actor.userId, ...provenanceOf(deps) })
       .returning();
     if (!row) throw new Error('project insert returned no row');
     return {

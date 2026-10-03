@@ -2,7 +2,7 @@ import 'server-only';
 import { and, count, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import type { DbOrTx } from '@/db/create';
-import { event, eventPerson, note, task } from '@/db/schema';
+import { context, event, eventPerson, note, task } from '@/db/schema';
 import type { UserActor } from '@/trust/actor';
 import { visibleTo } from '@/trust/visibility';
 import { NotFoundError, NotPermittedError } from './errors';
@@ -57,10 +57,17 @@ function incomingFor(entity: 'person' | 'project' | 'event'): Incoming[] {
     visibility: household(note),
     extra: eq(note.subjectType, type),
   });
+  const contextAbout = (type: string): Incoming => ({
+    table: context,
+    column: context.subjectId,
+    visibility: household(context),
+    extra: eq(context.subjectType, type),
+  });
   if (entity === 'project') {
     return [
       { table: task, column: task.projectId, visibility: household(task) },
       noteAbout('project'),
+      contextAbout('project'),
     ];
   }
   if (entity === 'event') return [noteAbout('event')];
@@ -72,6 +79,7 @@ function incomingFor(entity: 'person' | 'project' | 'event'): Incoming[] {
     },
     { table: task, column: task.aboutPersonId, visibility: household(task) },
     noteAbout('person'),
+    contextAbout('person'),
     // An annotation is as visible as its event.
     {
       table: eventPerson,

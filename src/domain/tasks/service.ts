@@ -8,7 +8,7 @@ import { NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { checkReferences, type Ref } from '../common/references';
-import { auditedWrite, type Deps } from '../common/write';
+import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import {
   createTaskInput,
   updateTaskInput,
@@ -66,7 +66,7 @@ export async function createTask(
         ...windowColumns(scheduled),
         completedAt: data.status === 'done' ? sql`now()` : null,
         createdBy: actor.userId,
-        createdVia: 'ui',
+        ...provenanceOf(deps),
       })
       .returning();
     if (!row) throw new Error('task insert returned no row');

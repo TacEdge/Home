@@ -20,7 +20,9 @@ export type NotPermittedCode =
   | 'references_private' // a household record may not point at a private one (contract §5.5)
   | 'referenced_by_household' // a record household records point at cannot become private
   | 'synced_event' // synced events are read-only until M4's sync path
-  | 'not_home_domain'; // V0.1 projects are home projects
+  | 'not_home_domain' // V0.1 projects are home projects
+  | 'sensitive_context' // sensitive context is read and written only by a person, directly (D15)
+  | 'proposal_not_pending'; // a decided or expired proposal can never be approved or rejected
 
 export class NotPermittedError extends Error {
   constructor(public readonly code: NotPermittedCode) {
