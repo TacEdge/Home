@@ -72,6 +72,36 @@ describe('runtime/app role (home_app)', () => {
     expect(r.rows[0]?.n).toBeGreaterThan(0);
   });
 
+  it("has exactly SELECT, INSERT, UPDATE and DELETE on person, through 0002's default privileges", async () => {
+    const grants = await db.execute(
+      sql`select privilege_type from information_schema.role_table_grants
+          where grantee = 'home_app' and table_name = 'person' order by 1`,
+    );
+    expect(grants.rows.map((r) => r.privilege_type)).toEqual([
+      'DELETE',
+      'INSERT',
+      'SELECT',
+      'UPDATE',
+    ]);
+  });
+
+  it('cannot ALTER, DROP or TRUNCATE person', async () => {
+    await expectPermissionDenied(db.execute(sql`alter table person add column x int`));
+    await expectPermissionDenied(db.execute(sql`drop table person`));
+    await expectPermissionDenied(db.execute(sql`truncate person`));
+  });
+
+  it('cannot UPDATE the new audit_log columns either (permission, not trigger)', async () => {
+    await expectPermissionDenied(
+      db.execute(sql`update audit_log set visibility = 'private' where event = 'test.app_role'`),
+    );
+    await expectPermissionDenied(
+      db.execute(
+        sql`update audit_log set visible_to_user_id = 'u-x' where event = 'test.app_role'`,
+      ),
+    );
+  });
+
   it('cannot UPDATE audit_log rows (permission, not trigger)', async () => {
     await expectPermissionDenied(
       db.execute(sql`update audit_log set summary = 'tampered' where event = 'test.app_role'`),
