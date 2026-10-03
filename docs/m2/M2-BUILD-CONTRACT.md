@@ -81,8 +81,9 @@ Every PR stops when CI is green and is ready for review; **the owner merges it**
 | **2 — Foundation and People** | **2a** migration-only, **merged (#21), migrated in production** | `person`; the P-1 columns on `audit_log`; their Drizzle schema; migration and `home_app` privilege tests. | `0003` |
 | | **2b** application, **merged (#22)** | `src/domain/common/`; sensitivity predicate; record-following `listAudit` with `person` registered; `person` service including `linkSelf`; `profile` engine; fixture people. Opened only after `0003` has succeeded in production. PRs for packages 3–5 register each new entity with `listAudit` in the application PR that uses it. | none |
 | **3 — Events, projects, tasks, notes** | **3a** migration-only, **merged (#23)** | `event`, `event_person`, `project`, `task`, `note`; their Drizzle schema; migration and `home_app` privilege tests. | `0004` |
-| | **3b** application, in review | Their services, reference rules (§5.5), Activity registration, fixtures and leak tests. Opened only after `0004` has succeeded in production. | none |
-| **4 — Capture, context, proposals** | 4a / 4b | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; then the `staleness` engine, proposal approval (§5.7) and fixtures. | `0005` |
+| | **3b** application, **merged (#24)** | Their services, reference rules (§5.5), Activity registration, fixtures and leak tests. Opened only after `0004` has succeeded in production. | none |
+| **4 — Capture, context, proposals** | **4a** migration-only, in review | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; their Drizzle schema, except `origin_capture_id` on those four existing tables, which waits for 4b (§2.1 rule 2, ADR 0005 §28); migration and `home_app` privilege tests. | `0005` |
+| | **4b** application | The `staleness` engine, capture, context and proposal services, proposal approval (§5.7), the deferred `origin_capture_id` definitions, Activity registration and fixtures. Opened only after `0005` has succeeded in production. | none |
 | **5 — Kev bookkeeping, seed, privacy suite** | 5a / 5b | `conversation`, `message`, `kev_usage` (append-only), `insight_response`, `capture.message_id` foreign key; then their services, `pnpm db:seed:fixtures`, the privacy suite (§8.3) and docs (§9). | `0006` |
 
 ### 2.3 Status of the first Package 2 attempt (PR #17)
@@ -168,7 +169,7 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 | Rule | Stored in M2 |
 |---|---|
 | Soft-deleted records purged after 30 days | `archived_at` on every user-facing table and `conversation` |
-| Dismissed captures purged after 30 days | `capture.dismissed_at` |
+| Dismissed captures purged after 30 days | `capture.dismissed_at`, set exactly while a capture is dismissed (`CHECK`) and indexed |
 | Conversations and messages deleted after 90 days | `message.created_at`, `conversation.last_message_at` |
 | Hard delete on request | Foreign keys chosen so a record can be deleted without orphaning or blocking: `ON DELETE SET NULL` for provenance links (`origin_capture_id`, `capture_id`, `message_id`, `conversation_id`, `project_id`, person references on tasks), `ON DELETE CASCADE` for owned children (`event_person`, `message`) |
 | Audit stays complete after a purge | Audit rows are structural only (P-1 d), so purging a record leaves nothing private behind in the append-only log; once the record is gone, the row's snapshot keeps it private (P-1 b) |

@@ -7,3 +7,6 @@ export * from './event';
 export * from './project';
 export * from './task';
 export * from './note';
+export * from './capture';
+export * from './context';
+export * from './proposal';

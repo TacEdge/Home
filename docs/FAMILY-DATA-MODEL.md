@@ -24,7 +24,7 @@ Every user-facing table has:
 | `created_via` | enum `ui` \| `kev` \| `sync` | `kev` means created by approving a Kev proposal |
 | `visibility` | enum `household` \| `private` | default `household` (captures default `private`) |
 | `archived_at` | timestamptz null | soft delete; purged after 30 days |
-| `origin_capture_id` | uuid null | on records organised from a capture |
+| `origin_capture_id` | uuid null | on records organised from a capture (`event`, `project`, `task`, `note`, `context`; migration `0005`, `ON DELETE SET NULL`) |
 
 ## 3. V0.1 entities
 
@@ -182,6 +182,8 @@ user says something ──► Capture(new, private)          ← stored immediat
 ```
 A capture may organise into several records ("book the WOF and remember the car's due for tyres" → a task and a context record). If nothing fits, it stays a capture — which is fine.
 
+Implementation (migration `0005`, M2 Package 4a): common fields with `visibility` always `private` (`CHECK`) and `created_by` as `captured_by` (required; never a `sync` record). `text` is stored exactly as given (it must contain a non-space character) and a trigger refuses any change to `text`, `created_by`, `created_at` or `channel` for every role, so organising never rewrites what was said. `channel` is `web`. `message_id` has no foreign key until `message` exists (Package 5). `organised_into` is a JSON array of `{type, id}` (`task`, `event`, `project`, `note`, `context`; uuid ids); `organised` requires `organised_at` and at least one reference; `dismissed_at` is set exactly while `dismissed`, for the 30-day purge.
+
 ### Context — "what Kev knows"
 Replaces the earlier `Fact`. Family knowledge that isn't naturally an event, task or note, and which can change.
 
@@ -206,6 +208,8 @@ Rules:
 - Kev never proposes `sensitive` context and never infers emotions, health, behaviour, development or relationship dynamics. People may record practical sensitive details themselves (e.g. an allergy).
 - Everything is listed in Settings → *What Kev knows*: editable, confirmable, retirable, deletable.
 
+Implementation (`0005`): common fields plus `origin_capture_id` (→ `capture`, `ON DELETE SET NULL`). A `household` subject has no `subject_id`; `person` and `project` subjects must have one (no foreign key; the service validates it). `source_user_id` is required (→ `user`, `RESTRICT`); `source_ref` has no foreign key. `last_confirmed_at` defaults to creation, `sensitivity` to `normal`, `status` to `active` (`proposed` reserved); `retired_at` is set exactly while `retired`.
+
 ### Conversation / Message
 Kev chat history, owned by one user, retained 90 days, not used as memory.
 
@@ -227,6 +231,8 @@ A change Kev wants to make, awaiting approval.
 | `summary` | human-readable, speakable |
 | `status` | `pending` \| `approved` \| `rejected` \| `expired` \| `failed` |
 | `decided_by`, `decided_at`, `decided_channel`, `result_ref` | |
+
+Implementation (`0005`): common fields with `visibility` always `private`; `created_by` must equal `requested_by_user_id`, and `decided_by`, when set, must too (only the requester decides). `capture_id` → `capture` `ON DELETE SET NULL`; `conversation_id` has no foreign key until `conversation` exists (Package 5). `payload` is a JSON object; `summary` is not blank. `expires_at` defaults to 7 days after creation. Each `status` has one shape: `pending`/`expired` undecided, `approved` with decider, time, channel and `result_ref`, `rejected` with decider, time and channel, `failed` with those and a `failure_reason` code.
 
 ### AuditLog, KevUsage
 - `audit_log` — append-only record of writes and Kev tool calls. Migration `0003` adds `visibility` (default `household`) and `visible_to_user_id`: a write-time snapshot of the affected record's visibility, so Activity never reveals more than the record would (ADR 0005 §9).

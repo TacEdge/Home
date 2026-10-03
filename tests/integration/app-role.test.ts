@@ -110,6 +110,73 @@ describe('runtime/app role (home_app)', () => {
     },
   );
 
+  it.each(['capture', 'context', 'proposal'])(
+    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0005, through 0002's default privileges)",
+    async (table) => {
+      const grants = await db.execute(
+        sql`select privilege_type, is_grantable from information_schema.role_table_grants
+            where grantee = 'home_app' and table_name = ${table} order by 1`,
+      );
+      expect(grants.rows).toEqual(
+        ['DELETE', 'INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+          privilege_type,
+          is_grantable: 'NO',
+        })),
+      );
+    },
+  );
+
+  it.each(['capture', 'context', 'proposal'])(
+    'cannot ALTER, DROP or TRUNCATE %s',
+    async (table) => {
+      await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
+      await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
+      await expectPermissionDenied(db.execute(sql.raw(`truncate ${table}`)));
+    },
+  );
+
+  it('gains no column-level grants and no privileges on any other table through 0005', async () => {
+    // No explicit column ACL on any table 0005 creates or alters.
+    const cols = await db.execute(sql`
+      select attrelid::regclass::text as table_name, attname from pg_attribute
+      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note']::regclass[])
+        and attacl is not null`);
+    expect(cols.rows).toEqual([]);
+    const tables = await db.execute(sql`
+      select distinct table_name from information_schema.role_table_grants
+      where grantee = 'home_app' and table_schema = 'public' order by 1`);
+    expect(tables.rows.map((r) => r.table_name)).toEqual([
+      'account',
+      'audit_log',
+      'capture',
+      'context',
+      'event',
+      'event_person',
+      'note',
+      'person',
+      'project',
+      'proposal',
+      'rate_limit',
+      'session',
+      'task',
+      'user',
+      'verification',
+    ]);
+  });
+
+  it('cannot disable or drop the capture trigger that keeps the original words', async () => {
+    await expectPermissionDenied(db.execute(sql`alter table capture disable trigger all`));
+    await expectPermissionDenied(db.execute(sql`drop trigger capture_source_immutable on capture`));
+    await expectPermissionDenied(
+      db.execute(sql`create or replace function capture_source_immutable() returns trigger as $$
+        begin return new; end $$ language plpgsql`),
+    );
+    const r = await db.execute(
+      sql`select tgname, tgenabled from pg_trigger where tgrelid = 'capture'::regclass and not tgisinternal`,
+    );
+    expect(r.rows).toEqual([{ tgname: 'capture_source_immutable', tgenabled: 'O' }]);
+  });
+
   it('cannot ALTER, DROP or TRUNCATE person', async () => {
     await expectPermissionDenied(db.execute(sql`alter table person add column x int`));
     await expectPermissionDenied(db.execute(sql`drop table person`));
