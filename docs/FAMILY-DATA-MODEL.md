@@ -105,6 +105,8 @@ Anything that happens at a time.
 | `source` | `manual` \| `synced` |
 | `calendar_source_id`, `external_uid`, `external_etag` | for synced events; provider-neutral |
 
+Implementation (migration `0004`, M2 Package 3a): a timed event has `starts_at`, `ends_at` and `time_zone` and no dates; an all-day event has `start_date` and an **exclusive** `end_date` (RFC 5545) and no instants; both enforced by `CHECK`. `rrule` and `exdates` (`text[]`) are stored as given; nothing parses them in M2. `source = 'synced'` requires `calendar_source_id` and `external_uid`; `calendar_source_id` has no foreign key until M4 (ADR 0005, D-M2-3). Indexes on `starts_at` and `start_date` serve range reads.
+
 ### EventPerson (annotation)
 Who is involved and how. Works for manual and synced events.
 
@@ -112,6 +114,8 @@ Who is involved and how. Works for manual and synced events.
 |---|---|
 | `event_id` (or `external_uid` for synced series), `person_id` | |
 | `role` | `attending` \| `responsible` (e.g. doing drop-off/pickup) |
+
+Implementation (`0004`): `event_person` has its own uuid id, a unique `(event_id, person_id, role)`, and cascades with its event and its person. It has no visibility column.
 
 ### Task
 
@@ -129,6 +133,8 @@ Who is involved and how. Works for manual and synced events.
 | `scheduled_for` | optional agreed window |
 | `completed_at` | |
 
+Implementation (`0004`): `needs` is a JSON array drawn only from the four values; `estimate_minutes` is positive; `scheduled_for` is two columns, `scheduled_starts_at` and `scheduled_ends_at`, both or neither. Deleting a task's project or person clears the link (`ON DELETE SET NULL`).
+
 ### Project
 V0.1: home projects only.
 
@@ -139,12 +145,16 @@ V0.1: home projects only.
 | `status` | `idea` \| `active` \| `paused` \| `done` |
 | `target_date` | optional |
 
+Implementation (`0004`): `domain` defaults to `home` and accepts the four domains; V0.1 services accept only `home`. `status` defaults to `idea`.
+
 ### Note
 
 | Field | Notes |
 |---|---|
 | `body` | markdown |
 | `subject_type`, `subject_id` | `project` \| `person` \| `event` \| null |
+
+Implementation (`0004`): `subject_type` and `subject_id` are both set or both null. The subject has no foreign key; the service validates it.
 
 ### Capture — "capture first"
 Something a user told HOME, stored verbatim before anyone decides what it is.

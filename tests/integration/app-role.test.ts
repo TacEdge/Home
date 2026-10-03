@@ -85,6 +85,31 @@ describe('runtime/app role (home_app)', () => {
     ]);
   });
 
+  it.each(['event', 'event_person', 'project', 'task', 'note'])(
+    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0004, through 0002's default privileges)",
+    async (table) => {
+      const grants = await db.execute(
+        sql`select privilege_type from information_schema.role_table_grants
+            where grantee = 'home_app' and table_name = ${table} order by 1`,
+      );
+      expect(grants.rows.map((r) => r.privilege_type)).toEqual([
+        'DELETE',
+        'INSERT',
+        'SELECT',
+        'UPDATE',
+      ]);
+    },
+  );
+
+  it.each(['event', 'event_person', 'project', 'task', 'note'])(
+    'cannot ALTER, DROP or TRUNCATE %s',
+    async (table) => {
+      await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
+      await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
+      await expectPermissionDenied(db.execute(sql.raw(`truncate ${table}`)));
+    },
+  );
+
   it('cannot ALTER, DROP or TRUNCATE person', async () => {
     await expectPermissionDenied(db.execute(sql`alter table person add column x int`));
     await expectPermissionDenied(db.execute(sql`drop table person`));

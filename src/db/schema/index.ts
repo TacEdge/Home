@@ -3,3 +3,7 @@ export * from './common';
 export * from './auth';
 export * from './audit';
 export * from './person';
+export * from './event';
+export * from './project';
+export * from './task';
+export * from './note';
