@@ -8,6 +8,7 @@ import type { UserActor } from '@/trust/actor';
 import { visibleTo } from '@/trust/visibility';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
+import { assertNotReferencedByHousehold } from '../common/references';
 import { auditedWrite, type Deps } from '../common/write';
 import {
   createPersonInput,
@@ -152,6 +153,9 @@ export async function updatePerson(
     if (data.visibility !== undefined && data.visibility !== current.visibility) {
       // Only the creator may change who can see a record (contract §5.3).
       if (current.createdBy !== actor.userId) throw new NotPermittedError('not_creator');
+      // Household tasks, notes and event annotations must not come to reveal it (contract §5.5).
+      if (data.visibility === 'private')
+        await assertNotReferencedByHousehold(tx, 'person', current.id);
     }
     if (current.userId !== null) {
       // A linked person stays what linkSelf required: a household parent.

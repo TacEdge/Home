@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '@/db/create';
-import { person, user } from '@/db/schema';
+import { event, eventPerson, note, person, project, task, user } from '@/db/schema';
 import type { UserActor } from '@/trust/actor';
 import { ALEX, SAM } from '../fixtures/users';
 
@@ -39,5 +39,11 @@ export async function ensureFixtureUsers(db: Db): Promise<Household> {
  * domain table, added in the package that adds the table.
  */
 export async function clearDomainRows(db: Db): Promise<void> {
+  // Children before the rows they reference.
+  await db.delete(eventPerson);
+  await db.delete(note);
+  await db.delete(task);
+  await db.delete(event);
+  await db.delete(project);
   await db.delete(person);
 }

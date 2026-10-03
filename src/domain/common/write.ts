@@ -36,16 +36,18 @@ export function snapshotOf(record: DomainAudit['record']) {
 /**
  * Runs a domain write and its audit row in one transaction (M2 contract
  * §5.3): if either fails, neither happens. This is the only way services
- * record domain audit rows.
+ * record domain audit rows. `audit: null` means the call changed nothing
+ * (an idempotent repeat), so there is nothing to audit.
  */
 export async function auditedWrite<T>(
   actor: UserActor,
   deps: Deps,
-  fn: (tx: DbOrTx) => Promise<{ result: T; audit: DomainAudit }>,
+  fn: (tx: DbOrTx) => Promise<{ result: T; audit: DomainAudit | null }>,
 ): Promise<T> {
   const db = deps.db ?? getDb();
   return db.transaction(async (tx) => {
     const { result, audit } = await fn(tx);
+    if (audit === null) return result;
     await recordAudit(
       actor,
       {

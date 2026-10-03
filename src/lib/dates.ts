@@ -45,6 +45,20 @@ export function compareIsoDates(a: IsoDate, b: IsoDate): -1 | 0 | 1 {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/**
+ * True for a time zone name the runtime's IANA database knows (a region
+ * name, or `UTC`). The database cannot check this, so input schemas do.
+ */
+export function isValidTimeZone(timeZone: string): boolean {
+  if (timeZone.trim() !== timeZone || timeZone.length === 0 || timeZone.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-NZ', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The calendar date of an instant in an IANA time zone, for callers computing "today". */
 export function isoDateInZone(instant: Date, timeZone: string): IsoDate {
   const parts = new Intl.DateTimeFormat('en-NZ', {

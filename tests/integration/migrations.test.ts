@@ -666,7 +666,7 @@ describe('0004: constraint behaviour for the runtime role (each case rolled back
       );
       await ev(tx, "all_day, start_date, end_date|true, '2026-10-14', '2026-10-15'");
       const r = await tx.execute(
-        sql`select source, all_day, visibility from event where title = 'E' order by all_day`,
+        sql`select source, all_day, visibility from event where title = 'E' and created_at = now() order by all_day`,
       );
       expect(r.rows).toEqual([
         { source: 'manual', all_day: false, visibility: 'household' },
@@ -715,7 +715,9 @@ describe('0004: constraint behaviour for the runtime role (each case rolled back
         tx,
         "starts_at, ends_at, time_zone, source, calendar_source_id, external_uid, rrule, exdates|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'Pacific/Auckland', 'synced', gen_random_uuid(), 'uid-1', 'FREQ=WEEKLY;BYDAY=WE', array['2026-10-21T02:30:00Z']",
       );
-      const r = await tx.execute(sql`select rrule, exdates from event where source = 'synced'`);
+      const r = await tx.execute(
+        sql`select rrule, exdates from event where source = 'synced' and created_at = now()`,
+      );
       expect(r.rows[0]).toEqual({
         rrule: 'FREQ=WEEKLY;BYDAY=WE',
         exdates: ['2026-10-21T02:30:00Z'],
@@ -738,7 +740,9 @@ describe('0004: constraint behaviour for the runtime role (each case rolled back
         sql`insert into event_person (event_id, person_id, role, created_via) values (${ids.event}, ${ids.person}, 'attending', 'ui')`,
       );
       await tx.execute(sql`delete from event where id = ${ids.event}`);
-      const left = await tx.execute(sql`select count(*)::int as n from event_person`);
+      const left = await tx.execute(
+        sql`select count(*)::int as n from event_person where event_id = ${ids.event}`,
+      );
       expect(left.rows[0]?.n).toBe(0);
     }));
 
@@ -802,7 +806,8 @@ describe('0004: constraint behaviour for the runtime role (each case rolled back
       );
       await task(tx, '', '');
       const r = await tx.execute(
-        sql`select status, needs from task where title = 'T' order by estimate_minutes nulls last`,
+        // now() is this transaction's start: only the rows this test inserted.
+        sql`select status, needs from task where title = 'T' and created_at = now() order by estimate_minutes nulls last`,
       );
       expect(r.rows).toEqual([
         { status: 'open', needs: ['dry_weather', 'daylight'] },

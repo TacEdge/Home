@@ -80,7 +80,8 @@ Every PR stops when CI is green and is ready for review; **the owner merges it**
 | **S — Deployment safety** | one PR, **merged (#20)** | Rule 6: `recordAudit` returns `id` only, every caller checked. Every other query on `audit_log`, including `listAudit`, names its columns, so 2a can add columns to its Drizzle definition safely. Rule 7: the previous-schema compatibility job in CI. No schema change. Must merge **before** the first M2 migration PR. | none |
 | **2 — Foundation and People** | **2a** migration-only, **merged (#21), migrated in production** | `person`; the P-1 columns on `audit_log`; their Drizzle schema; migration and `home_app` privilege tests. | `0003` |
 | | **2b** application, **merged (#22)** | `src/domain/common/`; sensitivity predicate; record-following `listAudit` with `person` registered; `person` service including `linkSelf`; `profile` engine; fixture people. Opened only after `0003` has succeeded in production. PRs for packages 3–5 register each new entity with `listAudit` in the application PR that uses it. | none |
-| **3 — Events, projects, tasks, notes** | 3a / 3b | `event`, `event_person`, `project`, `task`, `note`; then their services, reference rules (§5.5), fixtures and leak tests. | `0004` |
+| **3 — Events, projects, tasks, notes** | **3a** migration-only, **merged (#23)** | `event`, `event_person`, `project`, `task`, `note`; their Drizzle schema; migration and `home_app` privilege tests. | `0004` |
+| | **3b** application, in review | Their services, reference rules (§5.5), Activity registration, fixtures and leak tests. Opened only after `0004` has succeeded in production. | none |
 | **4 — Capture, context, proposals** | 4a / 4b | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; then the `staleness` engine, proposal approval (§5.7) and fixtures. | `0005` |
 | **5 — Kev bookkeeping, seed, privacy suite** | 5a / 5b | `conversation`, `message`, `kev_usage` (append-only), `insight_response`, `capture.message_id` foreign key; then their services, `pnpm db:seed:fixtures`, the privacy suite (§8.3) and docs (§9). | `0006` |
 
@@ -209,11 +210,12 @@ The approved rules, and what M2 stores so a later purge needs no schema change:
 
 - A reference to another record is resolved through that record's service with the same actor. Referencing something the actor cannot see fails with `NotFoundError`.
 - **A household record may not reference a private record** (e.g. a household task in a private project, or a household note about a private event). Otherwise the household record would reveal the private one.
+- The rule holds in both directions (ADR 0005 §23): a record that household records reference cannot be made private, and archived referencing records count, because they can be restored.
 
 ### 5.6 Entity specifics
 
 - **People:** `linkSelf(actor, personId)` sets `user_id` to the acting user only, on a household-visible person with role `parent`, and only if neither is already linked. `unlinkSelf(actor)` clears only the acting user's own link (ADR 0005 §22). Nothing else sets or clears `user_id`.
-- **Events:** M2 services create and edit `manual` events only. `synced` rows can be created only by M4's sync path.
+- **Events:** M2 services create and edit `manual` events only. `synced` rows can be created only by M4's sync path, and are read-only to M2 services (`synced_event`). A time is timed (two instants and a valid IANA zone) or all-day (two dates, end exclusive); the input layer mirrors the database checks. `rrule` and `exdates` are stored as given and never parsed.
 - **Captures:** `captureVerbatim(actor, { text, channel, messageId? })` stores `text` exactly as given (rejecting only empty or whitespace-only text and the length limit) and always `private`. Captures are listed only to their creator. Dismiss sets `status` and `dismissed_at`.
 - **Context:** `confirm` sets `last_confirmed_at`; `retire` sets `status = 'retired'` and `retired_at`. Retired and stale context is never deleted.
 - **Conversations and messages:** private to `conversation.user_id`, enforced in the query.

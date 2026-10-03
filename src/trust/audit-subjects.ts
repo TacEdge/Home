@@ -1,7 +1,7 @@
 import 'server-only';
 import { and, eq, exists, getTableName, not, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
-import { auditLog, person } from '@/db/schema';
+import { auditLog, event, note, person, project, task } from '@/db/schema';
 import type { Actor } from './actor';
 import { visibleTo, type VisibilityColumns } from './visibility';
 
@@ -26,7 +26,15 @@ export type AuditSubject = {
 const register = (...subjects: AuditSubject[]): Record<string, AuditSubject> =>
   Object.fromEntries(subjects.map((s) => [getTableName(s.table), s]));
 
-export const auditSubjects: Record<string, AuditSubject> = register({ table: person });
+// EventPerson annotations are audited as their event (subject_type 'event'),
+// so their rows follow the event's visibility.
+export const auditSubjects: Record<string, AuditSubject> = register(
+  { table: person },
+  { table: event },
+  { table: project },
+  { table: task },
+  { table: note },
+);
 
 /** The write-time snapshot: household, or private to its recorded owner. */
 function snapshotVisibleTo(actor: Actor & { kind: 'user' }): SQL {
