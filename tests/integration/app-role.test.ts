@@ -150,8 +150,12 @@ describe('runtime/app role (home_app)', () => {
       'audit_log',
       'capture',
       'context',
+      'conversation', // 0006
       'event',
       'event_person',
+      'insight_response', // 0006
+      'kev_usage', // 0006
+      'message', // 0006
       'note',
       'person',
       'project',
@@ -175,6 +179,72 @@ describe('runtime/app role (home_app)', () => {
       sql`select tgname, tgenabled from pg_trigger where tgrelid = 'capture'::regclass and not tgisinternal`,
     );
     expect(r.rows).toEqual([{ tgname: 'capture_source_immutable', tgenabled: 'O' }]);
+  });
+
+  it.each(['conversation', 'message', 'insight_response'])(
+    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0006, through 0002's default privileges)",
+    async (table) => {
+      const grants = await db.execute(
+        sql`select privilege_type, is_grantable from information_schema.role_table_grants
+            where grantee = 'home_app' and table_name = ${table} order by 1`,
+      );
+      expect(grants.rows).toEqual(
+        ['DELETE', 'INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+          privilege_type,
+          is_grantable: 'NO',
+        })),
+      );
+    },
+  );
+
+  it('has only SELECT and INSERT on kev_usage: append-only (0006 revoke)', async () => {
+    const grants = await db.execute(
+      sql`select privilege_type from information_schema.role_table_grants
+          where grantee = 'home_app' and table_name = 'kev_usage' order by 1`,
+    );
+    expect(grants.rows.map((r) => r.privilege_type)).toEqual(['INSERT', 'SELECT']);
+  });
+
+  it('can INSERT into and SELECT from kev_usage', async () => {
+    await db.execute(
+      sql`insert into kev_usage (user_id, tier, model, cost_usd_micros) values ('test.app_role', 'fast', 'm', 1)`,
+    );
+    const r = await db.execute(
+      sql`select count(*)::int as n from kev_usage where user_id = 'test.app_role'`,
+    );
+    expect(r.rows[0]?.n).toBeGreaterThan(0);
+  });
+
+  it('cannot UPDATE, DELETE or TRUNCATE kev_usage (permission, not trigger)', async () => {
+    await expectPermissionDenied(
+      db.execute(sql`update kev_usage set cost_usd_micros = 0 where user_id = 'test.app_role'`),
+    );
+    await expectPermissionDenied(
+      db.execute(sql`delete from kev_usage where user_id = 'test.app_role'`),
+    );
+    await expectPermissionDenied(db.execute(sql`truncate kev_usage`));
+  });
+
+  it.each(['conversation', 'message', 'kev_usage', 'insight_response'])(
+    'cannot ALTER or DROP %s',
+    async (table) => {
+      await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
+      await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
+    },
+  );
+
+  it('cannot disable or drop the kev_usage triggers', async () => {
+    await expectPermissionDenied(db.execute(sql`alter table kev_usage disable trigger all`));
+    await expectPermissionDenied(
+      db.execute(sql`drop trigger kev_usage_no_update_delete on kev_usage`),
+    );
+    const r = await db.execute(
+      sql`select tgname, tgenabled from pg_trigger where tgrelid = 'kev_usage'::regclass and not tgisinternal order by 1`,
+    );
+    expect(r.rows).toEqual([
+      { tgname: 'kev_usage_no_truncate', tgenabled: 'O' },
+      { tgname: 'kev_usage_no_update_delete', tgenabled: 'O' },
+    ]);
   });
 
   it('cannot ALTER, DROP or TRUNCATE person', async () => {

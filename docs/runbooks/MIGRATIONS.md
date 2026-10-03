@@ -31,6 +31,7 @@ A change with no schema dependency is one ordinary PR. Nothing here relaxes the 
 ## Rules
 
 - **Expand first**: add columns as nullable or with defaults; add new tables; backfill. Only drop or tighten (**contract**) in a later release, once no deployed code uses the old shape.
+- A constraint on an existing column is a tightening. The only exceptions are foreign keys the contract planned, listed by name in `APPROVED_EXISTING_COLUMN_FKS` in `tests/unit/migrations-additive.test.ts` (currently `capture.message_id` and `proposal.conversation_id`, `ON DELETE SET NULL`, ADR 0005 §38).
 - No destructive change without a tested restore (see DEPLOY.md, backups).
 - `audit_log` rows are never updated or deleted: `home_app` has no privilege to, and the trigger refuses even the owner.
 - **Append-only tables:** migration `0002_app_role` sets default privileges so every new table is readable and writable by `home_app`. A migration that creates an **append-only** table must therefore add, after the `CREATE TABLE`:

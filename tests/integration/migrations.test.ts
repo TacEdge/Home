@@ -5,10 +5,13 @@ import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '@/db/create';
+import { captureVerbatim, listCaptures } from '@/domain/captures/service';
+import { createContext, listContext } from '@/domain/context/service';
 import { createEvent, listEvents, updateEvent } from '@/domain/events/service';
 import { createNote, listNotes } from '@/domain/notes/service';
 import { createPerson, listPeople } from '@/domain/people/service';
 import { createProject, listProjects } from '@/domain/projects/service';
+import { approveProposal, createProposal, listProposals } from '@/domain/proposals/service';
 import { listTasks, updateTask } from '@/domain/tasks/service';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit, recordAudit } from '@/trust/audit';
@@ -1082,11 +1085,10 @@ describe('0005: tables and columns', () => {
       expect((await columnsOf(t)).at(-1), t).toEqual(['origin_capture_id', 'uuid', 'YES', null]);
   });
 
-  it('no conversation or message tables yet, so no foreign key on message_id or conversation_id (Package 5)', async () => {
-    const r = await db.execute(sql`
-      select table_name from information_schema.tables
-      where table_schema = 'public' and table_name in ('conversation', 'message')`);
-    expect(r.rows).toEqual([]);
+  it('0005 creates no conversation or message tables, and no foreign key on message_id or conversation_id (those are 0006)', async () => {
+    const text = readFileSync(join(MIGRATIONS, '0005_capture_context_proposal.sql'), 'utf8');
+    expect(text).not.toMatch(/CREATE TABLE "(conversation|message)"/);
+    expect(text).not.toMatch(/FOREIGN KEY \("(message_id|conversation_id)"\)/);
   });
 });
 
@@ -1158,6 +1160,7 @@ describe('0005: constraints, foreign keys, indexes and trigger', () => {
       r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
     ).toEqual([
       'capture.created_by -> user RESTRICT',
+      'capture.message_id -> message SET NULL', // 0006
       'context.created_by -> user RESTRICT',
       'context.origin_capture_id -> capture SET NULL',
       'context.source_user_id -> user RESTRICT',
@@ -1165,6 +1168,7 @@ describe('0005: constraints, foreign keys, indexes and trigger', () => {
       'note.origin_capture_id -> capture SET NULL',
       'project.origin_capture_id -> capture SET NULL',
       'proposal.capture_id -> capture SET NULL',
+      'proposal.conversation_id -> conversation SET NULL', // 0006
       'proposal.created_by -> user RESTRICT',
       'proposal.decided_by -> user RESTRICT',
       'proposal.requested_by_user_id -> user RESTRICT',
@@ -1309,7 +1313,14 @@ describe('0005: constraint behaviour for the runtime role (each case rolled back
 
     it('keeps message_id writable, so Package 5 can attach or backfill the message', () =>
       withBase(async (tx, ids) => {
-        const m = '00000000-0000-4000-8000-000000000001';
+        // A real message, since 0006 adds the foreign key.
+        const c = await tx.execute(
+          sql`insert into conversation (user_id) values (${U}) returning id`,
+        );
+        const msg =
+          await tx.execute(sql`insert into message (conversation_id, role, channel, content)
+          values (${c.rows[0]?.id as string}, 'user', 'web', '{"v":1,"text":"x"}') returning id`);
+        const m = msg.rows[0]?.id as string;
         await tx.execute(sql`update capture set message_id = ${m} where id = ${ids.capture}`);
         expect(
           (await tx.execute(sql`select message_id from capture where id = ${ids.capture}`)).rows,
@@ -1754,6 +1765,399 @@ describe('0005 upgrades the production schema (0000–0004) in place', () => {
       await expect(
         recordAudit(systemActor, { event: 'auth.sign_out' }, { db: upApp.db }),
       ).resolves.toBeDefined();
+    } finally {
+      await upApp.close();
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+});
+
+// 0006: conversation, message, kev_usage, insight_response; the planned
+// foreign keys on capture.message_id and proposal.conversation_id
+// (Package 5a, migration only)
+// ---------------------------------------------------------------------------
+
+const TABLES_0006 = ['conversation', 'message', 'kev_usage', 'insight_response'];
+
+describe('0006: tables and columns', () => {
+  it('conversation: owned by one user; dated for the 90-day purge; no visibility column', async () => {
+    expect(await columnsOf('conversation')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['user_id', 'text', 'NO', null],
+      ['created_at', TS, 'NO', 'now()'],
+      ['updated_at', TS, 'NO', 'now()'],
+      ['last_message_at', TS, 'YES', null],
+      ['archived_at', TS, 'YES', null],
+    ]);
+  });
+
+  it('message: role, channel, provider-neutral content, tier and model', async () => {
+    expect(await columnsOf('message')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['conversation_id', 'uuid', 'NO', null],
+      ['role', 'text', 'NO', null],
+      ['channel', 'text', 'NO', null],
+      ['content', 'jsonb', 'NO', null],
+      ['tier', 'text', 'YES', null],
+      ['model', 'text', 'YES', null],
+      ['created_at', TS, 'NO', 'now()'],
+    ]);
+  });
+
+  it('kev_usage: no content; cost in micro-US-dollars (bigint), no NZD column', async () => {
+    expect(await columnsOf('kev_usage')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['at', TS, 'NO', 'now()'],
+      ['user_id', 'text', 'NO', null],
+      ['conversation_id', 'uuid', 'YES', null],
+      ['tier', 'text', 'NO', null],
+      ['model', 'text', 'NO', null],
+      ['input_tokens', 'integer', 'NO', '0'],
+      ['output_tokens', 'integer', 'NO', '0'],
+      ['cache_read_tokens', 'integer', 'NO', '0'],
+      ['cache_write_tokens', 'integer', 'NO', '0'],
+      ['cost_usd_micros', 'bigint', 'NO', null],
+      ['escalated', 'boolean', 'NO', 'false'],
+    ]);
+  });
+
+  it('insight_response: one row per user and insight key', async () => {
+    expect(await columnsOf('insight_response')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['user_id', 'text', 'NO', null],
+      ['insight_key', 'text', 'NO', null],
+      ['response', 'text', 'NO', null],
+      ['responded_at', TS, 'NO', 'now()'],
+    ]);
+  });
+
+  it('adds no column to any existing table', async () => {
+    expect((await columnsOf('capture')).map((c) => c[0])).not.toContain('conversation_id');
+    expect((await columnsOf('capture')).length).toBe(14);
+    expect((await columnsOf('proposal')).length).toBe(20);
+  });
+});
+
+describe('0006: constraints, foreign keys, indexes and triggers', () => {
+  const checksOf = async (table: string) =>
+    (
+      await db.execute(
+        sql`select conname from pg_constraint where conrelid = ${table}::regclass and contype = 'c' order by 1`,
+      )
+    ).rows.map((r) => r.conname);
+
+  it('has the CHECK constraints for every enum and shape', async () => {
+    expect(await checksOf('conversation')).toEqual([]);
+    expect(await checksOf('message')).toEqual([
+      'message_author_check',
+      'message_channel_check',
+      'message_content_check',
+      'message_role_check',
+      'message_tier_check',
+    ]);
+    expect(await checksOf('kev_usage')).toEqual(['kev_usage_counts_check', 'kev_usage_tier_check']);
+    expect(await checksOf('insight_response')).toEqual(['insight_response_response_check']);
+  });
+
+  it('has exactly these foreign keys: owned children CASCADE, provenance SET NULL, none on kev_usage', async () => {
+    const r = await admin.db.execute(sql`
+      select tc.table_name, kcu.column_name, ccu.table_name as target, rc.delete_rule
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu using (constraint_schema, constraint_name)
+      join information_schema.referential_constraints rc using (constraint_schema, constraint_name)
+      join information_schema.constraint_column_usage ccu using (constraint_schema, constraint_name)
+      where tc.constraint_type = 'FOREIGN KEY'
+        and (tc.table_name in ('conversation', 'message', 'kev_usage', 'insight_response')
+             or ccu.table_name in ('conversation', 'message'))
+      order by 1, 2`);
+    expect(
+      r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
+    ).toEqual([
+      'capture.message_id -> message SET NULL',
+      'conversation.user_id -> user CASCADE',
+      'insight_response.user_id -> user RESTRICT',
+      'message.conversation_id -> conversation CASCADE',
+      'proposal.conversation_id -> conversation SET NULL',
+    ]);
+  });
+
+  it('indexes the foreign keys, the retention clocks and the usage month', async () => {
+    const r = await db.execute(sql`
+      select indexname from pg_indexes
+      where tablename in ('conversation', 'message', 'kev_usage', 'insight_response')
+      order by tablename, indexname`);
+    expect(r.rows.map((x) => x.indexname)).toEqual([
+      'conversation_archived_at_idx',
+      'conversation_pkey',
+      'conversation_user_id_last_message_at_idx',
+      'insight_response_insight_key_idx',
+      'insight_response_pkey',
+      'insight_response_user_key_unique',
+      'kev_usage_at_idx',
+      'kev_usage_pkey',
+      'kev_usage_user_id_at_idx',
+      'message_conversation_id_created_at_idx',
+      'message_created_at_idx',
+      'message_pkey',
+    ]);
+  });
+
+  it('kev_usage has the append-only triggers, owned by the migration role', async () => {
+    const t = await admin.db.execute(sql`
+      select tgname, tgenabled, pg_get_userbyid(p.proowner) <> 'home_app' as not_app
+      from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+      where tgrelid = 'kev_usage'::regclass and not tgisinternal order by 1`);
+    expect(t.rows).toEqual([
+      { tgname: 'kev_usage_no_truncate', tgenabled: 'O', not_app: true },
+      { tgname: 'kev_usage_no_update_delete', tgenabled: 'O', not_app: true },
+    ]);
+  });
+});
+
+describe('0006: constraint behaviour (each case rolled back)', () => {
+  const U = 'u-0006';
+  type Ids = { conversation: string; message: string; capture: string; proposal: string };
+  const withBase = (fn: (tx: Db, ids: Ids) => Promise<void>, as: Db = db) =>
+    rolledBackAs(as, async (tx) => {
+      await tx.execute(
+        sql`insert into "user" (id, name, email) values (${U}, 'U', 'u-0006@example.test')`,
+      );
+      const one = async (q: ReturnType<typeof sql>) => (await tx.execute(q)).rows[0]?.id as string;
+      const conversation = await one(
+        sql`insert into conversation (user_id) values (${U}) returning id`,
+      );
+      const message = await one(sql`insert into message (conversation_id, role, channel, content)
+        values (${conversation}, 'user', 'web', '{"v":1,"text":"hello"}') returning id`);
+      const capture =
+        await one(sql`insert into capture (created_by, created_via, text, channel, message_id)
+        values (${U}, 'kev', 'hello', 'web', ${message}) returning id`);
+      const proposal =
+        await one(sql`insert into proposal (created_by, created_via, requested_by_user_id, conversation_id, action, payload, summary)
+        values (${U}, 'kev', ${U}, ${conversation}, 'task.create', '{"title":"x"}', 'Add x') returning id`);
+      await fn(tx, { conversation, message, capture, proposal });
+    });
+  const fails = (tx: Db, q: ReturnType<typeof sql>, code: string) =>
+    expectCode(
+      tx.transaction(async (sp) => {
+        await sp.execute(q);
+      }),
+      code,
+    );
+  const kevMessage = (vals: string) =>
+    sql.raw(
+      `insert into message (conversation_id, role, channel, content, tier, model) values ${vals}`,
+    );
+
+  it('accepts a Kev message with its tier and model', () =>
+    withBase(async (tx, ids) => {
+      await tx.execute(
+        kevMessage(`('${ids.conversation}', 'kev', 'web', '{"v":1,"text":"Sure."}', 'fast', 'm')`),
+      );
+    }));
+
+  it.each([
+    ['a Kev message without a model', `'kev', 'web', '{"v":1}', 'fast', null`],
+    ['a person’s message with a tier', `'user', 'web', '{"v":1}', 'fast', null`],
+    ['an unknown role', `'system', 'web', '{"v":1}', null, null`],
+    ['an unknown tier', `'kev', 'web', '{"v":1}', 'slow', 'm'`],
+    ['content that is not an object', `'user', 'web', '[1]', null, null`],
+    ['content without a version', `'user', 'web', '{"text":"x"}', null, null`],
+    ['an unknown channel', `'user', 'sms', '{"v":1}', null, null`],
+  ])('message refuses %s', (_l, vals) =>
+    withBase(async (tx, ids) => {
+      await fails(tx, kevMessage(`('${ids.conversation}', ${vals})`), '23514');
+    }),
+  );
+
+  it('deleting a conversation takes its messages and clears provenance on captures and proposals; the words stay', () =>
+    withBase(async (tx, ids) => {
+      await tx.execute(sql`delete from conversation where id = ${ids.conversation}`);
+      expect(
+        (await tx.execute(sql`select count(*)::int as n from message where id = ${ids.message}`))
+          .rows[0]?.n,
+      ).toBe(0);
+      expect(
+        (await tx.execute(sql`select message_id, text from capture where id = ${ids.capture}`))
+          .rows,
+      ).toEqual([{ message_id: null, text: 'hello' }]);
+      expect(
+        (await tx.execute(sql`select conversation_id from proposal where id = ${ids.proposal}`))
+          .rows,
+      ).toEqual([{ conversation_id: null }]);
+    }));
+
+  it('a capture or proposal can point only at a real message or conversation', () =>
+    withBase(async (tx, ids) => {
+      await fails(
+        tx,
+        sql`update capture set message_id = gen_random_uuid() where id = ${ids.capture}`,
+        '23503',
+      );
+      await fails(
+        tx,
+        sql`update proposal set conversation_id = gen_random_uuid() where id = ${ids.proposal}`,
+        '23503',
+      );
+    }));
+
+  it('kev_usage: accepts a run; refuses negative counts, negative cost and unknown tiers', () =>
+    withBase(async (tx) => {
+      const usage = (cols: string) =>
+        sql.raw(
+          `insert into kev_usage (user_id, tier, model, input_tokens, output_tokens, cost_usd_micros) values ${cols}`,
+        );
+      await tx.execute(usage(`('${U}', 'deep', 'm', 1200, 300, 4500)`));
+      await fails(tx, usage(`('${U}', 'fast', 'm', -1, 0, 0)`), '23514');
+      await fails(tx, usage(`('${U}', 'fast', 'm', 0, 0, -1)`), '23514');
+      await fails(tx, usage(`('${U}', 'turbo', 'm', 0, 0, 0)`), '23514');
+    }));
+
+  it('kev_usage is append-only even for the migration/admin role (trigger)', () =>
+    withBase(async (tx) => {
+      await tx.execute(
+        sql`insert into kev_usage (user_id, tier, model, cost_usd_micros) values (${U}, 'fast', 'm', 1)`,
+      );
+      await fails(tx, sql`update kev_usage set cost_usd_micros = 0 where user_id = ${U}`, 'P0001');
+      await fails(tx, sql`delete from kev_usage where user_id = ${U}`, 'P0001');
+      await fails(tx, sql`truncate kev_usage`, 'P0001');
+    }, admin.db));
+
+  it('insight_response: one per user and key; known responses only', () =>
+    withBase(async (tx) => {
+      await tx.execute(
+        sql`insert into insight_response (user_id, insight_key, response) values (${U}, 'k1', 'dismissed')`,
+      );
+      await fails(
+        tx,
+        sql`insert into insight_response (user_id, insight_key, response) values (${U}, 'k1', 'not_useful')`,
+        '23505',
+      );
+      await fails(
+        tx,
+        sql`insert into insight_response (user_id, insight_key, response) values (${U}, 'k2', 'hidden')`,
+        '23514',
+      );
+    }));
+});
+
+describe('0006 upgrades the production schema (0000–0005) in place', () => {
+  it('applies on top of 0005 with data the current app wrote, changing nothing that was there, and the app keeps working', async () => {
+    const name = 'home_upgrade_0006_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const upApp = createDb(appUrl);
+    const production = migrationsUpTo('0005_capture_context_proposal');
+    const deps = { db: upApp.db };
+    const sam: UserActor = {
+      kind: 'user',
+      userId: 'u-up6',
+      email: 'sam@example.test',
+      via: 'ui',
+      channel: 'web',
+    };
+    const kev: UserActor = { ...sam, via: 'kev' };
+    try {
+      // Production today: 0000–0005, written through the deployed 4b services.
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upApp.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up6', 'Sam', 'sam@example.test')`,
+      );
+      const cap = await captureVerbatim(kev, { text: ' book the WOF ' }, deps);
+      const p = await createProposal(
+        kev,
+        {
+          action: 'task.create',
+          payload: { title: 'WOF' },
+          summary: 'Add a task',
+          captureId: cap.id,
+        },
+        deps,
+      );
+      await approveProposal(sam, p.id, deps);
+      await createProposal(
+        kev,
+        { action: 'note.create', payload: { body: 'x' }, summary: 'Add a note' },
+        deps,
+      );
+      await createContext(
+        sam,
+        { subject: { type: 'household' }, content: 'Bins Tuesday', category: 'routine' },
+        deps,
+      );
+      const tables = ['capture', 'proposal', 'context', 'task', 'audit_log'];
+      const snapshot = async () =>
+        Object.fromEntries(
+          await Promise.all(
+            tables.map(
+              async (t) =>
+                [
+                  t,
+                  (await upAdmin.db.execute(sql.raw(`select * from ${t} order by id`))).rows,
+                ] as const,
+            ),
+          ),
+        );
+      const before = await snapshot();
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.conversation') as t`)).rows[0]?.t,
+      ).toBeNull();
+
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      // Existing rows are unchanged; the new tables exist and are empty.
+      expect(await snapshot()).toEqual(before);
+      for (const t of TABLES_0006) {
+        const r = await upAdmin.db.execute(sql.raw(`select count(*)::int as n from ${t}`));
+        expect(r.rows[0]?.n, t).toBe(0);
+      }
+
+      // The runtime role: full DML on the new tables except the append-only log.
+      const privileges = async (t: string) =>
+        (
+          await upApp.db.execute(
+            sql.raw(`
+          select has_table_privilege('home_app', '${t}', 'SELECT') as s,
+                 has_table_privilege('home_app', '${t}', 'INSERT') as i,
+                 has_table_privilege('home_app', '${t}', 'UPDATE') as u,
+                 has_table_privilege('home_app', '${t}', 'DELETE') as d,
+                 has_table_privilege('home_app', '${t}', 'TRUNCATE') as tr`),
+          )
+        ).rows[0];
+      for (const t of ['conversation', 'message', 'insight_response'])
+        expect(await privileges(t), t).toEqual({ s: true, i: true, u: true, d: true, tr: false });
+      expect(await privileges('kev_usage')).toEqual({
+        s: true,
+        i: true,
+        u: false,
+        d: false,
+        tr: false,
+      });
+
+      // The deployed app keeps working on the upgraded schema.
+      expect((await listCaptures(sam, {}, deps)).map((c) => c.status)).toEqual(['organised']);
+      expect((await listProposals(sam, {}, deps)).map((x) => x.status).sort()).toEqual([
+        'approved',
+        'pending',
+      ]);
+      await expect(captureVerbatim(kev, { text: 'another' }, deps)).resolves.toBeDefined();
+      await expect(
+        createProposal(
+          kev,
+          { action: 'project.create', payload: { title: 'Garage' }, summary: 'Add a project' },
+          deps,
+        ),
+      ).resolves.toBeDefined();
+      expect(await listContext(sam, {}, deps)).toHaveLength(1);
+      expect((await listAudit(sam, {}, deps)).rows.length).toBeGreaterThan(0);
     } finally {
       await upApp.close();
       await upAdmin.close();

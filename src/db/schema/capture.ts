@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { user } from './auth';
 import { CHANNELS, commonColumns, CREATED_VIA, oneOf } from './common';
+import { message } from './conversation';
 
 // Something a user told HOME, stored verbatim before anyone decides what it
 // is (FAMILY-DATA-MODEL §3, Capture; M2 contract §4.2). Capture first,
@@ -35,9 +36,9 @@ export const capture = pgTable(
     visibility: text('visibility').notNull().default('private'),
     text: text('text').notNull(),
     channel: text('channel').notNull(),
-    // The conversation message it came from; its foreign key arrives with
-    // `message` in Package 5 (ON DELETE SET NULL).
-    messageId: uuid('message_id'),
+    // The conversation message it came from (provenance, ON DELETE SET NULL:
+    // the 90-day message purge clears it and leaves the capture).
+    messageId: uuid('message_id').references(() => message.id, { onDelete: 'set null' }),
     status: text('status').notNull().default('new'),
     organisedInto: jsonb('organised_into').$type<OrganisedRef[]>().notNull().default([]),
     organisedAt: timestamp('organised_at', { withTimezone: true }),
