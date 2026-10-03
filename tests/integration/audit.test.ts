@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { auditLog } from '@/db/schema';
-import { listAudit, recordAudit, type AuditCursor } from '@/trust/audit';
+import { auditRowColumns, listAudit, recordAudit, type AuditCursor } from '@/trust/audit';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { adminDb, testDb } from './db';
 
@@ -25,6 +25,14 @@ async function expectAppendOnly(p: Promise<unknown>) {
   });
 }
 
+// Reads name their columns (rule 6): this suite also runs against the
+// previous schema, where the Drizzle definition may be ahead of the table.
+const readBack = async (id: string) => {
+  const [row] = await db.select(auditRowColumns).from(auditLog).where(eq(auditLog.id, id));
+  if (!row) throw new Error('audit row not found');
+  return row;
+};
+
 const sam: UserActor = {
   kind: 'user',
   userId: 'u-sam',
@@ -35,15 +43,30 @@ const sam: UserActor = {
 
 describe('audit_log', () => {
   it('records an entry for a user actor', async () => {
-    const row = await recordAudit(sam, { event: 'test.user', summary: 'hello' }, { db });
+    const { id } = await recordAudit(sam, { event: 'test.user', summary: 'hello' }, { db });
+    const row = await readBack(id);
     expect(row.actorUserId).toBe('u-sam');
     expect(row.actorVia).toBe('ui');
     expect(row.actorChannel).toBe('web');
     expect(row.event).toBe('test.user');
+    expect(row.summary).toBe('hello');
+    expect(row.meta).toBeNull();
+  });
+
+  it('stores meta as JSON and returns only the new id', async () => {
+    const created = await recordAudit(
+      sam,
+      { event: 'test.meta', meta: { count: 2, ok: true, tags: ['a'] } },
+      { db },
+    );
+    expect(Object.keys(created)).toEqual(['id']);
+    expect(created.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await readBack(created.id)).meta).toEqual({ count: 2, ok: true, tags: ['a'] });
   });
 
   it('records an entry for the system actor with no user or channel', async () => {
-    const row = await recordAudit(systemActor, { event: 'test.system' }, { db });
+    const { id } = await recordAudit(systemActor, { event: 'test.system' }, { db });
+    const row = await readBack(id);
     expect(row.actorUserId).toBeNull();
     expect(row.actorVia).toBe('system');
     expect(row.actorChannel).toBeNull();
@@ -138,7 +161,12 @@ describe('audit_log', () => {
     // Twelve rows that all share one explicit `at`, so only `id` can order them.
     const at = new Date('2026-03-01T10:00:00.000Z');
     const events = Array.from({ length: 12 }, (_, i) => `test.same.${i}`);
-    await db.insert(auditLog).values(events.map((event) => ({ at, actorVia: 'system', event })));
+    await db.execute(
+      sql`insert into audit_log (at, actor_via, event) values ${sql.join(
+        events.map((event) => sql`(${at.toISOString()}::timestamptz, 'system', ${event})`),
+        sql`, `,
+      )}`,
+    );
 
     const seen: string[] = [];
     let cursor: AuditCursor | undefined;

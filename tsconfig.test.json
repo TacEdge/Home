@@ -2,6 +2,9 @@
   // Everything the production config excludes, so tests, runner configs and
   // scripts stay type-checked by `pnpm typecheck` (M1.1 contract §1.2).
   "extends": "./tsconfig.json",
+  // Tests import scripts/*.mts by their real path, as Node runs them. Type
+  // checking only (noEmit); the production config excludes scripts and tests.
+  "compilerOptions": { "allowImportingTsExtensions": true },
   "include": [
     "next-env.d.ts",
     "**/*.ts",

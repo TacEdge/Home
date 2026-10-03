@@ -16,12 +16,22 @@ export type ResetOptions = {
   migrate?: (pool: MinimalPool) => Promise<void>;
 };
 
+/**
+ * The migrations to build the test database from. Normally this checkout's.
+ * The previous-schema check (scripts/check-previous-schema.mts) points it at
+ * the base branch's migrations, so the suites run against the schema
+ * production has until the PR's own migration is applied (migration-first).
+ */
+export function migrationsFolder(): string {
+  return process.env.HOME_TEST_MIGRATIONS_DIR || 'src/db/migrations';
+}
+
 export async function resetTestDatabase(opts: ResetOptions = {}): Promise<void> {
   const url = assertTestDatabase(opts.url ?? TEST_DATABASE_URL);
   const createPool = opts.createPool ?? ((u) => new Pool({ connectionString: u, max: 1 }));
   const migrate =
     opts.migrate ??
-    ((pool) => drizzleMigrate(drizzle(pool as Pool), { migrationsFolder: 'src/db/migrations' }));
+    ((pool) => drizzleMigrate(drizzle(pool as Pool), { migrationsFolder: migrationsFolder() }));
   const pool = createPool(url);
   try {
     await pool.query('drop schema if exists public cascade; create schema public;');
