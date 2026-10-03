@@ -29,8 +29,13 @@ import {
 
 // Context: what Kev knows (FAMILY-DATA-MODEL §3, M2 contract §5.4, §5.6).
 // Dated and sourced. Same write discipline as every record, plus:
-//   - sensitive context is never read unless the caller asks, and asking is
-//     audited (`context.sensitive_read`); Kev may never ask;
+//   - visibility and sensitivity are independent (ADR 0005 §37): visibility
+//     says who may read a record at all (household: either adult; private:
+//     its owner); sensitivity says it is left out of every default read and
+//     every automatic use. A sensitive record is returned only to a person
+//     authorised by its visibility who explicitly asks (`includeSensitive`),
+//     and each one returned is audited (`context.sensitive_read`). Kev and
+//     the system may never ask, so they never receive it;
 //   - sensitive context is created and edited only by a person directly: an
 //     executing proposal can neither write `sensitive` nor touch a sensitive
 //     record (D15);
@@ -63,7 +68,7 @@ const subjectRef = (s: { type: string; id?: string | null }): Ref | null =>
       ? { table: project, entity: 'project', id: s.id }
       : null;
 
-/** Sensitive reads are for a person who asks; Kev never may (CLAUDE.md rule 6). */
+/** Sensitive reads are for a signed-in person who asks; Kev and the system never may (CLAUDE.md rule 6). */
 function assertMayIncludeSensitive(actor: UserActor, opts: ReadOpts): void {
   if (opts.includeSensitive && actor.via !== 'ui') throw new NotPermittedError('sensitive_context');
 }

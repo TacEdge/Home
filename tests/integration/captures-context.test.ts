@@ -296,6 +296,71 @@ describe('context', () => {
     expect(events.filter((e) => e === 'context.sensitive_read')).toHaveLength(2);
   });
 
+  describe('the sensitive-context invariant (ADR 0005 §37)', () => {
+    const sensitive = (actor: UserActor, visibility: 'household' | 'private') =>
+      createContext(
+        actor,
+        {
+          subject: household,
+          content: 'canary-ctx-sensitive',
+          category: 'practical',
+          sensitivity: 'sensitive',
+          visibility,
+        },
+        deps,
+      );
+
+    it('household + sensitive: either adult, but only when they explicitly ask', async () => {
+      const c = await sensitive(h.sam, 'household');
+      for (const adult of [h.sam, h.alex]) {
+        expect(await code(getContext(adult, c.id, {}, deps))).toBe('not_found');
+        expect((await listContext(adult, {}, deps)).map((x) => x.id)).not.toContain(c.id);
+        expect(
+          (await listContext(adult, { status: 'active' }, deps)).map((x) => x.id),
+        ).not.toContain(c.id);
+        expect((await getContext(adult, c.id, { includeSensitive: true }, deps)).id).toBe(c.id);
+        expect(
+          (await listContext(adult, { includeSensitive: true }, deps)).map((x) => x.id),
+        ).toContain(c.id);
+      }
+    });
+
+    it('private + sensitive: only its owner, and only when they ask', async () => {
+      const c = await sensitive(h.sam, 'private');
+      expect(await code(getContext(h.sam, c.id, {}, deps))).toBe('not_found');
+      expect((await getContext(h.sam, c.id, { includeSensitive: true }, deps)).id).toBe(c.id);
+      expect(await code(getContext(h.alex, c.id, { includeSensitive: true }, deps))).toBe(
+        'not_found',
+      );
+      expect(
+        (await listContext(h.alex, { includeSensitive: true }, deps)).map((x) => x.id),
+      ).not.toContain(c.id);
+    });
+
+    it('Kev and the system can never request or receive it', async () => {
+      const c = await sensitive(h.sam, 'household');
+      for (const actor of [h.samViaKev, sys]) {
+        expect(await code(getContext(actor, c.id, { includeSensitive: true }, deps))).toBe(
+          'sensitive_context',
+        );
+        expect(await code(listContext(actor, { includeSensitive: true }, deps))).toBe(
+          'sensitive_context',
+        );
+        // Their default reads simply never contain it.
+        expect(await code(getContext(actor, c.id, {}, deps))).toBe('not_found');
+        const rows = await listContext(actor, {}, deps);
+        expect(rows.some((x) => x.sensitivity === 'sensitive')).toBe(false);
+      }
+    });
+
+    it('every sensitive record returned is audited by id, with no content', async () => {
+      const c = await sensitive(h.alex, 'private');
+      await getContext(h.alex, c.id, { includeSensitive: true }, deps);
+      const rows = await activity(h.alex, c.id);
+      expect(rows).toEqual(['context.sensitive_read', 'context.create']);
+    });
+  });
+
   it('an executing proposal can neither write sensitive context nor touch a sensitive record', async () => {
     const execution = issueExecution({
       proposalId: crypto.randomUUID(),
