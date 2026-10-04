@@ -11,6 +11,7 @@ export type SeedRefusal =
   | 'no_database_url'
   | 'unparseable_url'
   | 'not_postgres'
+  | 'host_override'
   | 'vercel_environment'
   | 'production_node_env'
   | 'neon_host'
@@ -44,9 +45,20 @@ export function assertSeedTarget(
     throw new SeedRefusedError('unparseable_url');
   }
   if (!/^postgres(ql)?:$/.test(parsed.protocol)) throw new SeedRefusedError('not_postgres');
+  // The driver lets a `host` (or libpq's `hostaddr`) query parameter override
+  // the URL's host, so `localhost?host=<remote>` would connect elsewhere.
+  // Refuse any such override, whatever its letter case.
+  if (hasHostOverride(parsed)) throw new SeedRefusedError('host_override');
   const host = parsed.hostname.toLowerCase();
   if (host.endsWith('neon.tech') || host.includes('.neon.'))
     throw new SeedRefusedError('neon_host');
   if (!(LOCAL_HOSTS as readonly string[]).includes(host))
     throw new SeedRefusedError('not_local_host');
+}
+
+/** True if the URL's query would override the host the driver connects to. */
+export function hasHostOverride(url: URL): boolean {
+  return [...url.searchParams.keys()].some((k) =>
+    ['host', 'hostaddr'].includes(k.trim().toLowerCase()),
+  );
 }

@@ -8,12 +8,14 @@ import type { Visibility } from '@/trust/visibility';
 /**
  * An approved proposal being executed (M2 contract §5.7). Only the proposal
  * executor issues one; services receive it in `deps` and use it for nothing
- * but provenance: `created_via = 'kev'`, `origin_capture_id`, context's
+ * but provenance: `created_via` as the proposal was made, `origin_capture_id`, context's
  * source, and an `executed` marker in audit meta. It never relaxes a check.
  */
 export type Execution = Readonly<{
   proposalId: string;
   requestedBy: string;
+  /** How the proposal was made: `kev` if Kev proposed it, `ui` if the person did (ADR 0005 §43). */
+  createdVia: 'ui' | 'kev';
   captureId: string | null;
   conversationId: string | null;
 }>;
@@ -40,8 +42,9 @@ export function provenanceOf(deps: Deps): {
   originCaptureId: string | null;
 } {
   const e = executionOf(deps);
+  // Provenance follows the proposal: only what Kev proposed is created_via 'kev'.
   return e
-    ? { createdVia: 'kev', originCaptureId: e.captureId }
+    ? { createdVia: e.createdVia, originCaptureId: e.captureId }
     : { createdVia: 'ui', originCaptureId: null };
 }
 

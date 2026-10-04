@@ -289,10 +289,88 @@ describe('Activity privacy across every visibility-bearing entity (P-1)', () => 
         union all select id::text from capture where created_by = ${seed.actors[OTHER[a]].userId}
         union all select id::text from proposal where requested_by_user_id = ${seed.actors[OTHER[a]].userId}
         union all select id::text from conversation where user_id = ${seed.actors[OTHER[a]].userId}
-        union all select id::text from insight_response where user_id = ${seed.actors[OTHER[a]].userId}`);
+        union all select id::text from insight_response where user_id = ${seed.actors[OTHER[a]].userId}
+        union all select id::text from kev_usage where user_id = ${seed.actors[OTHER[a]].userId}`);
       expect(theirPrivate.rows.length).toBeGreaterThan(10);
       for (const r of theirPrivate.rows)
         expect(seen.has(r.id as string), r.id as string).toBe(false);
+    },
+  );
+});
+
+describe('closeout hardening (ADR 0005 §43)', () => {
+  it.each(
+    ADULTS.flatMap(
+      (a) =>
+        [
+          [a, 'ui'],
+          [a, 'kev'],
+        ] as const,
+    ),
+  )(
+    '%s (via %s): Activity shows nothing about any sensitive context, household or private, theirs or not',
+    async (a, via) => {
+      const rows = await allAudit(actor(a, via));
+      const ids = new Set(rows.map((r) => r.subjectId));
+      expect(ids.has(seed.sensitive.household)).toBe(false);
+      expect(ids.has(seed.sensitive.private)).toBe(false);
+    },
+  );
+
+  it('the system actor’s Activity omits sensitive context too', async () => {
+    const rows = await allAudit(sys as never);
+    const ids = new Set(rows.map((r) => r.subjectId));
+    expect(ids.has(seed.sensitive.household)).toBe(false);
+    expect(ids.has(seed.sensitive.private)).toBe(false);
+  });
+
+  it.each(ADULTS)('%s: no context write returns sensitive content', async (a) => {
+    const me = actor(a);
+    const targets =
+      a === 'alex'
+        ? [seed.sensitive.household, seed.sensitive.private]
+        : [seed.sensitive.household];
+    for (const id of targets) {
+      const out = json([
+        await context.updateContext(me, id, {}, deps),
+        await context.updateContext(me, id, { category: 'practical' }, deps),
+        await context.confirmContext(me, id, deps),
+      ]);
+      expect(out).not.toContain(SENSITIVE_MARK);
+    }
+  });
+
+  it.each(ADULTS)(
+    '%s: cannot capture, or propose from, the other adult’s message or conversation',
+    async (a) => {
+      const o = seed.canaries[OTHER[a]];
+      expect(
+        await outcome(
+          captures.captureVerbatim(actor(a, 'kev'), { messageId: o.userMessage }, deps),
+        ),
+      ).toBe('not_found');
+      expect(
+        await outcome(
+          captures.captureVerbatim(actor(a), { text: 'x', messageId: o.userMessage }, deps),
+        ),
+      ).toBe('not_found');
+      expect(
+        await outcome(captures.captureVerbatim(actor(a, 'kev'), { text: 'Kev wrote this' }, deps)),
+      ).toBe('kev_cannot_author');
+      expect(
+        await outcome(
+          proposals.createProposal(
+            actor(a, 'kev'),
+            {
+              action: 'task.create',
+              payload: { title: 'x' },
+              summary: 'x',
+              conversationId: o.conversation,
+            },
+            deps,
+          ),
+        ),
+      ).toBe('not_found');
     },
   );
 });
@@ -385,7 +463,13 @@ function writeCalls(own: Adult): Record<string, Call> {
     'notes.updateNote': (a) => notes.updateNote(a, c.note, { body: 'x' }, d),
     'notes.archiveNote': (a) => notes.archiveNote(a, c.note, d),
     'notes.restoreNote': (a) => notes.restoreNote(a, c.note, d),
-    'captures.captureVerbatim': (a) => captures.captureVerbatim(a, { text: 'kev may capture' }, d),
+    // Kev may capture only the person's own message (it never supplies words).
+    'captures.captureVerbatim': (a) =>
+      captures.captureVerbatim(
+        a,
+        a.via === 'kev' ? { messageId: c.userMessage } : { text: 'a person captures' },
+        d,
+      ),
     'captures.dismissCapture': (a) => captures.dismissCapture(a, c.capture, d),
     'captures.undismissCapture': (a) => captures.undismissCapture(a, c.capture, d),
     'captures.archiveCapture': (a) => captures.archiveCapture(a, c.capture, d),

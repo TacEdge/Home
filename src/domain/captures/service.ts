@@ -1,8 +1,8 @@
 import 'server-only';
-import { and, count, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
-import { capture, proposal } from '@/db/schema';
+import { capture, conversation, message, proposal } from '@/db/schema';
 import {
   ORGANISED_TYPES,
   type CaptureStatus,
@@ -10,11 +10,11 @@ import {
   type OrganisedType,
 } from '@/db/schema/capture';
 import type { UserActor } from '@/trust/actor';
-import { NotPermittedError } from '../common/errors';
+import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { auditedWrite, type Deps, type DomainAudit } from '../common/write';
-import { captureInput, type CaptureInput } from './schema';
+import { captureInput, captureText, type CaptureInput } from './schema';
 
 // Captures (FAMILY-DATA-MODEL §3, M2 contract §5.6). What someone told HOME,
 // stored verbatim and privately before anyone decides what it is. The text,
@@ -43,7 +43,36 @@ const audit = (
   record: row,
 });
 
-/** Stores the person's words exactly as given, private to them. Kev may call this; the system may not. */
+/**
+ * The actor's own message, by id: in a live conversation they own. Another
+ * adult's message is NotFound, like a missing one. Locked FOR SHARE so it
+ * cannot vanish while a capture points at it.
+ */
+async function ownMessage(tx: DbOrTx, actor: UserActor, id: string) {
+  const [row] = await tx
+    .select({ role: message.role, content: message.content })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .where(
+      and(
+        eq(message.id, id),
+        eq(conversation.userId, actor.userId),
+        isNull(conversation.archivedAt),
+      ),
+    )
+    .for('share')
+    .limit(1);
+  if (!row) throw new NotFoundError('message');
+  return row;
+}
+
+/**
+ * Stores what a person said, exactly, private to them (CLAUDE.md "capture
+ * first"). A person passes their words as `text`. Kev never authors a
+ * capture (rule 3): it passes only `messageId`, the person's own user
+ * message, and the text is copied from that message unchanged. Any
+ * `messageId` must be the actor's own. The system actor may not capture.
+ */
 export async function captureVerbatim(
   actor: UserActor,
   input: CaptureInput,
@@ -51,11 +80,25 @@ export async function captureVerbatim(
 ): Promise<Capture> {
   if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
   const data = captureInput.parse(input);
+  const kev = actor.via === 'kev';
+  if (kev && (data.text !== undefined || data.messageId === undefined)) {
+    throw new NotPermittedError('kev_cannot_author');
+  }
+  if (!kev && data.text === undefined) captureText.parse(undefined); // a person must give their words
   return auditedWrite(actor, deps, async (tx) => {
+    let text = data.text;
+    if (data.messageId) {
+      const m = await ownMessage(tx, actor, data.messageId);
+      if (kev) {
+        // Only the person's own words: a user message, copied exactly.
+        if (m.role !== 'user') throw new NotPermittedError('kev_cannot_author');
+        text = captureText.parse((m.content as { text?: unknown }).text);
+      }
+    }
     const [row] = await tx
       .insert(capture)
       .values({
-        text: data.text,
+        text: text as string,
         channel: data.channel,
         messageId: data.messageId ?? null,
         visibility: 'private',

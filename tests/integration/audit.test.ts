@@ -126,8 +126,9 @@ describe('audit_log', () => {
     expect(expected).toHaveLength(micros.length);
 
     // Every page size, including one that ends a page on every row. Paged as
-    // the system actor, which sees every row: this is about pagination, and
-    // a user's Activity rightly omits rows about others' private records (P-1).
+    // the system actor, which sees every row except Activity about sensitive
+    // context (ADR 0005 §43): this is about pagination, and a user's Activity
+    // rightly omits rows about others' private records (P-1).
     for (const limit of [1, 2, 3, 4, 5, 7]) {
       const seen: { id: string; event: string }[] = [];
       let cursor: AuditCursor | undefined;
@@ -144,7 +145,14 @@ describe('audit_log', () => {
       const ids = seen.map((r) => r.id);
       expect(new Set(ids).size, `page size ${limit}`).toBe(ids.length);
       // And the walk covered the whole log.
-      const total = (await db.execute(sql`select count(*)::int as n from audit_log`)).rows[0]?.n;
+      const total = (
+        await db.execute(sql`select count(*)::int as n from audit_log a
+          where not (a.subject_type = 'context' and (
+            exists (select 1 from context c where c.id::text = a.subject_id and c.sensitivity = 'sensitive')
+            or (not exists (select 1 from context c where c.id::text = a.subject_id)
+                and exists (select 1 from audit_log p where p.subject_type = 'context'
+                  and p.subject_id = a.subject_id and p.meta ->> 'sensitivity' = 'sensitive'))))`)
+      ).rows[0]?.n;
       expect(ids.length, `page size ${limit}`).toBe(total);
     }
   });

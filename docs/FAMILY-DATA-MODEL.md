@@ -21,7 +21,7 @@ Every user-facing table has:
 | `id` | uuid | |
 | `created_at`, `updated_at` | timestamptz | |
 | `created_by` | user id | null for `sync` |
-| `created_via` | enum `ui` \| `kev` \| `sync` | `kev` means created by approving a Kev proposal |
+| `created_via` | enum `ui` \| `kev` \| `sync` | how the record came to be: `kev` when Kev proposed it (and a person approved), or when Kev captured or proposed it directly; a proposal the person made themselves executes as `ui` (ADR 0005 §43) |
 | `visibility` | enum `household` \| `private` | default `household` (captures default `private`) |
 | `archived_at` | timestamptz null | soft delete; purged after 30 days |
 | `origin_capture_id` | uuid null | on records organised from a capture (`event`, `project`, `task`, `note`, `context`; migration `0005`, `ON DELETE SET NULL`) |
@@ -192,6 +192,8 @@ user says something ──► Capture(new, private)          ← stored immediat
 ```
 A capture may organise into several records ("book the WOF and remember the car's due for tyres" → a task and a context record). If nothing fits, it stays a capture — which is fine.
 
+Kev never authors a capture (CLAUDE.md rule 3): a Kev capture names the person's own user message and its text is copied exactly; any `message_id` must be in the capturer's own conversation (ADR 0005 §43).
+
 Implementation (migration `0005`, M2 Package 4a): common fields with `visibility` always `private` (`CHECK`) and `created_by` as `captured_by` (required; never a `sync` record). `text` is stored exactly as given (it must contain a non-space character) and a trigger refuses any change to `text`, `created_by`, `created_at`, `created_via` or `channel` for every role, so organising never rewrites what was said (`message_id` stays writable for Package 5). `channel` is `web`. `message_id` has no foreign key until `message` exists (Package 5). `organised_into` is a JSON array of `{type, id}` (`task`, `event`, `project`, `note`, `context`; uuid ids); `organised` requires `organised_at` and at least one reference; `dismissed_at` is set exactly while `dismissed`, for the 30-day purge.
 
 ### Context — "what Kev knows"
@@ -231,6 +233,8 @@ Kev chat history, owned by one user, retained 90 days, not used as memory.
 | `tier`, `model` | on Kev messages |
 
 Service (M2 Package 5b): conversations and messages are read and written only by their owner; adding a message moves `last_message_at`; message content is validated as version 1 of HOME's provider-neutral format. Writes are a signed-in person's (ADR 0005 §39).
+
+Retention: the 90-day conversation purge (not built in M2) measures from `last_message_at`, falling back to `created_at` for a conversation that has no message (ADR 0005 §43).
 
 Implementation (migration `0006`, M2 Package 5a): `conversation` has `user_id` (→ `user`, `ON DELETE CASCADE`), `created_at`, `updated_at`, `last_message_at` (the 90-day retention clock) and `archived_at`; it is private to its owner by `user_id`, so it has no visibility column. `message` belongs to its conversation (`ON DELETE CASCADE`); `content` is a JSON object carrying a numeric `v` (the application validates each version's schema); a Kev message has `tier` (`fast` \| `deep`) and `model`, a person's has neither (`CHECK`). Deleting a conversation clears `capture.message_id` and `proposal.conversation_id` (`ON DELETE SET NULL`) and never touches a capture's words.
 

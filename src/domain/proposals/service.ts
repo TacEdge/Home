@@ -2,7 +2,7 @@ import 'server-only';
 import { and, desc, eq, getTableColumns, lte, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
-import { proposal } from '@/db/schema';
+import { conversation, proposal } from '@/db/schema';
 import type { ProposalAction, ProposalStatus } from '@/db/schema/proposal';
 import { log } from '@/lib/log';
 import type { UserActor } from '@/trust/actor';
@@ -65,6 +65,16 @@ export async function createProposal(
   PROPOSAL_PAYLOADS[data.action].parse(data.payload);
   return auditedWrite(actor, deps, async (tx) => {
     if (data.captureId) await lockForProposal(tx, actor, data.captureId);
+    // Only the requester's own conversation, as recordUsage requires (ADR 0005 §43).
+    if (data.conversationId) {
+      const [c] = await tx
+        .select({ id: conversation.id })
+        .from(conversation)
+        .where(and(eq(conversation.id, data.conversationId), eq(conversation.userId, actor.userId)))
+        .for('share')
+        .limit(1);
+      if (!c) throw new NotFoundError('conversation');
+    }
     const [row] = await tx
       .insert(proposal)
       .values({
@@ -186,6 +196,7 @@ export async function approveProposal(
     const execution = issueExecution({
       proposalId: current.id,
       requestedBy: current.requestedByUserId,
+      createdVia: current.createdVia === 'kev' ? 'kev' : 'ui',
       captureId: current.captureId,
       conversationId: current.conversationId,
     });

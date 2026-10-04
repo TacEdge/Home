@@ -46,6 +46,7 @@ export type CanaryIds = {
   capture: string;
   proposal: string;
   conversation: string;
+  userMessage: string;
   insightKey: string;
 };
 export type SeedManifest = {
@@ -117,7 +118,15 @@ async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> 
     },
     deps,
   );
-  const cap = await captureVerbatim(kev, { text: `${mark}capture: remember the surprise` }, deps);
+  // Kev never authors a capture: it captures the person's own message, word for word.
+  const conv = await startConversation(a, deps);
+  const said = await addMessage(
+    a,
+    conv.id,
+    { role: 'user', content: { v: 1, text: `${mark}capture: remember the surprise` } },
+    deps,
+  );
+  const cap = await captureVerbatim(kev, { messageId: said.id }, deps);
   const prop = await createProposal(
     kev,
     {
@@ -125,11 +134,11 @@ async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> 
       payload: { title: `${mark}proposal-task`, visibility: 'private' },
       summary: `${mark}proposal-summary`,
       captureId: cap.id,
+      conversationId: conv.id,
     },
     deps,
   );
-  const conv = await startConversation(a, deps);
-  await addMessage(
+  const userMessage = await addMessage(
     a,
     conv.id,
     { role: 'user', content: { v: 1, text: `${mark}message-user` } },
@@ -170,6 +179,7 @@ async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> 
     capture: cap.id,
     proposal: prop.id,
     conversation: conv.id,
+    userMessage: userMessage.id,
     insightKey,
   };
 }

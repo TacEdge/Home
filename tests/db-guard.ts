@@ -24,6 +24,15 @@ export function assertTestDatabase(url: string | undefined): string {
   if (!/^postgres(ql)?:$/.test(parsed.protocol)) {
     throw new NotATestDatabaseError('the URL is not a postgres:// URL');
   }
+  // `?host=` (or `hostaddr=`) would make the driver connect somewhere other
+  // than the URL's host: refuse any such override.
+  if (
+    [...parsed.searchParams.keys()].some((k) =>
+      ['host', 'hostaddr'].includes(k.trim().toLowerCase()),
+    )
+  ) {
+    throw new NotATestDatabaseError('the URL overrides its host with a query parameter');
+  }
   if (!LOCAL_HOSTS.has(parsed.hostname)) {
     throw new NotATestDatabaseError('the host is not a local test host');
   }

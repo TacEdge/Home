@@ -19,8 +19,12 @@ Checked against `M2-BUILD-CONTRACT.md` §10 with Package 5b in review (2026-10-0
 | 13 | Docs updated per §9 | Met (this PR) | FAMILY-DATA-MODEL implementation notes; ADR 0005 §§9–42; LOCAL-DEV (`pnpm db:seed:fixtures`); MIGRATIONS (live production); CLAUDE.md and ROADMAP status. |
 | 14 | Handed back for Opus code and architecture review before M3 | **Open** | Awaiting the owner. |
 
+## Final audit and closeout hardening
+
+The final adversarial audit of M2 (2026-10-04) found no blocker and recommended targeted fixes (B). All of its Important and the applicable Minor findings are fixed in the closeout hardening PR (ADR 0005 §43), each with regression tests, privacy-suite coverage and a mutation check: host-override guard bypass; Kev-authored captures and cross-adult message links; per-run Kev usage visible in Activity; sensitive context in Activity; context writes returning content; proposal provenance; conversation ownership; retention note.
+
 ## Open items and risks
 
 - **M1 acceptance is still open** (DEPLOY.md §E): Postmark live approval, a successful production magic-link sign-in, and the Neon recovery condition. M3 real-user or real-data work stays gated on them.
-- **Kev's own transcript and usage recording** needs a decision before M3 (ADR 0005 §39): M2 refuses every Kev write except capture and propose, including these.
+- **Kev's own transcript and usage recording** needs a decision before M3 (ADR 0005 §39): M2 refuses every Kev write except capture (of the person's own message) and propose, including these.
 - **Production health after 5b deploys** (criterion 3) should be confirmed by the owner, as for every earlier package.

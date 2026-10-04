@@ -46,6 +46,14 @@ import {
 //     derived by the engine, never stored).
 
 export type Context = typeof context.$inferSelect;
+/**
+ * What a write returns: the record without its content (ADR 0005 §43). A
+ * write must never become a way to read sensitive content without asking:
+ * content comes only from getContext/listContext, where sensitivity is
+ * explicit and audited.
+ */
+export type ContextRecord = Omit<Context, 'content'>;
+const structural = ({ content: _content, ...rest }: Context): ContextRecord => rest;
 type ReadOpts = { includeArchived?: boolean; includeSensitive?: boolean };
 
 const R = records(context, 'context');
@@ -116,16 +124,19 @@ const refuseSensitiveExecution = (deps: Deps, sensitivity: string | undefined) =
 function sourceOf(actor: UserActor, deps: Deps) {
   const e = executionOf(deps);
   if (!e) return { sourceType: 'manual' as const, sourceUserId: actor.userId, sourceRef: null };
-  return e.captureId
-    ? { sourceType: 'capture' as const, sourceUserId: e.requestedBy, sourceRef: e.captureId }
-    : { sourceType: 'told_kev' as const, sourceUserId: e.requestedBy, sourceRef: e.conversationId };
+  if (e.captureId)
+    return { sourceType: 'capture' as const, sourceUserId: e.requestedBy, sourceRef: e.captureId };
+  // A proposal the person made themselves is their own manual entry.
+  return e.createdVia === 'kev'
+    ? { sourceType: 'told_kev' as const, sourceUserId: e.requestedBy, sourceRef: e.conversationId }
+    : { sourceType: 'manual' as const, sourceUserId: e.requestedBy, sourceRef: null };
 }
 
 export async function createContext(
   actor: UserActor,
   input: CreateContextInput,
   deps: Deps = {},
-): Promise<Context> {
+): Promise<ContextRecord> {
   assertCanWrite(actor);
   const { subject, ...data } = createContextInput.parse(input);
   refuseSensitiveExecution(deps, data.sensitivity);
@@ -145,7 +156,7 @@ export async function createContext(
       .returning();
     if (!row) throw new Error('context insert returned no row');
     return {
-      result: row,
+      result: structural(row),
       audit: audit('create', row, {
         category: row.category,
         sensitivity: row.sensitivity,
@@ -220,13 +231,15 @@ export async function updateContext(
   id: string,
   patch: UpdateContextInput,
   deps: Deps = {},
-): Promise<Context> {
+): Promise<ContextRecord> {
   assertCanWrite(actor);
   const data = updateContextInput.parse(patch);
   refuseSensitiveExecution(deps, data.sensitivity);
   const fields = Object.keys(data).sort();
-  if (fields.length === 0)
-    return getContext(actor, id, { includeSensitive: !executionOf(deps) }, deps);
+  if (fields.length === 0) {
+    const db = deps.db ?? getDb();
+    return db.transaction(async (tx) => structural(await lockFor(tx, actor, id, deps)));
+  }
   return auditedWrite(actor, deps, async (tx) => {
     const current = await lockFor(tx, actor, id, deps);
     const next = data.visibility ?? current.visibility;
@@ -241,7 +254,7 @@ export async function updateContext(
     const row = await R.update(tx, actor, current.id, 'exclude', data);
     const meta: Record<string, string | string[]> = { fields };
     if (data.sensitivity) meta.sensitivity = row.sensitivity;
-    return { result: row, audit: audit('update', row, meta) };
+    return { result: structural(row), audit: audit('update', row, meta) };
   });
 }
 
@@ -252,7 +265,7 @@ export async function confirmContext(actor: UserActor, id: string, deps: Deps = 
     const current = await lockFor(tx, actor, id, deps);
     if (current.status !== 'active') throw new NotPermittedError('not_eligible');
     const row = await R.update(tx, actor, current.id, 'exclude', { lastConfirmedAt: sql`now()` });
-    return { result: row, audit: audit('confirm', row) };
+    return { result: structural(row), audit: audit('confirm', row) };
   });
 }
 
@@ -261,12 +274,12 @@ export async function retireContext(actor: UserActor, id: string, deps: Deps = {
   assertCanWrite(actor);
   return auditedWrite(actor, deps, async (tx) => {
     const current = await lockFor(tx, actor, id, deps);
-    if (current.status === 'retired') return { result: current, audit: null };
+    if (current.status === 'retired') return { result: structural(current), audit: null };
     const row = await R.update(tx, actor, current.id, 'exclude', {
       status: 'retired',
       retiredAt: sql`now()`,
     });
-    return { result: row, audit: audit('retire', row, { status: row.status }) };
+    return { result: structural(row), audit: audit('retire', row, { status: row.status }) };
   });
 }
 
@@ -281,7 +294,7 @@ export async function reinstateContext(actor: UserActor, id: string, deps: Deps 
       retiredAt: null,
       lastConfirmedAt: sql`now()`,
     });
-    return { result: row, audit: audit('reinstate', row, { status: row.status }) };
+    return { result: structural(row), audit: audit('reinstate', row, { status: row.status }) };
   });
 }
 
@@ -290,7 +303,7 @@ export async function archiveContext(actor: UserActor, id: string, deps: Deps = 
   return auditedWrite(actor, deps, async (tx) => {
     const current = await lockFor(tx, actor, id, deps);
     const row = await R.update(tx, actor, current.id, 'exclude', { archivedAt: sql`now()` });
-    return { result: row, audit: audit('archive', row) };
+    return { result: structural(row), audit: audit('archive', row) };
   });
 }
 
@@ -300,6 +313,6 @@ export async function restoreContext(actor: UserActor, id: string, deps: Deps = 
     const current = await R.lock(tx, actor, id, 'include');
     if (current.archivedAt === null) throw new NotPermittedError('not_archived');
     const row = await R.update(tx, actor, current.id, 'only', { archivedAt: null });
-    return { result: row, audit: audit('restore', row) };
+    return { result: structural(row), audit: audit('restore', row) };
   });
 }

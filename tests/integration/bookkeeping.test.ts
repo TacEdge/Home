@@ -206,6 +206,23 @@ describe('kev_usage: an append-only ledger in micro-US-dollars', () => {
     expect(r.rows[0]?.c).toBe('5');
   });
 
+  it('each run is its user’s alone in Activity: the other adult never sees it; the household total still counts it', async () => {
+    // The current month, on the database clock.
+    const m = (
+      await admin.db.execute(sql`select to_char(now() at time zone 'UTC', 'YYYY-MM') as m`)
+    ).rows[0]?.m as string;
+    const total = await monthToDateCostUsdMicros(h.alex, m, 'UTC', deps);
+    const row = await recordUsage(
+      h.sam,
+      { tier: 'deep', model: 'canary-usage-model', costUsdMicros: 11 },
+      deps,
+    );
+    expect(await activity(h.alex, row.id)).toEqual([]);
+    expect((await activity(h.sam, row.id)).map((r) => r.event)).toEqual(['kev_usage.record']);
+    // The household total is unchanged in kind: it still counts Sam's run for Alex.
+    expect(await monthToDateCostUsdMicros(h.alex, m, 'UTC', deps)).toBe(total + 11n);
+  });
+
   it.each([
     ['a negative cost', { tier: 'fast', model: 'm', costUsdMicros: -1 }],
     ['a fractional cost', { tier: 'fast', model: 'm', costUsdMicros: 1.5 }],

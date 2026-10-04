@@ -4,6 +4,7 @@ import { auditLog, capture, task } from '@/db/schema';
 import { captureVerbatim, getCapture } from '@/domain/captures/service';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
 import { createContext, getContext } from '@/domain/context/service';
+import { addMessage, startConversation } from '@/domain/conversations/service';
 import { createEvent, getEvent, listEventPeople } from '@/domain/events/service';
 import { getNote } from '@/domain/notes/service';
 import { createPerson } from '@/domain/people/service';
@@ -500,7 +501,15 @@ describe('capture organisation', () => {
   const words = ' Book the WOF, and the car is due for tyres \n';
 
   it('records what a capture became, with provenance, and never touches its words', async () => {
-    const c = await captureVerbatim(h.samViaKev, { text: words }, deps);
+    // Kev captures the person's own message (it never supplies the words).
+    const conv = await startConversation(h.sam, deps);
+    const m = await addMessage(
+      h.sam,
+      conv.id,
+      { role: 'user', content: { v: 1, text: words } },
+      deps,
+    );
+    const c = await captureVerbatim(h.samViaKev, { messageId: m.id }, deps);
     const a = await propose(
       h.samViaKev,
       'task.create',
@@ -582,6 +591,50 @@ describe('capture organisation', () => {
     expect(
       await code(propose(h.samViaKev, 'task.create', { title: 'x' }, { captureId: c.id })),
     ).toBe('not_eligible');
+  });
+});
+
+describe('provenance follows the proposal (ADR 0005 §43)', () => {
+  it('a proposal the person made themselves creates records as theirs (ui); Kev’s as kev', async () => {
+    const mine = await propose(h.sam, 'task.create', { title: 'typed by Sam' });
+    expect(mine.createdVia).toBe('ui');
+    const [t] = approved(await approve(h.sam, mine.id)).resultRef;
+    expect((await getTask(h.sam, t!.id, {}, deps)).createdVia).toBe('ui');
+    const ctx = await propose(h.sam, 'context.create', {
+      subject: { type: 'household' },
+      content: 'x',
+      category: 'other',
+    });
+    const [c] = approved(await approve(h.sam, ctx.id)).resultRef;
+    expect(await getContext(h.sam, c!.id, {}, deps)).toMatchObject({
+      createdVia: 'ui',
+      sourceType: 'manual',
+      sourceRef: null,
+    });
+    const kevs = await propose(h.samViaKev, 'task.create', { title: 'proposed by Kev' });
+    const [k] = approved(await approve(h.sam, kevs.id)).resultRef;
+    expect((await getTask(h.sam, k!.id, {}, deps)).createdVia).toBe('kev');
+  });
+});
+
+describe('a proposal may name only its requester’s own conversation', () => {
+  it('the other adult’s conversation, or none at all, is not found; the requester’s own is accepted', async () => {
+    const theirs = await startConversation(h.alex, deps);
+    const before = (await admin.db.execute(sql`select count(*)::int as n from proposal`)).rows[0]
+      ?.n;
+    const linked = (conversationId: string) =>
+      createProposal(
+        h.samViaKev,
+        { action: 'task.create', payload: { title: 'x' }, summary: 'x', conversationId },
+        deps,
+      );
+    expect(await code(linked(theirs.id))).toBe('not_found');
+    expect(await code(linked(crypto.randomUUID()))).toBe('not_found');
+    expect((await admin.db.execute(sql`select count(*)::int as n from proposal`)).rows[0]?.n).toBe(
+      before,
+    );
+    const own = await startConversation(h.sam, deps);
+    expect((await linked(own.id)).conversationId).toBe(own.id);
   });
 });
 
