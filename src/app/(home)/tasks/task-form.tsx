@@ -11,7 +11,7 @@ import type { PersonColour } from '@/ui/person-dot';
 import { NEED_LABEL } from './copy';
 
 // The task form (M3 contract §3.5): the title, then everything else under
-// More: notes, project, who's doing it, who it's about, due date, how long,
+// More (folded until asked for, on a new and an existing task alike): notes, project, who's doing it, who it's about, due date, how long,
 // what it needs, a window, visibility. A refused save shows what was typed
 // (shown()) and focuses where to look.
 
@@ -61,9 +61,27 @@ export function TaskForm({
   const errors = state.status === 'error' ? state.fields : {};
   const ref = useRefusalFocus<HTMLFormElement>(state);
   const v = (name: string, stored: string | null | undefined) => shown(state, name, stored);
+  // Fold More open when a field inside was refused or changed, so nothing
+  // the person typed is hidden behind it; otherwise it starts folded.
+  const stored: Record<string, string> = {
+    notes: task?.notes ?? '',
+    projectId: task?.projectId ?? defaults.projectId,
+    assigneePersonId: task?.assigneePersonId ?? '',
+    aboutPersonId: task?.aboutPersonId ?? '',
+    dueDate: task?.dueDate ?? '',
+    estimateMinutes: task?.estimateMinutes ? String(task.estimateMinutes) : '',
+    windowDate: defaults.windowDate,
+    windowFrom: defaults.windowFrom,
+    windowTo: defaults.windowTo,
+    visibility: task?.visibility ?? 'household',
+  };
   const moreTouched =
     state.status === 'error' &&
-    MORE_FIELDS.some((k) => Object.keys(errors).some((e) => e.startsWith(k)));
+    (MORE_FIELDS.some((k) => Object.keys(errors).some((e) => e.startsWith(k))) ||
+      Object.entries(stored).some(([k, v]) => (state.values?.[k] ?? v) !== v) ||
+      NEEDS.some(
+        (n) => (state.values?.[`needs_${n}`] === 'on') !== (task?.needs ?? []).includes(n),
+      ));
   const needs = new Set(
     NEEDS.filter((n) =>
       state.status === 'error' && state.values
@@ -85,7 +103,7 @@ export function TaskForm({
         defaultValue={v('title', task?.title)}
         error={errors.title}
       />
-      <More open={moreTouched || Boolean(task)}>
+      <More open={moreTouched}>
         <Field
           name="notes"
           label="Notes"
@@ -107,7 +125,7 @@ export function TaskForm({
         />
         <Field
           name="assigneePersonId"
-          label="Who's doing it"
+          label="Who’s doing it"
           type="select"
           options={personOptions}
           defaultValue={v('assigneePersonId', task?.assigneePersonId ?? '')}
@@ -115,11 +133,11 @@ export function TaskForm({
         />
         <Field
           name="aboutPersonId"
-          label="Who it's about"
+          label="Who it’s about"
           type="select"
           options={personOptions}
           defaultValue={v('aboutPersonId', task?.aboutPersonId ?? '')}
-          hint="For example, a form for Milo's school."
+          hint="For example, a form for Milo’s school."
           error={errors.aboutPersonId}
         />
         <Field
@@ -183,7 +201,7 @@ export function TaskForm({
           required
           options={VISIBILITY}
           defaultValue={v('visibility', task?.visibility ?? 'household')}
-          hint="Just me keeps this out of the other adult's HOME. Something private can only point at private things."
+          hint="Just me keeps this out of the other adult’s HOME. Something private can only point at private things."
           error={errors.visibility}
         />
       </More>

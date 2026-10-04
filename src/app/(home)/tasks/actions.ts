@@ -3,10 +3,12 @@
 import { redirect } from 'next/navigation';
 import { formAction, type FormState } from '@/app/_forms/action';
 import { choiceOf, idOf } from '@/app/_forms/read';
+import { localPath } from '@/app/_forms/return-to';
+import { NotPermittedError } from '@/domain/common/errors';
 import { TASK_STATUSES, type TaskStatus } from '@/domain/tasks/schema';
 import { listPeople } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
-import { archiveTask, createTask, restoreTask, updateTask } from '@/domain/tasks/service';
+import { archiveTask, createTask, getTask, restoreTask, updateTask } from '@/domain/tasks/service';
 import { env } from '@/lib/env';
 import { readNewTask, readTaskPatch } from './task-form-data';
 
@@ -14,11 +16,9 @@ import { readNewTask, readTaskPatch } from './task-form-data';
 // session inside formAction; the project and people a form may name are the
 // ones the actor can see, read here rather than trusted from the form; the
 // service validates and enforces every rule. Status has its own action so
-// done and dropped are one tap, with undo.
-
-/** A path on this site to return to; anything else goes to To do. */
-export const safeReturn = async (to: string | undefined) =>
-  to && /^\/[^/\\]/.test(to) ? to : '/tasks';
+// done and dropped are one tap, with undo. An edit sends a reference
+// (project, people) only when it changed, so an archived one it still
+// holds is kept rather than cleared.
 
 async function offered(actor: Parameters<typeof listPeople>[0]) {
   const [projects, people] = await Promise.all([listProjects(actor), listPeople(actor)]);
@@ -42,7 +42,12 @@ export async function updateTaskAction(
 ): Promise<FormState> {
   return formAction(
     async (actor) => {
-      await updateTask(actor, id, readTaskPatch(form, await offered(actor), env.HOME_TIMEZONE));
+      const current = await getTask(actor, id);
+      await updateTask(
+        actor,
+        id,
+        readTaskPatch(form, await offered(actor), env.HOME_TIMEZONE, current),
+      );
       redirect(`/tasks/${id}`);
     },
     { form },
@@ -62,9 +67,9 @@ export async function setTaskStatusAction(
   return formAction(async (actor) => {
     const id = idOf(form);
     const status = choiceOf(form, 'status') as TaskStatus;
-    if (!TASK_STATUSES.includes(status)) throw new Error('unknown status');
+    if (!TASK_STATUSES.includes(status)) throw new NotPermittedError('not_eligible');
     await updateTask(actor, id, { status });
-    const to = await safeReturn(returnTo);
+    const to = localPath(returnTo, '/tasks');
     redirect(status === 'open' ? to : `${to}${to.includes('?') ? '&' : '?'}undo=${id}`);
   });
 }

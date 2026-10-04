@@ -101,12 +101,44 @@ describe('readNewTask', () => {
 });
 
 describe('readTaskPatch', () => {
+  const none = { projectId: null, assigneePersonId: null, aboutPersonId: null };
   it('sends only what the form carried, never a status', () => {
-    expect(readTaskPatch(form({ title: 'y', dueDate: '' }), offered, NZ)).toEqual({
+    expect(readTaskPatch(form({ title: 'y', dueDate: '' }), offered, NZ, none)).toEqual({
       title: 'y',
       dueDate: null,
     });
-    expect(readTaskPatch(form({ needs_present: '1' }), offered, NZ)).toEqual({ needs: [] });
+    expect(readTaskPatch(form({ needs_present: '1' }), offered, NZ, none)).toEqual({ needs: [] });
+  });
+
+  it('leaves a reference alone when it is what the task already holds, offered or not (archived)', () => {
+    const ARCHIVED_PR = '44444444-4444-4444-8444-444444444444';
+    const ARCHIVED_PE = '55555555-5555-4555-8555-555555555555';
+    const current = { projectId: ARCHIVED_PR, assigneePersonId: ARCHIVED_PE, aboutPersonId: PE };
+    // An unrelated change: the archived project and person, not offered for new links, are kept.
+    expect(
+      readTaskPatch(
+        form({
+          title: 'y',
+          projectId: ARCHIVED_PR,
+          assigneePersonId: ARCHIVED_PE,
+          aboutPersonId: PE,
+        }),
+        offered,
+        NZ,
+        current,
+      ),
+    ).toEqual({ title: 'y' });
+    // A change must name something offered; clearing is a change too.
+    expect(
+      readTaskPatch(
+        form({ projectId: PR, assigneePersonId: '', aboutPersonId: 'not-offered' }),
+        offered,
+        NZ,
+        current,
+      ),
+    ).toEqual({ projectId: PR, assigneePersonId: null, aboutPersonId: null });
+    // Clearing what is already empty sends nothing.
+    expect(readTaskPatch(form({ projectId: '' }), offered, NZ, none)).toEqual({});
   });
 });
 

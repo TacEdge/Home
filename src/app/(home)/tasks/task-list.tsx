@@ -10,6 +10,7 @@ import { Quiet } from '@/ui/page';
 import { PersonName, type PersonColour } from '@/ui/person-dot';
 import { setTaskStatusAction } from './actions';
 import { taskStatusLabel } from './copy';
+import { UndoLine } from './undo-line';
 
 // Tasks as HOME lists them (M3 contract §3.5): open ones first, by due date
 // (none last) then project; done and dropped folded away. A row is the due
@@ -119,16 +120,12 @@ export function TaskList({
   return (
     <>
       {undo ? (
-        <ActionForm action={act} className="mb-4 flex flex-wrap items-baseline gap-x-3">
-          <input type="hidden" name="id" value={undo.id} />
-          <input type="hidden" name="status" value="open" />
-          <span role="status" className="text-ink-2">
-            {undo.title}: {taskStatusLabel(undo.status).toLowerCase()}.
-          </span>
-          <Button variant="quiet" ariaLabel={`Undo: ${undo.title}`}>
-            Undo
-          </Button>
-        </ActionForm>
+        <UndoLine
+          action={act}
+          taskId={undo.id}
+          title={undo.title}
+          text={`${undo.title}: ${taskStatusLabel(undo.status).toLowerCase()}.`}
+        />
       ) : null}
       {open.length === 0 ? (
         <Quiet>{empty}</Quiet>

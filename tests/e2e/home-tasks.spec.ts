@@ -59,7 +59,7 @@ test('a project: start, edit, mark done (folded on Home), archive and restore', 
 
   await page.getByLabel('What', { exact: true }).fill('Vege beds');
   await page.getByLabel('In a line').fill('Two raised beds by the fence.');
-  await page.getByLabel("Where it's at").selectOption('active');
+  await page.getByLabel('Where it’s at').selectOption('active');
   await page.getByLabel('Aiming for').fill('2027-01-31');
   await page.getByRole('button', { name: 'Add it' }).click();
   await expect(page).toHaveURL(/\/home\/projects\/[0-9a-f-]{36}$/);
@@ -80,7 +80,7 @@ test('a project: start, edit, mark done (folded on Home), archive and restore', 
   await page.getByRole('link', { name: 'Edit' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Edit Vege beds' })).toBeVisible();
   await shot(page, 'project-edit');
-  await page.getByLabel("Where it's at").selectOption('done');
+  await page.getByLabel('Where it’s at').selectOption('done');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(url);
   await expect(page.locator('main header').getByText(/^Done/)).toBeVisible();
@@ -196,6 +196,16 @@ test('To do: open tasks by due date then project, done in one tap with undo, dro
   await page.getByRole('link', { name: /Oil the deck/ }).click();
   await page.getByRole('button', { name: 'Back to To do' }).click();
   await expect(page.locator('main header').getByText(/^To do/)).toBeVisible();
+  // More starts folded on an existing task; a refused field inside it opens it with what was typed.
+  await expect(page.getByLabel('Due')).toBeHidden();
+  await openSummary(page, 'More');
+  await page.getByLabel('A window to do it').fill('2026-10-17'); // a date with no times
+  await page.getByLabel('Notes').fill('Needs the good brush.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('This needs a time, like 09:00.')).toBeVisible();
+  await expect(page.getByLabel('From (optional)')).toBeFocused();
+  await expect(page.getByLabel('Notes')).toHaveValue('Needs the good brush.');
+  await page.getByLabel('A window to do it').fill('');
 
   // Edit on the task page: the title; then archive both, so later specs see To do as seeded.
   await page.getByLabel('What', { exact: true }).fill('Oil the deck properly');
@@ -211,6 +221,77 @@ test('To do: open tasks by due date then project, done in one tap with undo, dro
   await page.getByRole('button', { name: 'Archive' }).click();
   await expect(page).toHaveURL(/\/tasks$/);
   expect(await page.textContent('main')).not.toContain('fence paint');
+});
+
+test('editing an unrelated field keeps an archived project and archived people on a task; Done on a project page stays there', async ({
+  page,
+}) => {
+  await signInAsFixtureAdult(page, 'sam');
+  const fence = await idOf('project', 'Back fence');
+  const nana = await idOf('person', 'Nana Jo');
+  const milo = await idOf('person', 'Milo');
+  const task = await withDb(
+    async (pool) =>
+      (
+        await pool.query(
+          `insert into task (title, status, project_id, assignee_person_id, about_person_id, needs, created_by, created_via, visibility)
+           values ('Fix the gate latch', 'open', $1, $2, $3, '[]', 'fixture-sam', 'ui', 'household') returning id`,
+          [fence, nana, milo],
+        )
+      ).rows[0] as { id: string },
+  );
+  // The project and both people go away (archived), then only the title changes.
+  await withDb((pool) =>
+    pool.query(`update project set archived_at = now() where id = $1`, [fence]),
+  );
+  await withDb((pool) =>
+    pool.query(`update person set archived_at = now() where id = any($1::uuid[])`, [[nana, milo]]),
+  );
+  await page.goto(`/tasks/${task.id}`);
+  await expect(page.getByRole('link', { name: /Back fence/ })).toContainText('Part of');
+  await openSummary(page, 'More');
+  await expect(page.getByLabel('Part of')).toHaveValue(fence);
+  await expect(page.locator('#field-projectId option:checked')).toHaveText('Back fence (archived)');
+  await expect(page.locator('#field-assigneePersonId option:checked')).toHaveText(
+    'Nana Jo (archived)',
+  );
+  await expect(page.locator('#field-aboutPersonId option:checked')).toHaveText('Milo (archived)');
+  await page.getByLabel('What', { exact: true }).fill('Fix the gate latch properly');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Fix the gate latch properly' }),
+  ).toBeVisible();
+  const kept = await withDb(
+    async (pool) =>
+      (
+        await pool.query(
+          `select project_id, assignee_person_id, about_person_id from task where id = $1`,
+          [task.id],
+        )
+      ).rows[0] as Record<string, string>,
+  );
+  expect(kept).toEqual({ project_id: fence, assignee_person_id: nana, about_person_id: milo });
+  await withDb((pool) =>
+    pool.query(`update project set archived_at = null where id = $1`, [fence]),
+  );
+  await withDb((pool) =>
+    pool.query(`update person set archived_at = null where id = any($1::uuid[])`, [[nana, milo]]),
+  );
+
+  // Done from the project page returns there, Undo focused, in context.
+  await page.goto(`/home/projects/${fence}`);
+  await page.getByRole('button', { name: 'Done: Fix the gate latch properly' }).click();
+  await expect(page).toHaveURL(new RegExp(`/home/projects/${fence}\\?undo=`));
+  await expect(page.getByRole('heading', { level: 1, name: 'Back fence' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Undo: Fix the gate latch properly' }),
+  ).toBeFocused();
+  await page.getByRole('button', { name: 'Undo: Fix the gate latch properly' }).click();
+  await expect(page).toHaveURL(new RegExp(`/home/projects/${fence}$`));
+  await expect(
+    page.getByRole('button', { name: 'Done: Fix the gate latch properly' }),
+  ).toBeVisible();
+  await withDb((pool) => pool.query(`delete from task where id = $1`, [task.id]));
 });
 
 test('notes live on their subject: add, change, archive and restore on a project; add on a person and an event', async ({

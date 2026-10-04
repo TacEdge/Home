@@ -58,7 +58,7 @@ export function ProjectForm({
       />
       <Field
         name="status"
-        label="Where it's at"
+        label="Where it’s at"
         type="select"
         required
         options={STATUSES}
@@ -81,7 +81,7 @@ export function ProjectForm({
           required
           options={VISIBILITY}
           defaultValue={v('visibility', project?.visibility ?? 'household')}
-          hint="Just me keeps this out of the other adult's HOME. Only the person who added it can change this, and not while things everyone can see point to it."
+          hint="Just me keeps this out of the other adult’s HOME. Only the person who added it can change this, and not while things everyone can see point to it."
           error={errors.visibility}
         />
       </More>

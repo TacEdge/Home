@@ -6,7 +6,7 @@ import { NotFoundError } from '@/domain/common/errors';
 import { listNotes } from '@/domain/notes/service';
 import { listPeople } from '@/domain/people/service';
 import { getProject } from '@/domain/projects/service';
-import { listTasks } from '@/domain/tasks/service';
+import { getTask, listTasks } from '@/domain/tasks/service';
 import { longDate } from '@/lib/dates';
 import { requireActor } from '@/trust/session';
 import { Label, Page, Quiet } from '@/ui/page';
@@ -18,10 +18,18 @@ export const dynamic = 'force-dynamic';
 
 // A project (M3 contract §3.5): its line, where it's at and the date it
 // aims for; its tasks (open first, done and dropped folded away); its
-// notes, written and edited here. Edit, Archive and Restore as every record.
-export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+// notes, written and edited here. Done on a task here returns here, with
+// Undo. Edit, Archive and Restore as every record.
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ undo?: string }>;
+}) {
   const actor = await requireActor();
   const { id } = await params;
+  const { undo } = await searchParams;
   const project = await getProject(actor, id, { includeArchived: true }).catch((e: unknown) => {
     if (e instanceof NotFoundError) notFound();
     throw e;
@@ -32,6 +40,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     listPeople(actor),
   ]);
   const archived = project.archivedAt !== null;
+  const justSettled = undo ? await getTask(actor, undo).catch(() => undefined) : undefined;
 
   return (
     <Page
@@ -56,7 +65,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         people={people}
         projects={[project]}
         showProject={false}
+        returnTo={`/home/projects/${project.id}`}
         empty="Nothing to do on this yet."
+        undo={
+          justSettled && justSettled.status !== 'open' && justSettled.projectId === project.id
+            ? justSettled
+            : undefined
+        }
       />
       {archived ? null : (
         <p className="mt-4">

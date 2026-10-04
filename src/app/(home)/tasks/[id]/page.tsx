@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { ActionForm } from '@/app/_forms/action-form';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotFoundError } from '@/domain/common/errors';
-import { listPeople } from '@/domain/people/service';
+import { getPerson, listPeople } from '@/domain/people/service';
 import { getProject, listProjects } from '@/domain/projects/service';
 import { getTask } from '@/domain/tasks/service';
 import { clockOf, isoDateInZone, longDate } from '@/lib/dates';
@@ -43,16 +43,30 @@ export default async function TaskPage({
     throw e;
   });
   const [projects, people] = await Promise.all([listProjects(actor), listPeople(actor)]);
-  // The task's own project is offered even when it is done or archived.
-  const own =
+  // The task's own project and people are shown even when done or archived
+  // (an edit leaves them alone unless changed); only live ones are offered
+  // for a new link.
+  const ownProject =
     task.projectId && !projects.some((p) => p.id === task.projectId)
       ? await getProject(actor, task.projectId, { includeArchived: true }).catch(() => null)
       : null;
-  const offered = own ? [...projects, own] : projects;
+  const ownPerson = async (pid: string | null) =>
+    pid && !people.some((p) => p.id === pid)
+      ? await getPerson(actor, pid, { includeArchived: true }).catch(() => null)
+      : null;
+  const [ownAssignee, ownAbout] = await Promise.all([
+    ownPerson(task.assigneePersonId),
+    ownPerson(task.aboutPersonId),
+  ]);
+  const offered = ownProject ? [...projects, ownProject] : projects;
+  const offeredPeople = [...people, ...[ownAssignee, ownAbout].filter((p) => p !== null)];
   const project = task.projectId ? offered.find((p) => p.id === task.projectId) : undefined;
-  const person = (pid: string | null) => (pid ? people.find((p) => p.id === pid) : undefined);
+  const person = (pid: string | null) =>
+    pid ? offeredPeople.find((p) => p.id === pid) : undefined;
   const assignee = person(task.assigneePersonId);
   const about = person(task.aboutPersonId);
+  const archivedLabel = (name: string, archivedAt: Date | null) =>
+    archivedAt ? `${name} (archived)` : name;
   const archived = task.archivedAt !== null;
   const tz = env.HOME_TIMEZONE;
   const act = setTaskStatusAction.bind(null, `/tasks/${task.id}`);
@@ -159,10 +173,13 @@ export default async function TaskPage({
           <TaskForm
             action={updateTaskAction.bind(null, task.id)}
             task={task}
-            projects={offered.map((p) => ({ id: p.id, name: p.title }))}
-            people={people.map((p) => ({
+            projects={offered.map((p) => ({
               id: p.id,
-              name: p.name,
+              name: archivedLabel(p.title, p.archivedAt),
+            }))}
+            people={offeredPeople.map((p) => ({
+              id: p.id,
+              name: archivedLabel(p.name, p.archivedAt),
               colour: p.colour as PersonColour | null,
             }))}
             defaults={existingTaskDefaults(task, tz)}

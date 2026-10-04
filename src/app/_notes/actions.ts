@@ -3,15 +3,17 @@
 import { redirect } from 'next/navigation';
 import { formAction, type FormState } from '@/app/_forms/action';
 import { choiceOf, idOf, requiredTextOf } from '@/app/_forms/read';
+import { localPath } from '@/app/_forms/return-to';
 import type { NOTE_SUBJECT_TYPES } from '@/domain/notes/schema';
 import { archiveNote, createNote, restoreNote, updateNote } from '@/domain/notes/service';
 
 // Notes on a subject (M3 contract §3.7): written, changed, archived and
 // restored in place on a project, person or event page. The subject is
-// bound by the page, never read from the form; the service checks it is
-// visible and that a household note never points at something private.
+// bound by the server-rendered page (and so readable in the browser, like
+// any field); the service re-checks it is visible, not archived, and that a
+// household note never points at something private.
 
-const safe = (to: string) => (/^\/[^/\\]/.test(to) ? to : '/today');
+const safe = (to: string) => localPath(to, '/today');
 type SubjectType = (typeof NOTE_SUBJECT_TYPES)[number];
 
 export async function createNoteAction(

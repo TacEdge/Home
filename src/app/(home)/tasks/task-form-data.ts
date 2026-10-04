@@ -1,5 +1,6 @@
 import { TASK_NEEDS } from '@/domain/tasks/schema';
 import type { CreateTaskInput, UpdateTaskInput } from '@/domain/tasks/schema';
+import type { Task } from '@/domain/tasks/service';
 import { choiceOf, requiredTextOf, textOf } from '@/app/_forms/read';
 import { FormFieldError } from '@/app/_forms/errors';
 import { instantFromWallClock, isValidIsoDate, parseIsoDate } from '@/lib/dates';
@@ -76,14 +77,31 @@ export function readNewTask(form: FormData, offered: Offered, timeZone: string):
   };
 }
 
-/** A patch: only what the form sent. Status is never read here (it has its own actions). */
-export function readTaskPatch(form: FormData, offered: Offered, timeZone: string): UpdateTaskInput {
+/**
+ * A patch: only what the form sent. Status is never read here (it has its
+ * own actions). A reference (project, people) is sent only when it differs
+ * from what the task holds, so a project or person that has since been
+ * archived (not offered for new links) is kept when left alone, and a
+ * change must name something offered.
+ */
+export function readTaskPatch(
+  form: FormData,
+  offered: Offered,
+  timeZone: string,
+  current: Pick<Task, 'projectId' | 'assigneePersonId' | 'aboutPersonId'>,
+): UpdateTaskInput {
+  const reference = (name: keyof typeof current, ids: readonly string[]) => {
+    const sent = textOf(form, name);
+    if (sent === undefined || sent === current[name]) return undefined;
+    if (sent === null) return current[name] === null ? undefined : null;
+    return ids.includes(sent) ? sent : null;
+  };
   const patch: UpdateTaskInput = {
     title: form.has('title') ? requiredTextOf(form, 'title') : undefined,
     notes: textOf(form, 'notes'),
-    projectId: offeredId(form, 'projectId', offered.projectIds),
-    assigneePersonId: offeredId(form, 'assigneePersonId', offered.peopleIds),
-    aboutPersonId: offeredId(form, 'aboutPersonId', offered.peopleIds),
+    projectId: reference('projectId', offered.projectIds),
+    assigneePersonId: reference('assigneePersonId', offered.peopleIds),
+    aboutPersonId: reference('aboutPersonId', offered.peopleIds),
     dueDate: textOf(form, 'dueDate'),
     estimateMinutes: readEstimate(form),
     needs: readNeeds(form),
