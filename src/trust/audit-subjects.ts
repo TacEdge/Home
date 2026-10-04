@@ -8,6 +8,7 @@ import {
   conversation,
   event,
   insightResponse,
+  kevUsage,
   note,
   person,
   project,
@@ -29,7 +30,7 @@ import { visibleTo, type VisibilityColumns } from './visibility';
 // An unregistered subject would fall back to its snapshot, which cannot
 // follow a later change of the record's visibility.
 
-export type AuditSubject =
+export type AuditSubject = (
   | {
       table: PgTable & { id: PgColumn } & VisibilityColumns;
       /** The record's own read rule; owner-only tables override the default. */
@@ -39,7 +40,16 @@ export type AuditSubject =
       /** An owner-only table with no visibility column must say who its owner is. */
       table: PgTable & { id: PgColumn };
       visible: (actor: Actor) => SQL;
-    };
+    }
+) & {
+  /**
+   * A record that can be sensitive (ADR 0005 §37): Activity about it is
+   * never listed while it is sensitive, nor, once it is gone, if it was ever
+   * recorded as sensitive (its rows' meta says so). Activity is a default
+   * read, and nothing sensitive enters a default read, for anyone.
+   */
+  sensitivity?: PgColumn;
+};
 
 /** Owner-only by `user_id` (conversations, insight responses): only that user, ever. */
 const ownedBy =
@@ -61,13 +71,14 @@ export const auditSubjects: Record<string, AuditSubject> = register(
   // Captures and proposals are always private to their creator, so the
   // default rule already makes them owner-only (P-1 b).
   { table: capture },
-  { table: context },
+  { table: context, sensitivity: context.sensitivity },
   { table: proposal },
   // Owner-only by user_id, with no visibility column (P-1 b). Messages are
-  // audited as their conversation; kev_usage rows are household information
-  // and are not a registered subject (their household snapshot decides).
+  // audited as their conversation. Kev usage is the household's only as a
+  // monthly total; each run's row (who, when, tier) is its user's alone.
   { table: conversation, visible: ownedBy(conversation.userId) },
   { table: insightResponse, visible: ownedBy(insightResponse.userId) },
+  { table: kevUsage, visible: ownedBy(kevUsage.userId) },
 );
 
 /** The write-time snapshot: household, or private to its recorded owner. */
@@ -78,9 +89,34 @@ function snapshotVisibleTo(actor: Actor & { kind: 'user' }): SQL {
   ) as SQL;
 }
 
-/** Which audit rows this actor may list (P-1). */
+/** Some earlier row about the same subject recorded it as sensitive. */
+const everSensitive = sql`exists (select 1 from ${auditLog} prior
+  where prior.subject_type = ${auditLog.subjectType} and prior.subject_id = ${auditLog.subjectId}
+    and prior.meta ->> 'sensitivity' = 'sensitive')`;
+
+/** Rows about a sensitive record (now, or ever, once it is gone): never listed by default. */
+function aboutSensitive(): SQL {
+  const parts = Object.entries(auditSubjects)
+    .filter(([, s]) => s.sensitivity)
+    .map(([type, s]) => {
+      const same = sql`${s.table.id}::text = ${auditLog.subjectId}`;
+      const sensitiveNow = exists(
+        sql`(select 1 from ${s.table} where ${same} and ${s.sensitivity} = 'sensitive')`,
+      );
+      const gone = not(exists(sql`(select 1 from ${s.table} where ${same})`));
+      return and(eq(auditLog.subjectType, type), or(sensitiveNow, and(gone, everSensitive))) as SQL;
+    });
+  return parts.length ? (or(...parts) as SQL) : sql`false`;
+}
+
+/**
+ * Which audit rows this actor may list (P-1). Rows about sensitive records
+ * are excluded for every actor, people, Kev and the system alike: Activity
+ * has no sensitive mode (ADR 0005 §43).
+ */
 export function auditVisibleTo(actor: Actor): SQL {
-  if (actor.kind === 'system') return sql`true`;
+  const notSensitive = not(aboutSensitive());
+  if (actor.kind === 'system') return notSensitive;
   const snapshot = snapshotVisibleTo(actor);
   const types = Object.keys(auditSubjects);
   const notADomainSubject = or(
@@ -102,5 +138,5 @@ export function auditVisibleTo(actor: Actor): SQL {
     const gone = not(exists(sql`(select 1 from ${s.table} where ${same})`));
     return and(eq(auditLog.subjectType, type), or(canSeeNow, and(gone, snapshot))) as SQL;
   });
-  return or(and(notADomainSubject, snapshot), ...domain) as SQL;
+  return and(or(and(notADomainSubject, snapshot), ...domain), notSensitive) as SQL;
 }

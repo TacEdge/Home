@@ -2067,7 +2067,8 @@ describe('0006 upgrades the production schema (0000–0005) in place', () => {
       await upApp.db.execute(
         sql`insert into "user" (id, name, email) values ('u-up6', 'Sam', 'sam@example.test')`,
       );
-      const cap = await captureVerbatim(kev, { text: ' book the WOF ' }, deps);
+      // Before 0006 there are no messages, so the person captures directly.
+      const cap = await captureVerbatim(sam, { text: ' book the WOF ' }, deps);
       const p = await createProposal(
         kev,
         {
@@ -2148,7 +2149,7 @@ describe('0006 upgrades the production schema (0000–0005) in place', () => {
         'approved',
         'pending',
       ]);
-      await expect(captureVerbatim(kev, { text: 'another' }, deps)).resolves.toBeDefined();
+      await expect(captureVerbatim(sam, { text: 'another' }, deps)).resolves.toBeDefined();
       await expect(
         createProposal(
           kev,

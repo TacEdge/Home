@@ -26,6 +26,22 @@ describe('assertTestDatabase', () => {
     ['localhost with the development database', `postgres://home:${PASSWORD}@localhost:5432/home`],
     ['a malformed URL', `not a url ${PASSWORD}`],
     ['a non-postgres URL', `https://home:${PASSWORD}@localhost/home_test`],
+    [
+      'localhost overridden by ?host= to a remote host',
+      `postgres://home:${PASSWORD}@localhost:5432/home_test?host=ep-x.aws.neon.tech`,
+    ],
+    [
+      'localhost overridden by ?hostaddr=',
+      `postgres://home:${PASSWORD}@localhost:5432/home_test?hostaddr=203.0.113.9`,
+    ],
+    [
+      'a host override in another letter case',
+      `postgres://home:${PASSWORD}@localhost:5432/home_test?sslmode=disable&HOST=db.example.test`,
+    ],
+    [
+      'a host override pointing at a socket path',
+      `postgres://home:${PASSWORD}@localhost:5432/home_test?host=%2Fvar%2Frun%2Fpostgresql`,
+    ],
   ])('rejects %s without echoing the password', (_label, url) => {
     expect(() => assertTestDatabase(url)).toThrow(NotATestDatabaseError);
     try {

@@ -12,6 +12,7 @@ import {
 } from '@/domain/captures/service';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
 import { issueExecution } from '@/domain/common/write';
+import { addMessage, startConversation } from '@/domain/conversations/service';
 import {
   archiveContext,
   confirmContext,
@@ -62,6 +63,13 @@ async function activity(actor: UserActor, id: string) {
   const page = await listAudit(actor, { limit: 200 }, deps);
   return page.rows.filter((r) => r.subjectId === id).map((r) => r.event);
 }
+/** Every audit row about a record, straight from the table (newest first), whatever Activity shows. */
+async function auditRows(id: string) {
+  const r = await admin.db.execute(
+    sql`select event from audit_log where subject_id = ${id} order by at desc, id desc`,
+  );
+  return r.rows.map((x) => x.event as string);
+}
 
 describe('captures', () => {
   const words = '  Book the WOF — and the car’s due for tyres 🚗\n\tcanary-cap-sam  \n';
@@ -81,9 +89,63 @@ describe('captures', () => {
     expect(raw.rows[0]?.text).toBe(words);
   });
 
-  it('Kev may capture (the one direct write), recorded as via kev; the system may not', async () => {
-    const c = await captureVerbatim(h.samViaKev, { text: 'pick up milk' }, deps);
-    expect(c.createdVia).toBe('kev');
+  it('Kev never authors a capture: it names the person’s own user message and the words are copied from it', async () => {
+    const conv = await startConversation(h.sam, deps);
+    const m = await addMessage(
+      h.sam,
+      conv.id,
+      { role: 'user', content: { v: 1, text: words } },
+      deps,
+    );
+    const c = await captureVerbatim(h.samViaKev, { messageId: m.id }, deps);
+    expect(c).toMatchObject({
+      text: words,
+      createdVia: 'kev',
+      messageId: m.id,
+      createdBy: h.sam.userId,
+    });
+    const before = (await admin.db.execute(sql`select count(*)::int as n from capture`)).rows[0]?.n;
+    // Kev supplying words, alone or alongside a message: refused.
+    expect(await code(captureVerbatim(h.samViaKev, { text: 'pick up milk' }, deps))).toBe(
+      'kev_cannot_author',
+    );
+    expect(
+      await code(captureVerbatim(h.samViaKev, { text: 'Kev’s version', messageId: m.id }, deps)),
+    ).toBe('kev_cannot_author');
+    expect(await code(captureVerbatim(h.samViaKev, {}, deps))).toBe('kev_cannot_author');
+    // Kev's own message is not the person's words.
+    const k = await addMessage(
+      h.sam,
+      conv.id,
+      { role: 'kev', content: { v: 1, text: 'Kev said this' }, tier: 'fast', model: 'm' },
+      deps,
+    );
+    expect(await code(captureVerbatim(h.samViaKev, { messageId: k.id }, deps))).toBe(
+      'kev_cannot_author',
+    );
+    // The other adult's message: not found, for Kev and for a person alike.
+    const ac = await startConversation(h.alex, deps);
+    const am = await addMessage(
+      h.alex,
+      ac.id,
+      { role: 'user', content: { v: 1, text: 'alex words' } },
+      deps,
+    );
+    expect(await code(captureVerbatim(h.samViaKev, { messageId: am.id }, deps))).toBe('not_found');
+    expect(await code(captureVerbatim(h.sam, { text: 'x', messageId: am.id }, deps))).toBe(
+      'not_found',
+    );
+    expect(
+      await code(captureVerbatim(h.sam, { text: 'x', messageId: crypto.randomUUID() }, deps)),
+    ).toBe('not_found');
+    expect((await admin.db.execute(sql`select count(*)::int as n from capture`)).rows[0]?.n).toBe(
+      before,
+    );
+    // A person may link their own message; a person must always give their words; the system never captures.
+    expect((await captureVerbatim(h.sam, { text: 'x', messageId: m.id }, deps)).messageId).toBe(
+      m.id,
+    );
+    await expect(captureVerbatim(h.sam, { messageId: m.id }, deps)).rejects.toThrow();
     expect(await code(captureVerbatim(sys, { text: 'x' }, deps))).toBe('not_a_user');
   });
 
@@ -292,8 +354,10 @@ describe('context', () => {
     expect(await code(listContext(h.samViaKev, { includeSensitive: true }, deps))).toBe(
       'sensitive_context',
     );
-    const events = await activity(h.sam, s.id);
+    const events = await auditRows(s.id);
     expect(events.filter((e) => e === 'context.sensitive_read')).toHaveLength(2);
+    // Recorded, but never shown in Activity (ADR 0005 §43).
+    expect(await activity(h.sam, s.id)).toEqual([]);
   });
 
   describe('the sensitive-context invariant (ADR 0005 §37)', () => {
@@ -356,8 +420,8 @@ describe('context', () => {
     it('every sensitive record returned is audited by id, with no content', async () => {
       const c = await sensitive(h.alex, 'private');
       await getContext(h.alex, c.id, { includeSensitive: true }, deps);
-      const rows = await activity(h.alex, c.id);
-      expect(rows).toEqual(['context.sensitive_read', 'context.create']);
+      expect(await auditRows(c.id)).toEqual(['context.sensitive_read', 'context.create']);
+      expect(await activity(h.alex, c.id)).toEqual([]);
     });
   });
 
@@ -365,6 +429,7 @@ describe('context', () => {
     const execution = issueExecution({
       proposalId: crypto.randomUUID(),
       requestedBy: h.sam.userId,
+      createdVia: 'kev',
       captureId: null,
       conversationId: null,
     });
@@ -398,13 +463,41 @@ describe('context', () => {
     ])
       expect(await code(op())).toBe('not_found');
     // A person, directly, may.
-    expect((await updateContext(h.sam, s.id, { content: 'y' }, deps)).content).toBe('y');
+    await updateContext(h.sam, s.id, { content: 'y' }, deps);
+    expect((await getContext(h.sam, s.id, { includeSensitive: true }, deps)).content).toBe('y');
+  });
+
+  it('a write never returns content, so no write is an unaudited sensitive read (ADR 0005 §43)', async () => {
+    const secret = 'canary-ctx-sensitive-write';
+    const s = await createContext(
+      h.alex,
+      { subject: household, content: secret, category: 'practical', sensitivity: 'sensitive' },
+      deps,
+    );
+    const results = [
+      s,
+      await updateContext(h.alex, s.id, { category: 'other' }, deps),
+      await updateContext(h.alex, s.id, {}, deps),
+      await confirmContext(h.alex, s.id, deps),
+      await retireContext(h.alex, s.id, deps),
+      await retireContext(h.alex, s.id, deps),
+      await reinstateContext(h.alex, s.id, deps),
+      await archiveContext(h.alex, s.id, deps),
+      await restoreContext(h.alex, s.id, deps),
+    ];
+    for (const r of results) expect(Object.keys(r)).not.toContain('content');
+    expect(JSON.stringify(results)).not.toContain(secret);
+    // None of them counted as, or recorded, a sensitive read.
+    expect((await auditRows(s.id)).filter((e) => e === 'context.sensitive_read')).toEqual([]);
+    // The household adult who did not write it gets nothing back either.
+    expect(JSON.stringify(await confirmContext(h.sam, s.id, deps))).not.toContain(secret);
   });
 
   it('a hand-made execution object is ignored: no kev provenance without the executor', async () => {
     const forged = {
       proposalId: crypto.randomUUID(),
       requestedBy: h.alex.userId,
+      createdVia: 'kev' as const,
       captureId: null,
       conversationId: null,
     };

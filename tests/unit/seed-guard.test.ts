@@ -60,6 +60,24 @@ describe('seed target guard', () => {
       {},
       'not_local_host',
     ],
+    [
+      'localhost?host=<remote>',
+      `postgres://u:${MARKER}@localhost:5432/home?host=ep-x.aws.neon.tech`,
+      {},
+      'host_override',
+    ],
+    [
+      'localhost?hostaddr=<remote>',
+      `postgres://u:${MARKER}@localhost:5432/home?hostaddr=203.0.113.9`,
+      {},
+      'host_override',
+    ],
+    [
+      'an upper-case HOST override',
+      `postgres://u:${MARKER}@127.0.0.1/home?sslmode=disable&HOST=db.example.com`,
+      {},
+      'host_override',
+    ],
     ['no URL', undefined, {}, 'no_database_url'],
     ['a non-Postgres URL', `mysql://u:${MARKER}@localhost/home`, {}, 'not_postgres'],
     ['an unparseable URL', `not a url ${MARKER}`, {}, 'unparseable_url'],
@@ -85,6 +103,10 @@ describe('pnpm db:seed:fixtures', () => {
       { DATABASE_URL: `postgres://u:${MARKER}@ep-x.ap-southeast-2.aws.neon.tech/home` },
     ],
     ['a preview deployment', { DATABASE_URL: local, VERCEL_ENV: 'preview' }],
+    [
+      'a local URL whose ?host= points at Neon',
+      { DATABASE_URL: `postgres://u:${MARKER}@localhost/home?host=ep-x.aws.neon.tech` },
+    ],
     ['no database at all', {}],
   ])('exits non-zero before connecting, for %s, and never prints the URL', (_l, env) => {
     const r = run(env);

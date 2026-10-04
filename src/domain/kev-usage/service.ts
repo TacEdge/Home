@@ -47,8 +47,9 @@ export async function recordUsage(
         subjectType: 'kev_usage',
         subjectId: row.id,
         meta: { tier: row.tier, escalated: row.escalated },
-        // Usage is household information (the cap is the household's).
-        record: { visibility: 'household', createdBy: row.userId },
+        // Each run is its user's alone (who, when, tier); only the monthly
+        // total is the household's. Owner-only in Activity (ADR 0005 §43).
+        record: { visibility: 'private', createdBy: row.userId },
       },
     };
   });

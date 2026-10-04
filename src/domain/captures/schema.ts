@@ -13,9 +13,15 @@ export const captureText = z
   .max(10_000)
   .refine((s) => /\S/.test(s), 'must not be blank');
 
+/**
+ * A person captures their words directly (`text`, optionally the message they
+ * came from). Kev never supplies text (CLAUDE.md rule 3): a Kev capture names
+ * only the person's own user message, and the service copies its text
+ * exactly. Which form applies is decided by the actor, in the service.
+ */
 export const captureInput = z
   .object({
-    text: captureText,
+    text: captureText.optional(),
     channel: z.enum(CHANNELS).default('web'),
     messageId: recordId.optional(),
   })

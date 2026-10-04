@@ -20,8 +20,8 @@ const PENDING_REGISTRATION: Record<string, string> = {};
 
 // Tables private to one user by user_id (P-1 b): registered with an
 // owner-only rule although they carry no visibility column. Messages are
-// audited as their conversation; kev_usage is household information.
-const OWNER_ONLY = ['conversation', 'insight_response'];
+// audited as their conversation; each kev_usage row is its user's alone.
+const OWNER_ONLY = ['conversation', 'insight_response', 'kev_usage'];
 
 const tables = (Object.values(schema) as unknown[]).filter((v): v is PgTable => is(v, PgTable));
 const visibilityTables = tables
