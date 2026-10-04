@@ -85,6 +85,21 @@ describe('readPersonPatch', () => {
     expect('visibility' in patch).toBe(false);
   });
 
+  it('leaves out every field the form did not send: no silent clear or tick', () => {
+    const patch = readPersonPatch(form({ name: 'Isla' }));
+    expect(patch).toEqual({ name: 'Isla' });
+    expect('colour' in patch).toBe(false); // an absent colour is not cleared
+    expect('inHousehold' in patch).toBe(false); // an absent box is not ticked
+    expect(readPersonPatch(form({ stageNote: 'x' }))).toEqual({ stageNote: 'x' }); // no name sent
+  });
+
+  it('clears a sent but empty field, and reads an unticked box as false', () => {
+    expect(readPersonPatch(form({ colour: '', inHousehold_present: '1' }))).toEqual({
+      colour: null,
+      inHousehold: false,
+    });
+  });
+
   it('carries role and visibility when sent', () => {
     const patch = readPersonPatch(form({ name: 'Isla', role: 'child', visibility: 'private' }));
     expect(updatePersonInput.parse(patch)).toMatchObject({ role: 'child', visibility: 'private' });

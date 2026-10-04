@@ -16,10 +16,13 @@ export async function linkSelfAction(_: FormState, form: FormData): Promise<Form
 }
 
 export async function addMeAction(_: FormState, form: FormData): Promise<FormState> {
-  return formAction(async (actor) => {
-    await createAndLinkSelf(actor, { name: requiredTextOf(form, 'name') });
-    redirect('/settings/you');
-  });
+  return formAction(
+    async (actor) => {
+      await createAndLinkSelf(actor, { name: requiredTextOf(form, 'name') });
+      redirect('/settings/you');
+    },
+    { form },
+  );
 }
 
 export async function unlinkSelfAction(): Promise<FormState> {

@@ -40,7 +40,7 @@ test('a profile: age and next birthday, things to know, no sensitive context', a
   await signInAsFixtureAdult(page, 'alex');
   await page.goto(`/people/${await personIdNamed('Milo')}`);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Milo');
-  await expect(page.locator('header').getByText(/Child · \d+/)).toBeVisible();
+  await expect(page.locator('header').getByText(/Child · age \d+/)).toBeVisible();
   await expect(page.getByText('Enjoys dinosaurs at the moment.')).toBeVisible();
   await expect(page.getByText(/Turns \d+|Birthday today/)).toBeVisible();
   expect(await page.textContent('main')).not.toContain('canary-sensitive');
@@ -126,6 +126,13 @@ test('You: not me, the Today prompt, add me, and this is me', async ({ page }) =
   await expect(eligible).toContainText('Sam');
   await expect(eligible).not.toContainText('Alex');
 
+  // A refused Add me keeps the typed name.
+  const tooLong = 'S'.repeat(101);
+  await page.getByLabel('Your name').fill(tooLong);
+  await page.getByRole('button', { name: 'Add me' }).click();
+  await expect(page.getByText('That’s too long.')).toBeVisible();
+  await expect(page.getByLabel('Your name')).toHaveValue(tooLong);
+
   await page.getByLabel('Your name').fill('Sam Again');
   await page.getByRole('button', { name: 'Add me' }).click();
   await expect(page.getByText('In HOME, you are')).toBeVisible();
@@ -137,11 +144,11 @@ test('You: not me, the Today prompt, add me, and this is me', async ({ page }) =
   await page.goto('/settings/you');
   await openSummary(page, 'Not me');
   await page.getByRole('button', { name: "That's not me" }).click();
-  await page
-    .getByRole('listitem')
-    .filter({ hasText: /^Sam\s*This is me$/ })
-    .getByRole('button', { name: 'This is me' })
-    .click();
+  // Each choice is named for its person (one accessible name per button).
+  await expect(
+    page.getByRole('button', { name: 'This is me: Sam Again', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'This is me: Sam', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Sam', exact: true })).toBeVisible();
   await page.goto('/people');
   await expect(
@@ -150,6 +157,13 @@ test('You: not me, the Today prompt, add me, and this is me', async ({ page }) =
       .first()
       .getByRole('link', { name: /^Sam · you/ }),
   ).toBeVisible();
+
+  // Leave nothing behind for later specs: archive the person Add me made.
+  await page.getByRole('link', { name: /^Sam Again/ }).click();
+  await openSummary(page, 'Archive');
+  await page.getByRole('button', { name: 'Archive' }).click();
+  await expect(page).toHaveURL(/\/people$/);
+  expect(await page.textContent('main')).not.toContain('Sam Again');
 });
 
 test('You works without JavaScript', async ({ browser }) => {
@@ -166,13 +180,58 @@ test('You works without JavaScript', async ({ browser }) => {
   await openSummary(page, 'Not me');
   await page.getByRole('button', { name: "That's not me" }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Which one is you?' })).toBeVisible();
-  await page
-    .getByRole('listitem')
-    .filter({ hasText: /^Alex\s*This is me$/ })
-    .getByRole('button', { name: 'This is me' })
-    .click();
+  // A refused Add me keeps the typed name, without JavaScript too.
+  const tooLong = 'A'.repeat(101);
+  await page.getByLabel('Your name').fill(tooLong);
+  await page.getByRole('button', { name: 'Add me' }).click();
+  await expect(page.getByText('That’s too long.')).toBeVisible();
+  await expect(page.getByLabel('Your name')).toHaveValue(tooLong);
+  await page.getByRole('button', { name: 'This is me: Alex', exact: true }).click();
   await expect(page.getByText('In HOME, you are')).toBeVisible();
+
+  // The person form keeps what was typed after a refusal, without JavaScript.
+  await page.goto('/people/new');
+  await page.getByLabel('Name', { exact: true }).fill('   ');
+  await page.getByLabel('Role').selectOption('other');
+  await page.getByLabel('Right now').fill('Typed without JavaScript');
+  await page.getByRole('button', { name: 'Add them' }).click();
+  await expect(page.getByText('This can’t be empty.')).toBeVisible();
+  await expect(page.getByLabel('Role')).toHaveValue('other');
+  await expect(page.getByLabel('Right now')).toHaveValue('Typed without JavaScript');
   await context.close();
+});
+
+test('a refused save keeps what was typed (JavaScript on)', async ({ page }) => {
+  await signInAsFixtureAdult(page, 'alex');
+  // Validation.
+  await page.goto('/people/new');
+  await page.getByLabel('Name', { exact: true }).fill('   ');
+  await page.getByLabel('Role').selectOption('other');
+  await page.getByLabel('Right now').fill('Typed before the error');
+  await openSummary(page, 'More');
+  await page.getByLabel('Relationship').fill('A neighbour');
+  await page.getByRole('button', { name: 'Add them' }).click();
+  await expect(page.getByText('This can’t be empty.')).toBeVisible();
+  await expect(page.getByLabel('Role')).toHaveValue('other');
+  await expect(page.getByLabel('Right now')).toHaveValue('Typed before the error');
+  await expect(page.getByLabel('Relationship')).toHaveValue('A neighbour'); // More stays open
+
+  // A domain rule: only the person who added Milo (Sam) may change who sees him.
+  const milo = await personIdNamed('Milo');
+  await page.goto(`/people/${milo}/edit`);
+  await page.getByLabel('Right now').fill('An edit that will be refused');
+  await openSummary(page, 'More');
+  await page.getByLabel('Who can see this').selectOption('private');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(
+    page.getByText('Only the person who added this can change who sees it.'),
+  ).toBeVisible();
+  await expect(page.getByLabel('Right now')).toHaveValue('An edit that will be refused');
+  await expect(page.getByLabel('Who can see this')).toHaveValue('private');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Milo');
+  // Nothing was saved.
+  await page.goto(`/people/${milo}`);
+  expect(await page.textContent('main')).not.toContain('An edit that will be refused');
 });
 
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {

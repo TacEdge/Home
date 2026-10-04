@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import { FormMessage, type FormAction } from '@/app/_forms/action-form';
-import { idle } from '@/app/_forms/state';
+import { formKey, idle, shown, shownChecked } from '@/app/_forms/state';
 import type { Person } from '@/domain/people/service';
 import { Button } from '@/ui/button';
 import { Checkbox, Field, More } from '@/ui/field';
@@ -11,6 +11,7 @@ import { Quiet } from '@/ui/page';
 // The person form (M3 contract §3.4, §4.4): one question per line, native
 // inputs, sensible defaults, the less-used fields under More. Private and
 // the linked-person rules are explained at the point of choice, in words.
+// A refused save shows what was typed, never the stored values (shown()).
 
 const ROLES = [
   { value: 'parent', label: 'Parent' },
@@ -26,6 +27,7 @@ const COLOURS = [
   { value: 'sage', label: 'Sage' },
   { value: 'mist', label: 'Mist' },
 ];
+const MORE_FIELDS = ['shortName', 'relationship', 'colour', 'visibility'] as const;
 const VISIBILITY = [
   { value: 'household', label: 'Everyone at home' },
   { value: 'private', label: 'Just me' },
@@ -43,10 +45,26 @@ export function PersonForm({
   const [state, dispatch] = useActionState(action, idle);
   const errors = state.status === 'error' ? state.fields : {};
   const linked = person?.userId != null;
+  const v = (name: string, stored: string | null | undefined) => shown(state, name, stored);
+  // Fold More open when a field inside was refused or changed, so nothing
+  // the person typed is hidden behind it.
+  const storedOf = (k: (typeof MORE_FIELDS)[number]) =>
+    k === 'visibility' ? (person?.visibility ?? 'household') : String(person?.[k] ?? '');
+  const moreTouched =
+    state.status === 'error' &&
+    MORE_FIELDS.some(
+      (k) => Boolean(errors[k]) || (state.values?.[k] ?? storedOf(k)) !== storedOf(k),
+    );
 
   return (
-    <form action={dispatch}>
-      <Field name="name" label="Name" required defaultValue={person?.name} error={errors.name} />
+    <form key={formKey(state)} action={dispatch}>
+      <Field
+        name="name"
+        label="Name"
+        required
+        defaultValue={v('name', person?.name)}
+        error={errors.name}
+      />
       {linked ? (
         <div className="mt-5">
           <p className="text-ink-2 text-[15px] font-medium">Role</p>
@@ -62,7 +80,7 @@ export function PersonForm({
           type="select"
           required
           options={ROLES}
-          defaultValue={person?.role ?? 'child'}
+          defaultValue={v('role', person?.role ?? 'child')}
           error={errors.role}
         />
       )}
@@ -70,7 +88,7 @@ export function PersonForm({
         name="dateOfBirth"
         label="Date of birth"
         type="date"
-        defaultValue={person?.dateOfBirth ?? undefined}
+        defaultValue={v('dateOfBirth', person?.dateOfBirth)}
         hint="HOME works out their age and next birthday from this."
         error={errors.dateOfBirth}
       />
@@ -79,7 +97,7 @@ export function PersonForm({
         label="Right now"
         type="textarea"
         rows={2}
-        defaultValue={person?.stageNote ?? undefined}
+        defaultValue={v('stageNote', person?.stageNote)}
         hint="A line or two about where they're at, in your words. Not a record."
         error={errors.stageNote}
       />
@@ -87,21 +105,21 @@ export function PersonForm({
       <Checkbox
         name="inHousehold"
         label="Lives at home"
-        defaultChecked={person?.inHousehold ?? true}
+        defaultChecked={shownChecked(state, 'inHousehold', person?.inHousehold ?? true)}
       />
 
-      <More>
+      <More open={moreTouched}>
         <Field
           name="shortName"
           label="Short name"
-          defaultValue={person?.shortName ?? undefined}
+          defaultValue={v('shortName', person?.shortName)}
           hint="What they're called day to day, if that's different."
           error={errors.shortName}
         />
         <Field
           name="relationship"
           label="Relationship"
-          defaultValue={person?.relationship ?? undefined}
+          defaultValue={v('relationship', person?.relationship)}
           hint="For example, Sam's mum."
           error={errors.relationship}
         />
@@ -110,7 +128,7 @@ export function PersonForm({
           label="Colour"
           type="select"
           options={COLOURS}
-          defaultValue={person?.colour ?? ''}
+          defaultValue={v('colour', person?.colour ?? '')}
           hint="A soft dot beside their name."
           error={errors.colour}
         />
@@ -127,7 +145,7 @@ export function PersonForm({
             type="select"
             required
             options={VISIBILITY}
-            defaultValue={person?.visibility ?? 'household'}
+            defaultValue={v('visibility', person?.visibility ?? 'household')}
             hint="Just me keeps this person out of the other adult's HOME. Only the person who added them can change this, and not while things everyone can see point to them."
             error={errors.visibility}
           />

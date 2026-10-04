@@ -19,20 +19,25 @@ export function readNewPerson(form: FormData): CreatePersonInput {
   };
 }
 
+/**
+ * A patch: only the fields the form sent. A field it did not send is left
+ * out (undefined) and so left unchanged: an absent colour is not cleared,
+ * an absent "lives at home" box is not ticked. A sent but empty optional
+ * field clears (null).
+ */
 export function readPersonPatch(form: FormData): UpdatePersonInput {
-  const role = choiceOf(form, 'role');
-  const visibility = choiceOf(form, 'visibility');
-  return {
-    name: requiredTextOf(form, 'name'),
-    ...(role !== undefined ? { role: role as UpdatePersonInput['role'] } : {}),
+  const patch: UpdatePersonInput = {
+    name: form.has('name') ? requiredTextOf(form, 'name') : undefined,
+    role: choiceOf(form, 'role') as UpdatePersonInput['role'],
     shortName: textOf(form, 'shortName'),
     relationship: textOf(form, 'relationship'),
-    inHousehold: checkboxOf(form, 'inHousehold') ?? true,
+    inHousehold: checkboxOf(form, 'inHousehold'),
     dateOfBirth: textOf(form, 'dateOfBirth'),
     stageNote: textOf(form, 'stageNote'),
-    colour: (textOf(form, 'colour') ?? null) as UpdatePersonInput['colour'],
-    ...(visibility !== undefined
-      ? { visibility: visibility as UpdatePersonInput['visibility'] }
-      : {}),
+    colour: textOf(form, 'colour') as UpdatePersonInput['colour'],
+    visibility: choiceOf(form, 'visibility') as UpdatePersonInput['visibility'],
   };
+  return Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined),
+  ) as UpdatePersonInput;
 }

@@ -20,8 +20,11 @@ export function Button({
   value,
   formAction,
   onClick,
+  ariaLabel,
 }: {
   children: React.ReactNode;
+  /** A fuller accessible name, when the visible words alone repeat (it must contain them). */
+  ariaLabel?: string;
   variant?: keyof typeof styles;
   type?: 'submit' | 'button';
   name?: string;
@@ -40,6 +43,7 @@ export function Button({
       onClick={onClick}
       disabled={busy}
       aria-busy={busy || undefined}
+      aria-label={ariaLabel}
       className={styles[variant]}
     >
       {children}

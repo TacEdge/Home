@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotFoundError } from '@/domain/common/errors';
+import type { ContextCategory } from '@/domain/context/schema';
 import { listContext } from '@/domain/context/service';
 import { ageOn, nextBirthday } from '@/domain/engines/profile';
 import { listNotes } from '@/domain/notes/service';
@@ -14,7 +15,7 @@ import { Label, Page, Quiet } from '@/ui/page';
 import type { PersonColour } from '@/ui/person-dot';
 import { PersonName } from '@/ui/person-dot';
 import { archivePersonAction, restorePersonAction } from '../actions';
-import { roleLabel } from '../copy';
+import { ageLabel, CONTEXT_CATEGORY_LABEL, roleLabel } from '../copy';
 
 // A person's profile (M3 contract §3.4, FAMILY-DATA-MODEL §3): lightweight
 // context, never a development record. Age and next birthday come from the
@@ -53,7 +54,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           {[
             person.relationship ?? roleLabel(person.role),
             person.inHousehold ? null : 'lives elsewhere',
-            age !== null ? `${age}` : null,
+            age !== null ? ageLabel(age) : null,
             archived ? 'archived' : null,
           ]
             .filter(Boolean)
@@ -74,7 +75,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       ) : (
         <List>
           {things.map((c) => (
-            <ItemRow key={c.id} title={c.content} detail={c.category} />
+            <ItemRow
+              key={c.id}
+              title={c.content}
+              detail={CONTEXT_CATEGORY_LABEL[c.category as ContextCategory] ?? undefined}
+            />
           ))}
         </List>
       )}

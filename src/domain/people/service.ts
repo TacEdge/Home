@@ -163,8 +163,15 @@ export async function updatePerson(
         throw new NotPermittedError('linked_person');
       }
     }
-    const row = await update(tx, actor, current.id, 'exclude', data);
-    return { result: row, audit: audit('update', row, { fields }) };
+    // Only what actually changes is written and audited (a form sends every
+    // field it shows). A patch that changes nothing is a true no-op.
+    const changes = Object.fromEntries(
+      Object.entries(data).filter(([k, v]) => v !== current[k as keyof Person]),
+    ) as UpdatePersonInput;
+    const changed = Object.keys(changes).sort();
+    if (changed.length === 0) return { result: current, audit: null };
+    const row = await update(tx, actor, current.id, 'exclude', changes);
+    return { result: row, audit: audit('update', row, { fields: changed }) };
   });
 }
 

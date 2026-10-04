@@ -10,10 +10,13 @@ import { readNewPerson, readPersonPatch } from './person-form-data';
 // session inside formAction; the services validate and enforce every rule.
 
 export async function createPersonAction(_: FormState, form: FormData): Promise<FormState> {
-  return formAction(async (actor) => {
-    const p = await createPerson(actor, readNewPerson(form));
-    redirect(`/people/${p.id}`);
-  });
+  return formAction(
+    async (actor) => {
+      const p = await createPerson(actor, readNewPerson(form));
+      redirect(`/people/${p.id}`);
+    },
+    { form },
+  );
 }
 
 export async function updatePersonAction(
@@ -21,10 +24,13 @@ export async function updatePersonAction(
   _: FormState,
   form: FormData,
 ): Promise<FormState> {
-  return formAction(async (actor) => {
-    const p = await updatePerson(actor, id, readPersonPatch(form));
-    redirect(`/people/${p.id}`);
-  });
+  return formAction(
+    async (actor) => {
+      const p = await updatePerson(actor, id, readPersonPatch(form));
+      redirect(`/people/${p.id}`);
+    },
+    { form },
+  );
 }
 
 export async function archivePersonAction(_: FormState, form: FormData): Promise<FormState> {

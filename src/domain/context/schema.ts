@@ -49,3 +49,6 @@ export const proposedContextInput = createContextInput.extend({
 export const proposedContextPatch = updateContextInput.extend({
   sensitivity: normalOnly.optional(),
 });
+
+export { CONTEXT_CATEGORIES };
+export type ContextCategory = (typeof CONTEXT_CATEGORIES)[number];
