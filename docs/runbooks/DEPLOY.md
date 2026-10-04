@@ -136,13 +136,13 @@ Then, connected as **`home_app`** to the same branch: `update audit_log set summ
 
 **R4. Confirm, then keep or roll back.** Sign in and check the records you expect at the restore point. To roll back, set the host back to the original and redeploy. Once a restore is accepted, the restored branch becomes the database: in Neon, make it the project's default (primary) branch so point-in-time restore keeps protecting it, and point `DATABASE_URL_MIGRATE` (GitHub `production` environment) at its direct host. Delete the old branch only when you are sure.
 
-**Rehearsal 1 — `home-dev`, end to end (§E item 7).** Synthetic data only.
+**Rehearsal 1 — `home-dev`, end to end (§E item 7).** Synthetic data only. Run it once M3 has at least one domain-entry screen (the first is People, Package 3), so the markers are synthetic household records; it is mandatory before `HOME_REAL_DATA=open` (ADR 0006 §27).
 
-1. Make a before-and-after marker in Preview. Once the M3 screens exist, add a synthetic task **A** ("Rehearsal A – keep"), note the UTC time **T** a minute later, then add a synthetic task **B** ("Rehearsal B – after T"). Before then, use sign-ins: sign in to a Preview deployment (**A**), note **T** a minute later, then sign out and in again (**B**); each shows in Settings › Activity with its time.
+1. Make a before-and-after marker in Preview: add a synthetic record **A** (for example a person named "Rehearsal A"), note the UTC time **T** a minute later, then add a synthetic record **B** ("Rehearsal B"). Use whichever domain-entry screen exists (People, To do, …).
 2. R1 on the `home-dev` project, at time **T**.
-3. R2 on the branch: migrations count matches; the marker query returns only **A** (`select count(*) from task where title like 'Rehearsal%'` returns 1, or for sign-ins `select count(*) from audit_log where event = 'auth.sign_in' and at > 'T'` returns 0); append-only checks hold.
+3. R2 on the branch: migrations count matches; the marker query returns only **A** (for people, `select count(*) from person where name like 'Rehearsal%'` returns 1; for tasks, the same on `task.title`); append-only checks hold.
 4. R3 for **Preview only**: change Preview's `DATABASE_URL` host to the branch's pooled host and redeploy the Preview branch. The preview boot guard still requires that host to differ from `HOME_PRODUCTION_DB_HOST`, which it does.
-5. Sign in to the Preview deployment: **A** is there and **B** is not (To do, or the sign-ins in Settings › Activity); Activity loads; Settings › Export downloads and `node scripts/check-export.mts <file>` reports it valid.
+5. Sign in to the Preview deployment: **A** is there and **B** is not, on the screen where they were added; Activity loads; Settings › Export downloads and `node scripts/check-export.mts <file>` reports it valid.
 6. R4 roll back: Preview's host back to the original `home-dev` host, redeploy, confirm **B** is visible again. Delete the restore branch.
 
 **Rehearsal 2 — `home`, branch verification only (§E item 8).** No family data is involved (the real-data gate is closed, so `home` holds sign-in and audit rows only), nothing is pointed at the branch, and nothing leaves the `home` project.

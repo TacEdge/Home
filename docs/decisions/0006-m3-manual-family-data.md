@@ -41,6 +41,12 @@ M2 is complete (ADR 0005, closed by PR #29). M1 is deployed to production but no
 25. **The route.** The page is `/settings/export`; the download is `POST /settings/export/download`, because Next.js cannot serve a page and a route handler from one path. It takes the actor from the session (303 to sign-in without one), refuses a cross-site request (403 when `Origin` names another host, or `Sec-Fetch-Site: cross-site`), and answers with `Cache-Control: no-store` and `Content-Disposition: attachment`. The page is a plain form, so it works without JavaScript.
 26. **Export check.** `node scripts/check-export.mts <file>` validates a downloaded file against version 1 and prints only counts, for DEPLOY.md §E item 9.
 
+27. **Accepted by the owner, 2026-10-04, at the PR #32 review:**
+    - **Download route.** The export download stays at `POST /settings/export/download` (§25).
+    - **Kev usage.** Each adult's export includes their own Kev usage runs (§21).
+    - **`includesSensitive`.** The top-level field stays in version 1 of the format (§22).
+    - **Restore rehearsal timing.** The full `home-dev` restore rehearsal (DEPLOY.md §E item 7) is deferred until M3 has at least one domain-entry screen, so its before-and-after markers are synthetic household records rather than sign-ins. It remains mandatory before `HOME_REAL_DATA=open`.
+
 ## Consequences
 
 - ROADMAP: M2 complete; M3 in progress on synthetic data, real data gated; M4 extends M3's recurrence engine.

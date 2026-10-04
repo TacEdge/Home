@@ -241,7 +241,7 @@ Pure, deterministic, under `src/domain/engines/`, importing nothing from `db` or
 - Backup: Neon point-in-time restore with ≥ 7 days on `home` (M1-D5; DEPLOY.md §E item 6). No scheduled dump.
 - Runbook (`DEPLOY.md` §D): restore to a new branch of `home`, verify (migrations table, row counts, `audit_log` intact and append-only), switch the runtime credential's host, confirm boot, roll back by switching back. Never restore production data into `home-dev`.
 - Rehearsal before the gate opens, recorded with dates in DEPLOY.md §E:
-  1. `home-dev`, end to end: synthetic data entered through the Preview UI, restore to a branch, switch Preview's runtime host, app boots and shows the data, switch back.
+  1. `home-dev`, end to end: synthetic data entered through the Preview UI, restore to a branch, switch Preview's runtime host, app boots and shows the data, switch back. Run once M3 has at least one domain-entry screen, with synthetic household records as the before-and-after markers (ADR 0006 §27).
   2. `home`: create a restore branch, verify schema, migrations and `audit_log`, delete the branch. No family data is involved.
 
 ---
