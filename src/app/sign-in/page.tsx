@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getActor } from '@/trust/session';
-import { Page, Quiet } from '@/ui/calm';
+import { Button } from '@/ui/button';
+import { CalmPage, Quiet } from '@/ui/calm';
+import { Field } from '@/ui/field';
 import { Wordmark } from '@/ui/wordmark';
 import { requestLinkAction } from './actions';
 
@@ -16,7 +18,7 @@ export default async function SignInPage({
   const { sent, error } = await searchParams;
 
   return (
-    <Page>
+    <CalmPage>
       <div className="mb-8 pt-6">
         <Wordmark size="lg" as="h1" />
       </div>
@@ -28,31 +30,21 @@ export default async function SignInPage({
         <>
           {error ? <Quiet>That link didn&rsquo;t work. Ask for a new one.</Quiet> : null}
           <Quiet>Enter your email and we&rsquo;ll send you a link to sign in.</Quiet>
-          <form action={requestLinkAction} className="mt-6 flex flex-col gap-3">
-            <label
-              className="text-muted font-mono text-[11.5px] tracking-[0.14em] uppercase"
-              htmlFor="email"
-            >
-              Email
-            </label>
-            <input
-              id="email"
+          <form action={requestLinkAction} className="mt-2">
+            <Field
               name="email"
+              label="Email"
               type="email"
               autoComplete="email"
               inputMode="email"
               required
-              className="bg-paper-2 border-line text-ink rounded-[24px] border px-4 py-3 text-[17px] outline-none"
             />
-            <button
-              type="submit"
-              className="bg-ink text-paper mt-2 self-start rounded-[22px] px-5 py-2 font-medium"
-            >
-              Send me a link
-            </button>
+            <div className="mt-5">
+              <Button>Send me a link</Button>
+            </div>
           </form>
         </>
       )}
-    </Page>
+    </CalmPage>
   );
 }

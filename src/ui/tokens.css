@@ -45,7 +45,8 @@
   --paper-2: #ebe7dc; /* Linen */
   --ink: #1f3b36; /* Pine */
   --ink-2: #4f6b62; /* Moss */
-  --muted: #8c9c95; /* Mist */
+  --muted: #5a6b64; /* Mist (text): labels, times, quiet text; WCAG AA (ADR 0006 §5) */
+  --muted-mark: #8c9c95; /* Mist (mark): decorative marks only, never text */
   --line: #d9d4c6; /* horizon rules */
 
   /* the one warm colour */
@@ -84,7 +85,8 @@
     --paper-2: #212a27;
     --ink: #ece8de;
     --ink-2: #b9c4bf;
-    --muted: #7f8d88;
+    --muted: #8e9b96;
+    --muted-mark: #7f8d88;
     --line: #303936;
     --accent: #f2b072;
     --accent-soft: #3a2a1b;

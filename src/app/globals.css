@@ -8,6 +8,7 @@
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-muted: var(--muted);
+  --color-muted-mark: var(--muted-mark);
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
@@ -46,6 +47,18 @@ h3 {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  /* Pine/Moon, not Sun: the ring must reach 3:1 on every surface (WCAG 1.4.11),
+     and Sun is reserved for "needs you". */
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

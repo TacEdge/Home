@@ -4,6 +4,7 @@ import type { DbOrTx } from '@/db/create';
 import type { UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
 import type { Visibility } from '@/trust/visibility';
+import { assertFamilyWritesOpen } from './guards';
 
 /**
  * An approved proposal being executed (M2 contract §5.7). Only the proposal
@@ -80,32 +81,60 @@ export function snapshotOf(record: DomainAudit['record']) {
  * record domain audit rows. `audit: null` means the call changed nothing
  * (an idempotent repeat), so there is nothing to audit. Several audits are
  * written in order, all in the same transaction.
+ *
+ * Every family-domain write passes the production real-data gate first,
+ * before any row is locked or written (ADR 0006 §2).
  */
 export async function auditedWrite<T>(
   actor: UserActor,
   deps: Deps,
   fn: (tx: DbOrTx) => Promise<{ result: T; audit: DomainAudit | DomainAudit[] | null }>,
 ): Promise<T> {
+  assertFamilyWritesOpen();
   const db = deps.db ?? getDb();
-  const execution = executionOf(deps);
   return db.transaction(async (tx) => {
     const { result, audit } = await fn(tx);
-    for (const a of audit === null ? [] : Array.isArray(audit) ? audit : [audit]) {
-      await recordAudit(
-        actor,
-        {
-          event: a.event,
-          subjectType: a.subjectType,
-          subjectId: a.subjectId,
-          // A write the executor makes says so. It does not name the proposal:
-          // that is private to its requester, while this record may be household.
-          // The proposal's own (private) approve row links the two.
-          meta: execution ? { ...a.meta, executed: 'proposal' } : a.meta,
-          snapshot: snapshotOf(a.record),
-        },
-        { db: tx },
-      );
-    }
+    await writeAudits(actor, deps, tx, audit);
     return result;
   });
+}
+
+/**
+ * Audit rows about a read (e.g. `context.sensitive_read`), with no domain
+ * write. Not gated: auditing what a person read is part of the audit trail,
+ * which stays operational while the real-data gate is closed. Never use it
+ * for a row that accompanies a change; that is `auditedWrite`.
+ */
+export async function auditRead(
+  actor: UserActor,
+  deps: Deps,
+  audit: DomainAudit | DomainAudit[],
+): Promise<void> {
+  const db = deps.db ?? getDb();
+  await db.transaction((tx) => writeAudits(actor, deps, tx, audit));
+}
+
+async function writeAudits(
+  actor: UserActor,
+  deps: Deps,
+  tx: DbOrTx,
+  audit: DomainAudit | DomainAudit[] | null,
+): Promise<void> {
+  const execution = executionOf(deps);
+  for (const a of audit === null ? [] : Array.isArray(audit) ? audit : [audit]) {
+    await recordAudit(
+      actor,
+      {
+        event: a.event,
+        subjectType: a.subjectType,
+        subjectId: a.subjectId,
+        // A write the executor makes says so. It does not name the proposal:
+        // that is private to its requester, while this record may be household.
+        // The proposal's own (private) approve row links the two.
+        meta: execution ? { ...a.meta, executed: 'proposal' } : a.meta,
+        snapshot: snapshotOf(a.record),
+      },
+      { db: tx },
+    );
+  }
 }

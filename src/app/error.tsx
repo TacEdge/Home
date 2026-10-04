@@ -1,6 +1,7 @@
 'use client';
 
-import { Headline, Page, Quiet } from '@/ui/calm';
+import { Button } from '@/ui/button';
+import { CalmPage, Headline, Quiet } from '@/ui/calm';
 
 // Calm, generic. Never shows internals. The digest is a short reference the
 // person can quote; the real error is logged server-side by Next.js.
@@ -12,17 +13,17 @@ export default function ErrorPage({
   reset: () => void;
 }) {
   return (
-    <Page>
+    <CalmPage>
       <Headline>Something went wrong.</Headline>
       <Quiet>Try again in a moment.</Quiet>
       <p className="mt-4">
-        <button type="button" onClick={reset} className="text-accent">
+        <Button type="button" variant="quiet" onClick={reset}>
           Try again
-        </button>
+        </Button>
       </p>
       {error.digest ? (
         <p className="text-muted mt-6 text-[13px]">Reference {error.digest}</p>
       ) : null}
-    </Page>
+    </CalmPage>
   );
 }

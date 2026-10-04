@@ -2,7 +2,7 @@
   "name": "home",
   "version": "0.1.0",
   "private": true,
-  "description": "HOME \u2014 a private family operating system, powered by Kev.",
+  "description": "HOME — a private family operating system, powered by Kev.",
   "engines": {
     "node": ">=22 <23",
     "pnpm": ">=10"
@@ -38,6 +38,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22",

@@ -1,5 +1,16 @@
+import { realDataGateOpen } from '@/lib/env';
 import type { UserActor } from '@/trust/actor';
 import { NotPermittedError } from './errors';
+
+/**
+ * The production real-data gate (ADR 0006 §2, M3 contract §6). Every
+ * family-domain write reaches this before it locks or writes anything (it is
+ * the first step of `auditedWrite`). Authentication, its audit rows, Activity
+ * and boot never pass through here.
+ */
+export function assertFamilyWritesOpen(): void {
+  if (!realDataGateOpen()) throw new NotPermittedError('real_data_closed');
+}
 
 /**
  * Kev never writes directly (CLAUDE.md rule 3, M2 contract §5.3). Every write
