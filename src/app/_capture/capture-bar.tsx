@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useActionState } from 'react';
 import type { FormAction } from '@/app/_forms/action-form';
 import { useRefusalFocus } from '@/app/_forms/focus';
@@ -11,9 +12,16 @@ import { Button } from '@/ui/button';
 // something…". A plain form, so it works without JavaScript. "✓ Kept · in
 // To sort" appears only when the server says it kept the words; if it
 // couldn't, the words stay in the box with a calm line and focus returns
-// there. Nothing is kept on the device.
+// there. Nothing is kept on the device. The bar lives in the shell, so its
+// state would otherwise outlive the page: it is keyed by the path, and
+// "Kept" is said on the place where it was said, not the next one.
 
 export function CaptureBar({ action }: { action: FormAction }) {
+  const pathname = usePathname();
+  return <CaptureForm key={pathname} action={action} />;
+}
+
+function CaptureForm({ action }: { action: FormAction }) {
   const [state, dispatch] = useActionState(action, idle);
   const ref = useRefusalFocus<HTMLFormElement>(state);
   const refused = state.status === 'error';

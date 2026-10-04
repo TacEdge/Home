@@ -33,7 +33,14 @@ export const UNEXPECTED_COPY =
   'Something went wrong, so nothing was changed. Try again in a moment.';
 
 /** Per-field copy for a validation issue, by Zod issue code. */
-export function fieldCopy(issue: { code: string; input?: unknown; minimum?: unknown }): string {
+export function fieldCopy(issue: {
+  code: string;
+  input?: unknown;
+  minimum?: unknown;
+  message?: string;
+}): string {
+  if (issue.code === 'custom' && issue.message === 'must not be blank')
+    return 'This can’t be empty.';
   switch (issue.code) {
     case 'too_small':
       return issue.minimum === 1 ? 'This can’t be empty.' : 'That’s too short.';

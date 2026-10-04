@@ -40,6 +40,9 @@ export default async function OrganisePage({
   });
   const action = organiseAction.bind(null, c.id, kind.as);
   const words = c.text;
+  // A title is one line: a line break in the words becomes a space there,
+  // rather than the browser dropping it. A note or something to know keeps them.
+  const title = words.replace(/\s*\r?\n\s*/g, ' ');
   const dismissed = c.status === 'dismissed';
 
   let form: React.ReactNode;
@@ -49,7 +52,7 @@ export default async function OrganisePage({
       form = (
         <TaskForm
           action={action}
-          initialTitle={words}
+          initialTitle={title}
           projects={projects.map((p) => ({ id: p.id, name: p.title }))}
           people={people.map((p) => ({
             id: p.id,
@@ -67,7 +70,7 @@ export default async function OrganisePage({
         <>
           <EventForm
             action={action}
-            initialTitle={words}
+            initialTitle={title}
             people={[]}
             defaults={newEventDefaults(todayInHomeZone())}
             submitLabel="Make it an event"
@@ -77,7 +80,7 @@ export default async function OrganisePage({
       );
       break;
     case 'project':
-      form = <ProjectForm action={action} initialTitle={words} submitLabel="Make it a project" />;
+      form = <ProjectForm action={action} initialTitle={title} submitLabel="Make it a project" />;
       break;
     case 'note': {
       const s = await subjectsFor(actor, true);

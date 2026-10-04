@@ -5,9 +5,8 @@ import { ItemRow, List } from '@/ui/list';
 import { Label, Page, Quiet } from '@/ui/page';
 import { signOutAction } from './actions';
 
-// Settings (M3 contract §3.1). You, What Kev knows, Archived and Export join
-// this list as their packages land; Calendars (M4) and Usage (M8) are not
-// listed in M3.
+// Settings (M3 contract §3.1): You · What Kev knows · Archived · Activity ·
+// Export. Calendars (M4) and Usage (M8) are not listed in M3.
 export default async function SettingsPage() {
   const actor = await requireActor();
   return (
@@ -22,6 +21,12 @@ export default async function SettingsPage() {
       <Label>Household</Label>
       <List>
         <ItemRow title="You" detail="Which person you are in HOME" href="/settings/you" />
+        <ItemRow
+          title="What Kev knows"
+          detail="Things to know, dated, in your words"
+          href="/settings/knows"
+        />
+        <ItemRow title="Archived" detail="Put away, not deleted" href="/settings/archived" />
         <ItemRow title="Activity" detail="Everything HOME has done" href="/settings/activity" />
         <ItemRow title="Export" detail="Download your HOME data" href="/settings/export" />
       </List>

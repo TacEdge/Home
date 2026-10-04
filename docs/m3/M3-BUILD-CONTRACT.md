@@ -161,7 +161,7 @@ Notes always live on a subject: a project, person or event. Create and edit inli
 
 - Context grouped by subject (household, each person, each project). Possibly-out-of-date items (`staleness`) first, phrased gently ("Still true?"), with **Confirm**, **Retire**, **Edit**; retired items collapsed with **Reinstate**; archive and restore.
 - **Sensitive context** appears only after the person presses **Show sensitive items**: a request that calls the context service with `includeSensitive` (the existing, audited `context.sensitive_read` path). The reveal lasts for that page view only, is never remembered, and is never available on any other screen. Adding the call site updates `tests/unit/sensitive-context-guard.test.ts` deliberately.
-- Creating context: subject, content, category, optional valid-until, visibility, and a sensitivity choice explained in plain words.
+- Creating context: subject, content, category, optional valid-until, visibility, and a sensitivity choice explained in plain words. Package 8's screens, the reveal and Activity paging: ADR 0006 §55–58.
 
 ### 3.10 Archived
 
