@@ -1,5 +1,7 @@
 // What "Show sensitive items" returns to the page that asked: the items for
-// this response only. Never stored, never in a URL, gone on navigation.
+// this response only, archived ones included (the only place they can be
+// restored from: Archived is a default read). Never stored, never in a
+// URL, gone on navigation.
 
 export type SensitiveItem = {
   id: string;
@@ -11,6 +13,8 @@ export type SensitiveItem = {
   visibility: string;
   validUntil: string | null;
   createdAt: string;
+  /** Set when the item is archived: it is offered Restore, nothing else. */
+  archivedAt: string | null;
 };
 
 export type RevealState =

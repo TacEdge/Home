@@ -147,6 +147,54 @@ test('sensitive items: hidden until asked, audited, for that response only; neve
   expect(made).toEqual({ sensitivity: 'sensitive', created_via: 'ui', source_type: 'manual' });
 });
 
+test('an archived sensitive item comes back only through the reveal; a bad Activity cursor reads as Latest', async ({
+  page,
+}) => {
+  await signInAsFixtureAdult(page, 'sam');
+  const words = `${SENSITIVE_MARK}household spare key arrangement`;
+  // 1. reveal; 2. archive it from the reveal (the reveal clears).
+  await page.goto('/settings/knows');
+  await page.getByRole('button', { name: 'Show sensitive items' }).click();
+  const row = page.locator('li', { hasText: words });
+  await row.locator('summary', { hasText: 'Change' }).click();
+  await row.locator('summary', { hasText: 'Archive' }).click();
+  await row.getByRole('button', { name: 'Archive', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Show sensitive items' })).toBeVisible();
+  expect(await page.textContent('main')).not.toContain(SENSITIVE_MARK);
+  // 3. nowhere by default: not What Kev knows, not Archived, not Activity.
+  for (const path of ['/settings/knows', '/settings/archived', '/settings/activity']) {
+    await page.goto(path);
+    expect(await page.textContent('main'), path).not.toContain(SENSITIVE_MARK);
+  }
+  // 4. reveal again: it is listed as put away, with Restore; 5. restore (the reveal clears).
+  await page.goto('/settings/knows');
+  await page.getByRole('button', { name: 'Show sensitive items' }).click();
+  await expect(
+    page.getByRole('heading', { level: 3, name: 'Sensitive items put away' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: `Restore: ${words.slice(0, 40)}` }).click();
+  await expect(page.getByRole('button', { name: 'Show sensitive items' })).toBeVisible();
+  // 6. still excluded by default; back among the live sensitive items when asked.
+  expect(await page.textContent('main')).not.toContain(SENSITIVE_MARK);
+  await page.goto('/settings/archived');
+  expect(await page.textContent('main')).not.toContain(SENSITIVE_MARK);
+  await page.goto('/settings/knows');
+  await page.getByRole('button', { name: 'Show sensitive items' }).click();
+  await expect(page.locator('p', { hasText: words })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 3, name: 'Sensitive items put away' }),
+  ).toHaveCount(0);
+  expect(
+    (await q(`select archived_at from context where content = $1`, [words]))[0]!.archived_at,
+  ).toBeNull();
+
+  // A crafted cursor never errors: it reads as Latest.
+  const r = await page.goto('/settings/activity?before=not-a-uuid');
+  expect(r?.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 2, name: 'Recent' })).toBeVisible();
+  expect(await page.textContent('main')).not.toMatch(/select |audit_log|Failed query/);
+});
+
 test('Archived: every type, grouped, with Restore; set-aside captures with Back to To sort; nothing of the other adult', async ({
   page,
 }) => {

@@ -86,9 +86,11 @@ export async function revealSensitiveAction(_: RevealState, form: FormData): Pro
   const includeSensitive = choiceOf(form, 'show') === 'sensitive';
   if (!includeSensitive) return { status: 'idle' };
   try {
+    // Archived included: a sensitive item put away can be brought back only
+    // here, since Archived is a default read (ADR 0006 §55).
     const rows = [
-      ...(await listContext(actor, { includeSensitive })),
-      ...(await listContext(actor, { includeSensitive, status: 'retired' })),
+      ...(await listContext(actor, { includeSensitive, includeArchived: true })),
+      ...(await listContext(actor, { includeSensitive, includeArchived: true, status: 'retired' })),
     ].filter((r) => r.sensitivity === 'sensitive');
     return {
       status: 'shown',
@@ -102,6 +104,7 @@ export async function revealSensitiveAction(_: RevealState, form: FormData): Pro
         visibility: r.visibility,
         validUntil: r.validUntil,
         createdAt: r.createdAt.toISOString(),
+        archivedAt: r.archivedAt ? r.archivedAt.toISOString() : null,
       })),
     };
   } catch {

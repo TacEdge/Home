@@ -99,7 +99,11 @@ export function KnownItem({
               action={archiveContextAction}
               hidden={hidden}
               label="Archive"
-              question="Put this away? Nothing is deleted; you can bring it back from Archived."
+              question={
+                item.sensitivity === 'sensitive'
+                  ? 'Put this away? Nothing is deleted; it can come back from here, under Show sensitive items.'
+                  : 'Put this away? Nothing is deleted; you can bring it back from Archived.'
+              }
               confirmLabel="Archive"
             />
           </div>

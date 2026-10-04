@@ -9,6 +9,7 @@ import { describeEvent, describeVia } from './labels';
 export const dynamic = 'force-dynamic';
 
 const PAGE = 50;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Activity (M3 contract §3.1): everything HOME has done, newest first, in
 // plain words, a page at a time. "Earlier" follows the audit cursor, so a
@@ -23,7 +24,11 @@ export default async function ActivityPage({
 }) {
   const actor = await getActor();
   if (!actor) redirect('/sign-in');
-  const { before } = await searchParams;
+  // A cursor is the id of the last row shown; anything else reads as Latest
+  // (never a query error, never a stack).
+  const before = UUID.test((await searchParams).before ?? '')
+    ? (await searchParams).before
+    : undefined;
   const { rows: entries, next } = await listAudit(actor, {
     limit: PAGE,
     before: before ? { id: before } : undefined,

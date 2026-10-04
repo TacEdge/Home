@@ -1,6 +1,6 @@
 import type { ContextCategory } from '@/domain/context/schema';
 import type { Staleness } from '@/domain/engines/staleness';
-import { longDate } from '@/lib/dates';
+import { longDate, type IsoDate } from '@/lib/dates';
 
 // Words for What Kev knows (M3 contract §3.9): kinds in plain words, the
 // gentle "still true?" line, and the sensitivity choice explained.
@@ -22,12 +22,17 @@ export const CATEGORY_OPTIONS = (Object.keys(CATEGORY_LABEL) as ContextCategory[
 
 export const categoryLabel = (c: string) => CATEGORY_LABEL[c as ContextCategory] ?? c;
 
-/** "Still true? Not confirmed since 3 March", or null when it looks current. */
-export function stalenessLine(s: Staleness): string | null {
+/**
+ * "Still true? Not confirmed since 4 Sep", or null when it looks current.
+ * The engine's `since` is the day it became possibly stale; the line names
+ * the day it was last confirmed (`lastConfirmedOn`, in the home zone), or
+ * the day it was meant to hold until.
+ */
+export function stalenessLine(s: Staleness, lastConfirmedOn: IsoDate): string | null {
   if (!s.possiblyStale) return null;
   return s.reason === 'past_valid_until'
     ? `Still true? It was meant to hold until ${longDate(s.since, 'short')}.`
-    : `Still true? Not confirmed since ${longDate(s.since, 'short')}.`;
+    : `Still true? Not confirmed since ${longDate(lastConfirmedOn, 'short')}.`;
 }
 
 export const SENSITIVITY_OPTIONS = [

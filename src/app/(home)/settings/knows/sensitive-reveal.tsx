@@ -1,9 +1,10 @@
 'use client';
 
 import { useActionState } from 'react';
+import { ActionForm } from '@/app/_forms/action-form';
 import { Button } from '@/ui/button';
 import { Label, Quiet } from '@/ui/page';
-import { revealSensitiveAction } from './actions';
+import { restoreContextAction, revealSensitiveAction } from './actions';
 import { KnownItem } from './known-item';
 import { revealIdle } from './reveal-state';
 
@@ -33,21 +34,49 @@ export function SensitiveReveal({
             <p className="text-ink-2 mt-2">None.</p>
           ) : (
             <ul className="border-line mt-2 border-b">
-              {state.items.map((it) => (
-                <KnownItem
-                  key={it.id}
-                  item={{ ...it, createdAt: new Date(it.createdAt), sensitivity: 'sensitive' }}
-                  staleLine={null}
-                  timeZone={timeZone}
-                  subjectName={
-                    it.subjectType === 'household'
-                      ? 'Everyone at home'
-                      : (subjectNames[`${it.subjectType}:${it.subjectId}`] ?? undefined)
-                  }
-                />
-              ))}
+              {state.items
+                .filter((it) => !it.archivedAt)
+                .map((it) => (
+                  <KnownItem
+                    key={it.id}
+                    item={{ ...it, createdAt: new Date(it.createdAt), sensitivity: 'sensitive' }}
+                    staleLine={null}
+                    timeZone={timeZone}
+                    subjectName={
+                      it.subjectType === 'household'
+                        ? 'Everyone at home'
+                        : (subjectNames[`${it.subjectType}:${it.subjectId}`] ?? undefined)
+                    }
+                  />
+                ))}
             </ul>
           )}
+          {state.items.some((it) => it.archivedAt) ? (
+            <>
+              <Label as="h3">Sensitive items put away</Label>
+              <Quiet>Archived, and kept as they were. Only here can they come back.</Quiet>
+              <ul className="border-line mt-2 border-b">
+                {state.items
+                  .filter((it) => it.archivedAt)
+                  .map((it) => (
+                    <li
+                      key={it.id}
+                      className="border-line flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t py-3"
+                    >
+                      <span className="text-ink-2 min-w-0 flex-1 break-words whitespace-pre-wrap">
+                        {it.content}
+                      </span>
+                      <ActionForm action={restoreContextAction}>
+                        <input type="hidden" name="id" value={it.id} />
+                        <Button variant="quiet" ariaLabel={`Restore: ${it.content.slice(0, 40)}`}>
+                          Restore
+                        </Button>
+                      </ActionForm>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ) : null}
         </>
       ) : (
         <form action={dispatch}>

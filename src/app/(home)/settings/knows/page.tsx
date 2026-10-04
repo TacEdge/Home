@@ -3,6 +3,7 @@ import { todayInHomeZone } from '@/app/_agenda/load';
 import { listContext } from '@/domain/context/service';
 import { listPeople } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
+import { isoDateInZone } from '@/lib/dates';
 import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { Label, Page, Quiet } from '@/ui/page';
@@ -76,7 +77,7 @@ export default async function KnowsPage() {
                   <KnownItem
                     key={i.row.id}
                     item={i.row}
-                    staleLine={stalenessLine(i.staleness)}
+                    staleLine={stalenessLine(i.staleness, isoDateInZone(i.row.lastConfirmedAt, tz))}
                     timeZone={tz}
                   />
                 ))}
