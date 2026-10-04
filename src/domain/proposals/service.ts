@@ -304,6 +304,61 @@ export async function expireOverdueProposals(
   });
 }
 
+/**
+ * What a person may organise a capture into, by hand (M3 contract §3.8):
+ * the five records To sort offers. Nothing that edits or dismisses.
+ */
+export const ORGANISE_ACTIONS = [
+  'task.create',
+  'event.create',
+  'project.create',
+  'note.create',
+  'context.create',
+] as const satisfies readonly ProposalAction[];
+export type OrganiseAction = (typeof ORGANISE_ACTIONS)[number];
+
+/**
+ * Organises one of the person's own captures into a record, by hand (M3
+ * contract §3.8, ADR 0006 §11): in one transaction, the person proposes the
+ * action against their capture and approves it, so the tested executor and
+ * capture settlement run unchanged. The record carries `origin_capture_id`
+ * and `created_via = 'ui'`, context so created is sourced `capture`, and the
+ * capture's `organised_into` and status are settled. There is no second
+ * organising path: this is `createProposal` then `approveProposal`.
+ *
+ * Only a person, signed in and acting directly. A payload the target schema
+ * refuses throws before anything is stored (the form shows the fields). An
+ * execution that fails returns the stored `failed` decision with its fixed
+ * code, and nothing it tried to write survives (the executor's savepoint).
+ * Calling it again on an organised capture makes another record from it.
+ */
+export async function organiseCapture(
+  actor: UserActor,
+  captureId: string,
+  step: { action: OrganiseAction; payload: Record<string, unknown>; summary: string },
+  deps: Deps = {},
+): Promise<Decision> {
+  assertCanWrite(actor);
+  assertFamilyWritesOpen();
+  if (!(ORGANISE_ACTIONS as readonly string[]).includes(step.action))
+    throw new NotPermittedError('not_eligible');
+  const db = deps.db ?? getDb();
+  return db.transaction(async (tx) => {
+    const d = { ...deps, db: tx };
+    const p = await createProposal(
+      actor,
+      {
+        action: step.action,
+        payload: step.payload,
+        summary: step.summary.slice(0, 500),
+        captureId,
+      },
+      d,
+    );
+    return approveProposal(actor, p.id, d);
+  });
+}
+
 export type ManyResult =
   | { id: string; ok: true; decision: Decision }
   | { id: string; ok: false; error: 'not_found' | string };

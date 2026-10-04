@@ -49,9 +49,12 @@ export function TaskForm({
   people,
   defaults,
   submitLabel,
+  initialTitle,
 }: {
   action: FormAction;
   task?: Task;
+  /** A new task's title before anyone types (from a capture's words). */
+  initialTitle?: string;
   projects: FormChoice[];
   people: FormChoice[];
   defaults: TaskFormDefaults;
@@ -100,7 +103,7 @@ export function TaskForm({
         name="title"
         label="What"
         required
-        defaultValue={v('title', task?.title)}
+        defaultValue={v('title', task?.title ?? initialTitle)}
         error={errors.title}
       />
       <More open={moreTouched}>

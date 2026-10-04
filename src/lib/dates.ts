@@ -185,3 +185,22 @@ export function clockOf(instant: Date, timeZone: string): string {
   const w = wallClockOf(instant, timeZone);
   return `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
 }
+
+/**
+ * When something happened, softly, for a list a person reads (To sort):
+ * "just now", "12 min ago", "today, 9:40", "yesterday, 18:05", the weekday
+ * within the week, then the date. Never an age to worry about: no "3 days
+ * old", no colour. `now` and the instant are compared in the home zone.
+ */
+export function softWhen(instant: Date, now: Date, timeZone: string): string {
+  const minutes = Math.floor((now.getTime() - instant.getTime()) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const day = isoDateInZone(instant, timeZone);
+  const today = isoDateInZone(now, timeZone);
+  const clock = clockOf(instant, timeZone);
+  if (day === today) return `today, ${clock}`;
+  if (day === addDays(today, -1)) return `yesterday, ${clock}`;
+  if (day > addDays(today, -7)) return longDate(day).split(' ')[0]!;
+  return longDate(day, 'short');
+}

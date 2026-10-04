@@ -28,6 +28,14 @@ body {
   height: 100%;
 }
 
+/* The header and the capture bar stay in view as the page scrolls, so
+   anything scrolled to (a focused field, a jump link) is kept clear of both
+   (WCAG 2.4.11, focus not obscured). */
+html {
+  scroll-padding-top: 4.5rem;
+  scroll-padding-bottom: 6.5rem;
+}
+
 body {
   background: var(--paper);
   color: var(--ink);

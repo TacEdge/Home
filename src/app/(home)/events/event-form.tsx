@@ -67,9 +67,12 @@ export function EventForm({
   people,
   defaults,
   submitLabel,
+  initialTitle,
 }: {
   action: FormAction;
   event?: Event;
+  /** A new event's title before anyone types (from a capture's words). */
+  initialTitle?: string;
   people: FormPerson[];
   defaults: EventFormDefaults;
   submitLabel: string;
@@ -101,7 +104,7 @@ export function EventForm({
         name="title"
         label="What"
         required
-        defaultValue={v('title', event?.title)}
+        defaultValue={v('title', event?.title ?? initialTitle)}
         error={errors.title}
       />
       <Field

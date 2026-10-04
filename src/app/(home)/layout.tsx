@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { captureAction } from '@/app/_capture/actions';
+import { CaptureBar } from '@/app/_capture/capture-bar';
 import { getActor } from '@/trust/session';
 import { Shell } from '@/ui/shell';
 
@@ -11,5 +13,5 @@ export default async function HomeLayout({ children }: { children: React.ReactNo
   const actor = await getActor();
   if (!actor) redirect('/sign-in');
 
-  return <Shell>{children}</Shell>;
+  return <Shell capture={<CaptureBar action={captureAction} />}>{children}</Shell>;
 }

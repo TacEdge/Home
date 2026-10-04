@@ -6,9 +6,7 @@ import { Wordmark } from './wordmark';
 
 // The HOME shell (docs/concepts/README.md, docs/BRAND.md §07, M3 contract
 // §3.1): the wordmark, the Today/Forward switch, the ⌂ menu, the page, and a
-// slot for the capture bar at the foot of every place. The capture bar
-// arrives in M3 Package 7; until then the slot renders nothing, so no input
-// ever appears that cannot keep what is typed.
+// slot for the capture bar at the foot of every place (M3 Package 7).
 
 export function Shell({
   children,

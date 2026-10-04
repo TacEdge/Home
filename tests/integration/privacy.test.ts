@@ -519,6 +519,13 @@ function writeCalls(own: Adult): Record<string, Call> {
         d,
       ),
     'proposals.approveProposal': (a) => proposals.approveProposal(a, c.proposal, d),
+    'proposals.organiseCapture': (a) =>
+      proposals.organiseCapture(
+        a,
+        c.capture,
+        { action: 'task.create', payload: { title: 'x' }, summary: 'Task: x' },
+        d,
+      ),
     'proposals.rejectProposal': (a) => proposals.rejectProposal(a, c.proposal, d),
     'proposals.expireOverdueProposals': (a) => proposals.expireOverdueProposals(a, d),
     'proposals.approveMany': (a) => proposals.approveMany(a, [c.proposal], d),
