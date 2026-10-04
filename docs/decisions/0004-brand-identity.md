@@ -20,3 +20,7 @@ M0 set an interim visual direction for the prototype: warm paper, a humanist ser
 - The prototype at tag `m0.6-prototype` keeps its interim styling as a record; it is not updated.
 - The time-of-day orb (early · day · evening · night) is a brand affordance, not an M1 feature. It may be implemented when Today exists, as a deterministic, display-only detail.
 - Font files are binary assets in the repository; updates come with a licence note in `public/fonts/LICENSE.md`.
+
+## Amendment, 2026-10-04 (ADR 0006 §5): accessible Mist
+
+Mist as adopted (`#8C9C95` day, `#7F8D88` night) is below WCAG AA for the small labels and times it was assigned. Text now uses an accessible Mist, `#5A6B64` by day and `#8E9B96` at night (≥ 4.5:1 on Morning and Linen, and on their night equivalents); the original Mist remains for decorative marks only. In code `--muted` takes the accessible value and `--muted-mark` the original (M3 Package 1). `docs/BRAND.md` §03 records the mapping. Nothing else in the identity changes.
