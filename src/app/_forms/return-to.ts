@@ -19,5 +19,10 @@ export function localPath(to: string | undefined, fallback: string): string {
     return fallback;
   }
   if (url.origin !== BASE || url.username || url.password) return fallback;
-  return `${url.pathname}${url.search}`;
+  // Dot segments can normalise to a protocol-relative path ("/.//evil.com"
+  // becomes "//evil.com"), so the result is judged again, not just the input.
+  const path = `${url.pathname}${url.search}`;
+  if (!path.startsWith('/') || path.startsWith('//') || /[\\\s\u0000-\u001f\u007f]/.test(path))
+    return fallback;
+  return path;
 }

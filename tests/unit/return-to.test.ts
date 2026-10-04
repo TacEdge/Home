@@ -24,6 +24,11 @@ describe('localPath', () => {
       '/x y',
       'javascript:alert(1)',
       `/${'a'.repeat(3000)}`,
+      // Dot segments that normalise to a protocol-relative path.
+      '/.//evil.com',
+      '/a/..//evil.com',
+      '/%2e//evil.com',
+      '/x/../..//evil.com',
     ]) {
       expect(localPath(bad, '/fallback'), String(bad)).toBe('/fallback');
     }

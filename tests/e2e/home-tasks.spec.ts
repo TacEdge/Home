@@ -183,7 +183,7 @@ test('To do: open tasks by due date then project, done in one tap with undo, dro
   await page.getByRole('button', { name: 'Drop it' }).click();
   await expect(page).toHaveURL(/undo=/);
   await expect(page.locator('main header').getByText(/^Dropped/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Undo: Oil the deck' })).toBeFocused();
   await page.goto('/tasks');
   await expect(
     page

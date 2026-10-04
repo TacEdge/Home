@@ -21,10 +21,13 @@ export function Button({
   formAction,
   onClick,
   ariaLabel,
+  ariaDescribedBy,
 }: {
   children: React.ReactNode;
   /** A fuller accessible name, when the visible words alone repeat (it must contain them). */
   ariaLabel?: string;
+  /** The id of text that says more about the action (e.g. what Undo undoes). */
+  ariaDescribedBy?: string;
   variant?: keyof typeof styles;
   type?: 'submit' | 'button';
   name?: string;
@@ -44,6 +47,7 @@ export function Button({
       disabled={busy}
       aria-busy={busy || undefined}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       className={styles[variant]}
     >
       {children}

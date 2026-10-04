@@ -22,6 +22,7 @@ import {
 import { estimateLabel, needLabel, taskStatusLabel } from '../copy';
 import { existingTaskDefaults } from '../task-defaults';
 import { TaskForm } from '../task-form';
+import { UndoLine } from '../undo-line';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,11 +105,15 @@ export default async function TaskPage({
           ) : (
             <>
               {undo === task.id ? (
-                <span role="status" className="text-ink-2">
-                  {taskStatusLabel(task.status)}.
-                </span>
-              ) : null}
-              {statusButton('open', undo === task.id ? 'Undo' : 'Back to To do')}
+                <UndoLine
+                  action={act}
+                  taskId={task.id}
+                  title={task.title}
+                  text={`${taskStatusLabel(task.status)}.`}
+                />
+              ) : (
+                statusButton('open', 'Back to To do')
+              )}
             </>
           )}
         </div>
