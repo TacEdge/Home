@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { FormMessage, type FormAction } from '@/app/_forms/action-form';
+import { useRefusalFocus } from '@/app/_forms/focus';
 import { formKey, idle, shown } from '@/app/_forms/state';
 import { Button } from '@/ui/button';
 import { Field } from '@/ui/field';
@@ -10,8 +11,9 @@ import { Field } from '@/ui/field';
 export function AddMeForm({ action }: { action: FormAction }) {
   const [state, dispatch] = useActionState(action, idle);
   const errors = state.status === 'error' ? state.fields : {};
+  const ref = useRefusalFocus<HTMLFormElement>(state);
   return (
-    <form key={formKey(state)} action={dispatch}>
+    <form key={formKey(state)} ref={ref} action={dispatch}>
       <Field
         name="name"
         label="Your name"

@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { FormMessage, type FormAction } from '@/app/_forms/action-form';
+import { useRefusalFocus } from '@/app/_forms/focus';
 import { formKey, idle, shown, shownChecked } from '@/app/_forms/state';
 import type { Person } from '@/domain/people/service';
 import { Button } from '@/ui/button';
@@ -44,6 +45,7 @@ export function PersonForm({
 }) {
   const [state, dispatch] = useActionState(action, idle);
   const errors = state.status === 'error' ? state.fields : {};
+  const ref = useRefusalFocus<HTMLFormElement>(state);
   const linked = person?.userId != null;
   const v = (name: string, stored: string | null | undefined) => shown(state, name, stored);
   // Fold More open when a field inside was refused or changed, so nothing
@@ -57,7 +59,7 @@ export function PersonForm({
     );
 
   return (
-    <form key={formKey(state)} action={dispatch}>
+    <form key={formKey(state)} ref={ref} action={dispatch}>
       <Field
         name="name"
         label="Name"

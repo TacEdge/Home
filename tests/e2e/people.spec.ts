@@ -132,6 +132,7 @@ test('You: not me, the Today prompt, add me, and this is me', async ({ page }) =
   await page.getByRole('button', { name: 'Add me' }).click();
   await expect(page.getByText('That’s too long.')).toBeVisible();
   await expect(page.getByLabel('Your name')).toHaveValue(tooLong);
+  await expect(page.getByLabel('Your name')).toBeFocused();
 
   await page.getByLabel('Your name').fill('Sam Again');
   await page.getByRole('button', { name: 'Add me' }).click();
@@ -212,6 +213,8 @@ test('a refused save keeps what was typed (JavaScript on)', async ({ page }) => 
   await page.getByLabel('Relationship').fill('A neighbour');
   await page.getByRole('button', { name: 'Add them' }).click();
   await expect(page.getByText('This can’t be empty.')).toBeVisible();
+  // Focus goes to the field that needs another look, not the top of the page.
+  await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
   await expect(page.getByLabel('Role')).toHaveValue('other');
   await expect(page.getByLabel('Right now')).toHaveValue('Typed before the error');
   await expect(page.getByLabel('Relationship')).toHaveValue('A neighbour'); // More stays open
@@ -226,6 +229,12 @@ test('a refused save keeps what was typed (JavaScript on)', async ({ page }) => 
   await expect(
     page.getByText('Only the person who added this can change who sees it.'),
   ).toBeVisible();
+  // A refusal that names no field: focus goes to the form's message.
+  await expect(
+    page.locator('[data-form-message]', {
+      hasText: 'Only the person who added this can change who sees it.',
+    }),
+  ).toBeFocused();
   await expect(page.getByLabel('Right now')).toHaveValue('An edit that will be refused');
   await expect(page.getByLabel('Who can see this')).toHaveValue('private');
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Milo');

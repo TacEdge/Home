@@ -87,3 +87,95 @@ export function longDate(date: IsoDate, style: 'long' | 'short' = 'long'): strin
     .format(instant)
     .replace(',', '');
 }
+
+// ---------------------------------------------------------------------------
+// Days and wall clocks. Still integer arithmetic on calendar fields; the only
+// conversions between instants and local time go through Intl's IANA data.
+
+/** The date `n` days after (or before, for negative `n`) a date. */
+export function addDays(date: IsoDate, n: number): IsoDate {
+  const d = parseIsoDate(date);
+  const t = new Date(Date.UTC(d.year, d.month - 1, d.day + n));
+  return formatIsoDate({
+    year: t.getUTCFullYear(),
+    month: t.getUTCMonth() + 1,
+    day: t.getUTCDate(),
+  });
+}
+
+/** Whole days from `a` to `b` (positive when `b` is later). */
+export function daysBetween(a: IsoDate, b: IsoDate): number {
+  const x = parseIsoDate(a);
+  const y = parseIsoDate(b);
+  return Math.round(
+    (Date.UTC(y.year, y.month - 1, y.day) - Date.UTC(x.year, x.month - 1, x.day)) / 86_400_000,
+  );
+}
+
+/** Day of the week, 0 = Monday … 6 = Sunday (RFC 5545 order, MO first). */
+export function weekdayOf(date: IsoDate): number {
+  const d = parseIsoDate(date);
+  return (new Date(Date.UTC(d.year, d.month - 1, d.day)).getUTCDay() + 6) % 7;
+}
+
+/** A local date and time of day, with no zone attached. */
+export type WallClock = CalendarDate & { hour: number; minute: number; second: number };
+
+const wallFormat = new Map<string, Intl.DateTimeFormat>();
+function wallFormatter(timeZone: string): Intl.DateTimeFormat {
+  let f = wallFormat.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-NZ', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    });
+    wallFormat.set(timeZone, f);
+  }
+  return f;
+}
+
+/** The wall clock an instant shows in an IANA time zone. */
+export function wallClockOf(instant: Date, timeZone: string): WallClock {
+  const parts = wallFormatter(timeZone).formatToParts(instant);
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return {
+    year: n('year'),
+    month: n('month'),
+    day: n('day'),
+    hour: n('hour'),
+    minute: n('minute'),
+    second: n('second'),
+  };
+}
+
+const wallMs = (w: WallClock) => Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
+
+/** The zone's offset from UTC at an instant, in milliseconds (NZDT: +13h). */
+export function offsetAt(instant: number, timeZone: string): number {
+  return wallMs(wallClockOf(new Date(instant), timeZone)) - (instant - (instant % 1000));
+}
+
+/**
+ * The instant a wall clock names in an IANA time zone. Where the clock
+ * shows that time twice (the hour repeated when daylight saving ends), the
+ * first instance. Where it never shows it (the hour skipped when daylight
+ * saving starts), the time moved forward by the gap: 02:30 on the NZ
+ * spring-forward night becomes 03:30 NZDT (M3 contract §5).
+ */
+export function instantFromWallClock(wall: WallClock, timeZone: string): Date {
+  const target = wallMs(wall);
+  const before = offsetAt(target - 86_400_000, timeZone);
+  const after = offsetAt(target + 86_400_000, timeZone);
+  const matches = [...new Set([target - before, target - after])]
+    .filter((t) => wallMs(wallClockOf(new Date(t), timeZone)) === target)
+    .sort((a, b) => a - b);
+  // In a gap neither offset reproduces the wall time; the pre-transition
+  // offset lands just after the gap, shifted forward by its length.
+  return new Date(matches[0] ?? target - before);
+}

@@ -207,7 +207,7 @@ Pure, deterministic, under `src/domain/engines/`, importing nothing from `db` or
   - Monthly on the 29th–31st skips months without that day (RFC 5545 behaviour, stated in the UI). Yearly on 29 February occurs only in leap years for events (birthdays keep P-4 via `profile`).
   - Timed occurrences keep their local wall-clock time across DST; a local time that does not exist (spring forward) moves forward by the gap; an ambiguous one (fall back) takes the first instance. All-day occurrences are dates, untouched by DST.
   - Any stored RRULE outside the model is shown read-only as "Repeats (custom)" and is never silently rewritten.
-- **`agenda`**: day and range views over manual events (expanded), with all-day items first and timed items by start (ADR 0005 §27); used by Today, Forward and *Coming up*.
+- **`agenda`**: day and range views over manual events (expanded), birthdays, open tasks with a due date and unfinished projects' target dates, with all-day items first (all-day events, birthdays, project targets, tasks due) and timed items by start (ADR 0005 §27, ADR 0006 §38); used by Today, Forward and *Coming up*.
 - Dependency: **`rrule`** (approved stack, CLAUDE.md). Justified in Package 4's PR. Nothing else is added for time handling.
 - Tests: every preset across both NZ DST transitions; all-day and timed; `UNTIL` and `COUNT`; exdates; month-end; 29 February; range boundaries; a zone other than `Pacific/Auckland`.
 
