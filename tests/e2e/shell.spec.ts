@@ -16,13 +16,17 @@ const SCREENS = [
   '/people/new',
   '/settings/you',
   '/events/new',
+  '/home',
+  '/home/projects/new',
+  '/tasks',
+  '/tasks/new',
 ];
 
 test('the ⌂ menu lists only places that exist, and closes on Escape', async ({ page }) => {
   await signInAsFixtureAdult(page, 'alex');
   await page.getByLabel('Menu', { exact: true }).click();
   const more = page.getByRole('navigation', { name: 'More places' });
-  await expect(more.getByRole('link')).toHaveText(['People', 'Settings']);
+  await expect(more.getByRole('link')).toHaveText(['People', 'Home', 'To do', 'Settings']);
   await page.keyboard.press('Escape');
   await expect(more).toBeHidden();
   await page.getByLabel('Menu', { exact: true }).click();

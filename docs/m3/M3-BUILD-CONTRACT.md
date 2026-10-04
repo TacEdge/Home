@@ -135,7 +135,7 @@ The next 30 days from today in the home time zone, grouped by day, empty days om
 
 - `/home`: projects grouped by status (active, idea, paused, done collapsed). Project page: summary, target date, its tasks, its notes. V0.1 accepts only `domain = home`.
 - `/tasks`: open tasks ordered by due date (none last), then project. Done and dropped collapsed. Marking done or dropped is one tap; undo is available.
-- Task form: title; then under **More**: notes, project, assignee, about person, due date, estimate, needs, scheduled window, visibility.
+- Task form: title; then under **More**: notes, project, assignee, about person, due date, estimate, needs, scheduled window, visibility. Package 6's screens, the task list, status actions and the notes block: ADR 0006 §44–48.
 
 ### 3.6 Events
 

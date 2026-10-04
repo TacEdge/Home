@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
+import { NotesSection } from '@/app/_notes/notes-section';
 import { NotFoundError } from '@/domain/common/errors';
 import type { ContextCategory } from '@/domain/context/schema';
 import { listContext } from '@/domain/context/service';
@@ -24,8 +25,8 @@ import { ageLabel, CONTEXT_CATEGORY_LABEL, roleLabel } from '../copy';
 // profile engine; things to know are normal context about them (sensitive
 // never appears here: the default read leaves it out); coming up is the
 // what is coming up for them in the next 30 days (the agenda engine, as
-// Forward uses it). Archived people are shown,
-// with Restore.
+// Forward uses it); notes about them are written here (§3.7). Archived
+// people are shown, with Restore.
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
   const { id } = await params;
@@ -35,7 +36,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   });
   const [things, notes] = await Promise.all([
     listContext(actor, { subject: { type: 'person', id: person.id } }),
-    listNotes(actor, { subject: { type: 'person', id: person.id } }),
+    listNotes(actor, { subject: { type: 'person', id: person.id }, includeArchived: true }),
   ]);
   const today = todayInHomeZone();
   const age = ageOn(person.dateOfBirth, today);
@@ -101,16 +102,13 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         />
       )}
 
-      <Label>Notes</Label>
-      {notes.length === 0 ? (
-        <Quiet>No notes yet.</Quiet>
-      ) : (
-        <List>
-          {notes.map((n) => (
-            <ItemRow key={n.id} title={<span className="whitespace-pre-wrap">{n.body}</span>} />
-          ))}
-        </List>
-      )}
+      <NotesSection
+        notes={notes}
+        subject={{ type: 'person', id: person.id }}
+        subjectVisibility={person.visibility}
+        returnTo={`/people/${person.id}`}
+        readOnly={archived}
+      />
 
       <Label>This record</Label>
       {archived ? (

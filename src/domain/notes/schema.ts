@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { NOTE_SUBJECT_TYPES } from '@/db/schema/note';
+
+export { NOTE_SUBJECT_TYPES };
 import { longText, recordId, visibility } from '../common/inputs';
 
 // Note inputs. A note's subject is a type and an id together, or none, as

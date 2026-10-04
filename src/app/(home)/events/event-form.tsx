@@ -276,10 +276,11 @@ export function EventForm({
         />
         <Field
           name="description"
-          label="Notes"
+          label="Details"
           type="textarea"
           rows={3}
           defaultValue={v('description', event?.description)}
+          hint="Anything worth knowing about it. Notes on it live on its page."
           error={errors.description}
         />
         <Field
