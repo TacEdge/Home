@@ -115,7 +115,7 @@ Anything that happens at a time.
 | `source` | `manual` \| `synced` |
 | `calendar_source_id`, `external_uid`, `external_etag` | for synced events; provider-neutral |
 
-Implementation (migration `0004`, M2 Package 3a): a timed event has `starts_at`, `ends_at` and `time_zone` and no dates; an all-day event has `start_date` and an **exclusive** `end_date` (RFC 5545) and no instants; both enforced by `CHECK`. `rrule` and `exdates` (`text[]`) are stored as given; nothing parses them in M2. `source = 'synced'` requires `calendar_source_id` and `external_uid`; `calendar_source_id` has no foreign key until M4 (ADR 0005, D-M2-3). Indexes on `starts_at` and `start_date` serve range reads.
+Implementation (migration `0004`, M2 Package 3a): a timed event has `starts_at`, `ends_at` and `time_zone` and no dates; an all-day event has `start_date` and an **exclusive** `end_date` (RFC 5545) and no instants; both enforced by `CHECK`. `rrule` and `exdates` (`text[]`) are stored as given; nothing parses them in M2. From M3 the `recurrence` engine reads them: `rrule` is an RFC 5545 rule (HOME writes only its presets, and keeps any other rule as written), and an exdate is a date (skips that local day's occurrence) or an instant (skips the occurrence starting then); ADR 0006 §35–37. `source = 'synced'` requires `calendar_source_id` and `external_uid`; `calendar_source_id` has no foreign key until M4 (ADR 0005, D-M2-3). Indexes on `starts_at` and `start_date` serve range reads.
 
 ### EventPerson (annotation)
 Who is involved and how. Works for manual and synced events.

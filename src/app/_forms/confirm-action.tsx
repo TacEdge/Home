@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { ConfirmInline } from '@/ui/confirm-inline';
 import { FormMessage, type FormAction } from './action-form';
+import { useRefusalFocus } from './focus';
 import { idle } from './state';
 
 // ConfirmInline wired to a FormState action: the second step happens in
@@ -21,8 +22,9 @@ export function ConfirmAction({
   hidden?: Record<string, string>;
 }) {
   const [state, dispatch] = useActionState(action, idle);
+  const ref = useRefusalFocus<HTMLDivElement>(state);
   return (
-    <div>
+    <div ref={ref}>
       <ConfirmInline {...props} hidden={hidden} action={dispatch} />
       <FormMessage state={state} />
     </div>

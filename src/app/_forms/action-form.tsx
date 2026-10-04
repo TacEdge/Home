@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { useRefusalFocus } from './focus';
 import { idle, type FormState } from './state';
 
 // A form whose outcome is shown in place (M3 contract §4.1): the server
@@ -19,8 +20,9 @@ export function ActionForm({
   className?: string;
 }) {
   const [state, dispatch] = useActionState(action, idle);
+  const ref = useRefusalFocus<HTMLFormElement>(state);
   return (
-    <form action={dispatch} className={className}>
+    <form ref={ref} action={dispatch} className={className}>
       {children}
       <FormMessage state={state} />
     </form>
@@ -31,7 +33,12 @@ export function ActionForm({
 export function FormMessage({ state }: { state: FormState }) {
   if (state.status === 'error')
     return (
-      <p role="alert" className="text-ink mt-4 flex items-baseline gap-2">
+      <p
+        role="alert"
+        tabIndex={-1}
+        data-form-message
+        className="text-ink mt-4 flex items-baseline gap-2"
+      >
         <span aria-hidden="true" className="bg-accent inline-block h-2 w-2 shrink-0 rounded-full" />
         {state.message}
       </p>

@@ -1,0 +1,379 @@
+import { RRule, Weekday, type Options } from 'rrule';
+import {
+  addDays,
+  daysBetween,
+  formatIsoDate,
+  instantFromWallClock,
+  isValidIsoDate,
+  parseIsoDate,
+  wallClockOf,
+  weekdayOf,
+  type IsoDate,
+  type WallClock,
+} from '@/lib/dates';
+
+// The recurrence engine (M3 contract §5, ADR 0006 §3). Pure: no database,
+// clock or environment; the caller passes every date and zone.
+//
+// HOME's own recurrence model is deliberately small: none, daily, weekly on
+// chosen days, fortnightly, monthly on the start's date, yearly; ending
+// never, on a date, or after N times. It is stored as an RFC 5545 RRULE
+// (the `event.rrule` column), so M4's calendar sync and any export reader
+// see a standard rule. A stored rule outside the model is still expanded,
+// but reads as `custom` and is never rewritten.
+//
+// Expansion never uses rrule's own time-zone support. Rules are expanded in
+// "floating" time: each occurrence is a local wall clock in the event's
+// zone, which is then turned into an instant by instantFromWallClock (the
+// DST rules of M3 contract §5: kept wall-clock time; a skipped hour moves
+// forward; a repeated hour takes its first instance). All-day events are
+// dates and never touch a zone.
+
+export type Weekdays = readonly number[]; // 0 = Monday … 6 = Sunday
+
+export type RecurrenceEnd =
+  | { type: 'never' }
+  | { type: 'until'; date: IsoDate } // the last day it may occur, inclusive, in the event's zone
+  | { type: 'count'; count: number }; // occurrences in all, the first included
+
+export type Recurrence =
+  | { preset: 'none' }
+  | { preset: 'daily'; end: RecurrenceEnd }
+  | { preset: 'weekly'; weekdays: Weekdays; end: RecurrenceEnd }
+  | { preset: 'fortnightly'; weekdays: Weekdays; end: RecurrenceEnd }
+  | { preset: 'monthly'; end: RecurrenceEnd }
+  | { preset: 'yearly'; end: RecurrenceEnd };
+
+export type RecurrencePreset = Recurrence['preset'];
+
+/** What a stored rule means to HOME: one of its presets, or a rule it shows read-only. */
+export type ReadRecurrence = Recurrence | { preset: 'custom'; rrule: string };
+
+/** When an event starts: the facts recurrence needs, timed or all-day. */
+export type EventStart =
+  { allDay: true; startDate: IsoDate } | { allDay: false; startsAt: Date; timeZone: string };
+
+export const MAX_COUNT = 1000;
+const RFC_DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'] as const;
+
+export class RecurrenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecurrenceError';
+  }
+}
+
+/** The event's first local date, in its own zone (or its date, all-day). */
+export function startDateOf(start: EventStart): IsoDate {
+  if (start.allDay) return start.startDate;
+  const w = wallClockOf(start.startsAt, start.timeZone);
+  return formatIsoDate(w);
+}
+
+function normaliseWeekdays(days: Weekdays): number[] {
+  const out = [...new Set(days)].sort((a, b) => a - b);
+  if (out.length === 0 || out.some((d) => !Number.isInteger(d) || d < 0 || d > 6))
+    throw new RecurrenceError('weekly and fortnightly repeats need one or more weekdays');
+  return out;
+}
+
+function untilValue(date: IsoDate, start: EventStart): string {
+  const d = date.replaceAll('-', '');
+  if (start.allDay) return d;
+  // RFC 5545: with a zoned DTSTART, UNTIL is UTC. The last moment of the
+  // chosen local day in the event's zone, so that day is included.
+  const last = instantFromWallClock(
+    { ...parseIsoDate(date), hour: 23, minute: 59, second: 59 },
+    start.timeZone,
+  );
+  return last
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
+}
+
+/**
+ * The RRULE (without DTSTART) for a recurrence, or null for `none`. Checks
+ * the model: weekdays for weekly and fortnightly, a count from 1 to 1000, an
+ * end date on or after the start. Weekly and fortnightly rules always name
+ * their days, so a stored rule says exactly what it means.
+ */
+export function toRRule(r: Recurrence, start: EventStart): string | null {
+  if (r.preset === 'none') return null;
+  const parts: string[] = [];
+  switch (r.preset) {
+    case 'daily':
+      parts.push('FREQ=DAILY');
+      break;
+    case 'weekly':
+    case 'fortnightly':
+      parts.push('FREQ=WEEKLY');
+      if (r.preset === 'fortnightly') parts.push('INTERVAL=2');
+      parts.push(
+        `BYDAY=${normaliseWeekdays(r.weekdays)
+          .map((d) => RFC_DAYS[d])
+          .join(',')}`,
+      );
+      break;
+    case 'monthly':
+      parts.push('FREQ=MONTHLY');
+      break;
+    case 'yearly':
+      parts.push('FREQ=YEARLY');
+      break;
+  }
+  const end = r.end;
+  if (end.type === 'count') {
+    if (!Number.isInteger(end.count) || end.count < 1 || end.count > MAX_COUNT)
+      throw new RecurrenceError(`a repeat count is from 1 to ${MAX_COUNT}`);
+    parts.push(`COUNT=${end.count}`);
+  } else if (end.type === 'until') {
+    if (!isValidIsoDate(end.date)) throw new RecurrenceError('the end date is not a real date');
+    if (end.date < startDateOf(start))
+      throw new RecurrenceError('the end date is before the first one');
+    parts.push(`UNTIL=${untilValue(end.date, start)}`);
+  }
+  return parts.join(';');
+}
+
+function parseRule(rrule: string): Partial<Options> | null {
+  try {
+    const body = rrule.trim().replace(/^RRULE:/i, '');
+    if (!/^[A-Z0-9=;,:+\-]+$/i.test(body)) return null;
+    const o = RRule.parseString(body);
+    return o.freq === undefined ? null : o;
+  } catch {
+    return null;
+  }
+}
+
+function weekdayNumbers(byweekday: Options['byweekday'] | undefined): number[] | null {
+  if (byweekday === undefined || byweekday === null) return null;
+  const list = Array.isArray(byweekday) ? byweekday : [byweekday];
+  const out: number[] = [];
+  for (const w of list) {
+    if (typeof w === 'number') out.push(w);
+    else if (w instanceof Weekday && w.n === undefined) out.push(w.weekday);
+    else return null; // "the second Tuesday" and the like: not in the model
+  }
+  return out;
+}
+
+/** The local date a stored UNTIL names, in the event's terms. */
+function untilDate(until: Date, start: EventStart): IsoDate {
+  return start.allDay
+    ? formatIsoDate({
+        year: until.getUTCFullYear(),
+        month: until.getUTCMonth() + 1,
+        day: until.getUTCDate(),
+      })
+    : formatIsoDate(wallClockOf(until, start.timeZone));
+}
+
+/**
+ * What a stored rule means: one of HOME's presets, or `custom` for anything
+ * else (a rule from elsewhere, or one HOME's editor cannot show). Only the
+ * keys HOME writes are understood; any other part makes it custom.
+ */
+export function readRRule(rrule: string | null | undefined, start: EventStart): ReadRecurrence {
+  if (rrule === null || rrule === undefined || rrule.trim() === '') return { preset: 'none' };
+  const custom = { preset: 'custom' as const, rrule };
+  const o = parseRule(rrule);
+  if (!o) return custom;
+  const keys = rrule
+    .trim()
+    .replace(/^RRULE:/i, '')
+    .split(';')
+    .map((p) => p.split('=')[0]!.toUpperCase());
+  if (keys.some((k) => !['FREQ', 'INTERVAL', 'BYDAY', 'COUNT', 'UNTIL'].includes(k))) return custom;
+  if (o.count != null && o.until != null) return custom;
+  const end: RecurrenceEnd =
+    o.count != null
+      ? o.count >= 1 && o.count <= MAX_COUNT
+        ? { type: 'count', count: o.count }
+        : { type: 'never' }
+      : o.until != null
+        ? { type: 'until', date: untilDate(o.until, start) }
+        : { type: 'never' };
+  if (o.count != null && end.type !== 'count') return custom;
+  const interval = o.interval ?? 1;
+  // BYDAY belongs only to weekly rules; on any other it is outside the model.
+  const byday = keys.includes('BYDAY');
+  const days = weekdayNumbers(o.byweekday);
+  switch (o.freq) {
+    case RRule.DAILY:
+      return interval === 1 && !byday ? { preset: 'daily', end } : custom;
+    case RRule.WEEKLY: {
+      if (days === null || days.length === 0) return custom;
+      const weekdays = normaliseWeekdays(days);
+      if (interval === 1) return { preset: 'weekly', weekdays, end };
+      if (interval === 2) return { preset: 'fortnightly', weekdays, end };
+      return custom;
+    }
+    case RRule.MONTHLY:
+      return interval === 1 && !byday ? { preset: 'monthly', end } : custom;
+    case RRule.YEARLY:
+      return interval === 1 && !byday ? { preset: 'yearly', end } : custom;
+    default:
+      return custom;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Expansion
+
+/** An event, as much of it as expansion needs. */
+export type RecurringEvent =
+  | {
+      allDay: true;
+      startDate: IsoDate;
+      endDate: IsoDate; // exclusive (RFC 5545)
+      rrule: string | null;
+      exdates: readonly string[] | null;
+    }
+  | {
+      allDay: false;
+      startsAt: Date;
+      endsAt: Date;
+      timeZone: string;
+      rrule: string | null;
+      exdates: readonly string[] | null;
+    };
+
+export type Occurrence =
+  | {
+      allDay: true;
+      /** The occurrence's own start date: its identity, and what "skip this one" names. */
+      date: IsoDate;
+      startDate: IsoDate;
+      endDate: IsoDate; // exclusive
+    }
+  | {
+      allDay: false;
+      /** The occurrence's start date in the event's zone: what "skip this one" names. */
+      date: IsoDate;
+      startsAt: Date;
+      endsAt: Date;
+      timeZone: string;
+    };
+
+const fakeUtc = (w: WallClock) =>
+  new Date(Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second));
+const wallOfFake = (d: Date): WallClock => ({
+  year: d.getUTCFullYear(),
+  month: d.getUTCMonth() + 1,
+  day: d.getUTCDate(),
+  hour: d.getUTCHours(),
+  minute: d.getUTCMinutes(),
+  second: d.getUTCSeconds(),
+});
+
+/**
+ * An EXDATE as HOME reads it. A date (`2026-10-21`, or RFC 5545's
+ * `20261021`) skips the occurrence starting that local day; an instant skips
+ * the timed occurrence starting at exactly that moment. Anything else is
+ * ignored rather than guessed at.
+ */
+function readExdates(exdates: readonly string[] | null) {
+  const dates = new Set<string>();
+  const instants = new Set<number>();
+  for (const raw of exdates ?? []) {
+    const v = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v) && isValidIsoDate(v)) dates.add(v);
+    else if (/^\d{8}$/.test(v)) {
+      const iso = `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+      if (isValidIsoDate(iso)) dates.add(iso);
+    } else {
+      const t = Date.parse(v);
+      if (/T/.test(v) && /(Z|[+-]\d{2}:?\d{2})$/.test(v) && Number.isFinite(t)) instants.add(t);
+    }
+  }
+  return { dates, instants };
+}
+
+/**
+ * Every occurrence of an event whose start date (in the event's own zone,
+ * or its date for all-day events) falls within `from`…`to`, inclusive, in
+ * order, skipping exdates. A one-off event is its single occurrence. A
+ * stored rule that cannot be read yields just the first occurrence, never a
+ * guess. Duration: an all-day occurrence keeps the event's number of days;
+ * a timed one keeps its elapsed length, so a 1-hour event is 1 hour long on
+ * a DST night too.
+ */
+export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): Occurrence[] {
+  if (to < from) return [];
+  const start: EventStart = event.allDay
+    ? { allDay: true, startDate: event.startDate }
+    : { allDay: false, startsAt: event.startsAt, timeZone: event.timeZone };
+  const first = startDateOf(start);
+  const ex = readExdates(event.exdates);
+
+  const occurrenceOn = (wall: WallClock): Occurrence => {
+    const date = formatIsoDate(wall);
+    if (event.allDay) {
+      return {
+        allDay: true,
+        date,
+        startDate: date,
+        endDate: addDays(date, daysBetween(event.startDate, event.endDate)),
+      };
+    }
+    const startsAt = instantFromWallClock(wall, event.timeZone);
+    const length = event.endsAt.getTime() - event.startsAt.getTime();
+    return {
+      allDay: false,
+      date,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + length),
+      timeZone: event.timeZone,
+    };
+  };
+  const kept = (o: Occurrence) =>
+    o.date >= from &&
+    o.date <= to &&
+    !ex.dates.has(o.date) &&
+    !(o.allDay === false && ex.instants.has(o.startsAt.getTime()));
+
+  const startWall: WallClock = event.allDay
+    ? { ...parseIsoDate(event.startDate), hour: 0, minute: 0, second: 0 }
+    : wallClockOf(event.startsAt, event.timeZone);
+
+  const rule = event.rrule ? parseRule(event.rrule) : null;
+  if (!rule) {
+    const only = occurrenceOn(startWall);
+    return kept(only) ? [only] : [];
+  }
+  if (to < first) return [];
+
+  // Floating expansion: DTSTART and UNTIL are local wall clocks written as
+  // if they were UTC; occurrences come back the same way.
+  const options: Partial<Options> = { ...rule, dtstart: fakeUtc(startWall) };
+  if (rule.until) {
+    const lastDay = untilDate(rule.until, start);
+    options.until = fakeUtc({ ...parseIsoDate(lastDay), hour: 23, minute: 59, second: 59 });
+  }
+  if (rule.count != null) options.count = Math.min(rule.count, MAX_COUNT);
+  const rr = new RRule(options);
+  const windowStart = fakeUtc({
+    ...parseIsoDate(from < first ? first : from),
+    hour: 0,
+    minute: 0,
+    second: 0,
+  });
+  const windowEnd = fakeUtc({ ...parseIsoDate(to), hour: 23, minute: 59, second: 59 });
+  return rr
+    .between(windowStart, windowEnd, true)
+    .map((d) => occurrenceOn(wallOfFake(d)))
+    .filter(kept);
+}
+
+/** The exdates with one more occurrence skipped, by its date: for "skip this one". */
+export function skipOccurrence(exdates: readonly string[] | null, date: IsoDate): string[] {
+  if (!isValidIsoDate(date)) throw new RecurrenceError('not a real date');
+  return [...new Set([...(exdates ?? []), date])].sort();
+}
+
+/** The weekday of an event's first date: the default day for weekly and fortnightly. */
+export function defaultWeekdays(start: EventStart): number[] {
+  return [weekdayOf(startDateOf(start))];
+}
