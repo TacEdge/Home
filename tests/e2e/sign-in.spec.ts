@@ -77,7 +77,7 @@ test('5. a signed-in user sees the places nav and their sign-in in Activity', as
   await expect(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'Forward' })).toBeVisible();
   await nav.getByRole('link', { name: 'Forward' }).click();
-  await expect(page.getByRole('heading', { name: 'Forward will live here.' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Forward' })).toBeVisible();
 
   await page.goto('/settings/activity');
   await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible();

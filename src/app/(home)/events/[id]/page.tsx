@@ -1,0 +1,249 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { clock } from '@/app/_agenda/agenda-list';
+import { todayInHomeZone } from '@/app/_agenda/load';
+import { ActionForm } from '@/app/_forms/action-form';
+import { ConfirmAction } from '@/app/_forms/confirm-action';
+import { NotFoundError } from '@/domain/common/errors';
+import { expandEvent, readRRule, type EventStart } from '@/domain/engines/recurrence';
+import { getEvent, listEventPeople } from '@/domain/events/service';
+import { listPeople } from '@/domain/people/service';
+import { addDays, longDate } from '@/lib/dates';
+import { requireActor } from '@/trust/session';
+import { Button } from '@/ui/button';
+import { ItemRow, List } from '@/ui/list';
+import { Label, Page, Quiet } from '@/ui/page';
+import { PersonName, type PersonColour } from '@/ui/person-dot';
+import {
+  archiveEventAction,
+  putBackOccurrenceAction,
+  restoreEventAction,
+  skipOccurrenceAction,
+} from '../actions';
+import { KIND_LABEL, repeatLabel, whenLabel } from '../copy';
+
+export const dynamic = 'force-dynamic';
+
+const UPCOMING_DAYS = 56;
+const UPCOMING_MAX = 6;
+
+// An event (M3 contract §3.6): when, how it repeats, who, where; the next
+// few times it happens with "Skip this one"; skipped dates with "Put back";
+// Edit, Archive and Restore. A synced event is read-only, and says so.
+export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+  const actor = await requireActor();
+  const { id } = await params;
+  const event = await getEvent(actor, id, { includeArchived: true }).catch((e: unknown) => {
+    if (e instanceof NotFoundError) notFound();
+    throw e;
+  });
+  const [annotations, people] = await Promise.all([
+    listEventPeople(actor, event.id, { includeArchived: true }),
+    listPeople(actor),
+  ]);
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const names = (role: string) =>
+    annotations
+      .filter((a) => a.role === role)
+      .map((a) => byId.get(a.personId))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p));
+  const start: EventStart = event.allDay
+    ? { allDay: true, startDate: event.startDate! }
+    : { allDay: false, startsAt: event.startsAt!, timeZone: event.timeZone! };
+  const startDate = event.allDay ? event.startDate! : longDateKey(event.startsAt!, event.timeZone!);
+  const recurrence = readRRule(event.rrule, start);
+  const repeats = repeatLabel(recurrence, startDate);
+  const archived = event.archivedAt !== null;
+  const synced = event.source !== 'manual';
+  const editable = !archived && !synced;
+  const today = todayInHomeZone();
+  const upcoming = event.rrule
+    ? expandEvent(
+        event.allDay
+          ? {
+              allDay: true,
+              startDate: event.startDate!,
+              endDate: event.endDate!,
+              rrule: event.rrule,
+              exdates: event.exdates,
+            }
+          : {
+              allDay: false,
+              startsAt: event.startsAt!,
+              endsAt: event.endsAt!,
+              timeZone: event.timeZone!,
+              rrule: event.rrule,
+              exdates: event.exdates,
+            },
+        today,
+        addDays(today, UPCOMING_DAYS - 1),
+      ).slice(0, UPCOMING_MAX)
+    : [];
+  const skipped = (event.exdates ?? []).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort();
+  const going = names('attending');
+  const responsible = names('responsible');
+
+  return (
+    <Page
+      title={event.title}
+      intro={
+        <Quiet>
+          {[
+            whenLabel(event),
+            repeats,
+            KIND_LABEL[event.kind] ?? event.kind,
+            archived ? 'archived' : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Quiet>
+      }
+    >
+      {synced ? (
+        <div className="mt-4">
+          <Quiet>This comes from a calendar, so change it there. HOME shows it as it is.</Quiet>
+        </div>
+      ) : null}
+      {event.location ? (
+        <>
+          <Label>Where</Label>
+          <p>{event.location}</p>
+        </>
+      ) : null}
+      {event.description ? (
+        <>
+          <Label>Notes</Label>
+          <p className="whitespace-pre-wrap">{event.description}</p>
+        </>
+      ) : null}
+
+      {going.length > 0 || responsible.length > 0 ? (
+        <>
+          <Label>Who</Label>
+          <List>
+            {going.map((p) => (
+              <ItemRow
+                key={`a-${p.id}`}
+                href={`/people/${p.id}`}
+                title={<PersonName name={p.name} colour={p.colour as PersonColour | null} />}
+                detail="Going"
+              />
+            ))}
+            {responsible.map((p) => (
+              <ItemRow
+                key={`r-${p.id}`}
+                href={`/people/${p.id}`}
+                title={<PersonName name={p.name} colour={p.colour as PersonColour | null} />}
+                detail="Responsible"
+              />
+            ))}
+          </List>
+        </>
+      ) : null}
+
+      {event.rrule ? (
+        <>
+          <Label>Next few times</Label>
+          {upcoming.length === 0 ? (
+            <Quiet>Nothing in the next eight weeks.</Quiet>
+          ) : (
+            <ul className="border-line border-b">
+              {upcoming.map((o) => (
+                <li
+                  key={o.date}
+                  className="border-line flex min-h-11 flex-wrap items-center justify-between gap-3 border-t py-2"
+                >
+                  <span>
+                    {longDate(o.date)}
+                    {o.allDay ? null : (
+                      <span className="text-muted font-mono text-[14px]">
+                        {' '}
+                        · {clock(o.startsAt, o.timeZone)}
+                      </span>
+                    )}
+                  </span>
+                  {editable ? (
+                    <ActionForm action={skipOccurrenceAction}>
+                      <input type="hidden" name="id" value={event.id} />
+                      <input type="hidden" name="date" value={o.date} />
+                      <Button variant="quiet" ariaLabel={`Skip ${longDate(o.date)}`}>
+                        Skip this one
+                      </Button>
+                    </ActionForm>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {skipped.length > 0 ? (
+            <>
+              <Label>Skipped</Label>
+              <ul className="border-line border-b">
+                {skipped.map((d) => (
+                  <li
+                    key={d}
+                    className="border-line flex min-h-11 flex-wrap items-center justify-between gap-3 border-t py-2"
+                  >
+                    <span className="text-ink-2">{longDate(d)}</span>
+                    {editable ? (
+                      <ActionForm action={putBackOccurrenceAction}>
+                        <input type="hidden" name="id" value={event.id} />
+                        <input type="hidden" name="date" value={d} />
+                        <Button variant="quiet" ariaLabel={`Put back ${longDate(d)}`}>
+                          Put back
+                        </Button>
+                      </ActionForm>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      <Label>This event</Label>
+      {synced ? (
+        <Quiet>Read-only in HOME.</Quiet>
+      ) : archived ? (
+        <ConfirmAction
+          action={restoreEventAction}
+          hidden={{ id: event.id }}
+          label="Restore"
+          question={`Bring ${event.title} back?`}
+          confirmLabel="Restore"
+          cancelLabel="Leave archived"
+        />
+      ) : (
+        <>
+          <p>
+            <Link
+              href={`/events/${event.id}/edit`}
+              className="text-ink-2 underline underline-offset-4"
+            >
+              Edit
+            </Link>
+          </p>
+          <ConfirmAction
+            action={archiveEventAction}
+            hidden={{ id: event.id }}
+            label="Archive"
+            question={`Put ${event.title} away? Nothing is deleted; you can bring it back from Settings.`}
+            confirmLabel="Archive"
+          />
+        </>
+      )}
+    </Page>
+  );
+}
+
+function longDateKey(d: Date, tz: string): string {
+  const s = new Intl.DateTimeFormat('en-NZ', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const g = (t: string) => s.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}

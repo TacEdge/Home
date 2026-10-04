@@ -453,6 +453,19 @@ function writeCalls(own: Adult): Record<string, Call> {
       events.setEventPerson(a, { eventId: c.event, personId: c.person, role: 'responsible' }, d),
     'events.removeEventPerson': (a) =>
       events.removeEventPerson(a, { eventId: c.event, personId: c.person, role: 'attending' }, d),
+    'events.setEventPeople': (a) =>
+      events.setEventPeople(a, c.event, [{ personId: c.person, role: 'attending' }], d),
+    'events.createEventWithPeople': (a) =>
+      events.createEventWithPeople(
+        a,
+        {
+          title: 'x',
+          kind: 'other',
+          time: { allDay: true, startDate: '2026-10-20', endDate: '2026-10-21' },
+        },
+        [{ personId: c.person, role: 'attending' }],
+        d,
+      ),
     'projects.createProject': (a) => projects.createProject(a, { title: 'x' }, d),
     'projects.updateProject': (a) => projects.updateProject(a, c.project, { title: 'x' }, d),
     'projects.archiveProject': (a) => projects.archiveProject(a, c.project, d),

@@ -141,7 +141,7 @@ The next 30 days from today in the home time zone, grouped by day, empty days om
 
 - Create and edit timed (start, end, zone defaulting to `HOME_TIMEZONE`) and all-day (date range shown inclusively, stored with the exclusive end, ADR 0005 §26) events: title, kind, domain, location, description, visibility, attending and responsible people.
 - **Recurrence** (§5): none, daily, weekly on chosen days, fortnightly, monthly on the same date, yearly; ends never, on a date, or after N times. Edits apply to the **whole series**. **Skip this one** adds an exdate for one occurrence. No single-occurrence edits.
-- Synced events render read-only (none exist until M4).
+- Synced events render read-only (none exist until M4). Package 5's form, page and shared agenda loader: ADR 0006 §40–43.
 
 ### 3.7 Notes
 

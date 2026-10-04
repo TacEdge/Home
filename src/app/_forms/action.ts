@@ -2,6 +2,7 @@ import 'server-only';
 import { redirect, unstable_rethrow } from 'next/navigation';
 import { ZodError } from 'zod';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
+import { FormFieldError } from './errors';
 import { log } from '@/lib/log';
 import { NotSignedInError, type UserActor } from '@/trust/actor';
 import { requireActor } from '@/trust/session';
@@ -42,6 +43,8 @@ export function toFormState(e: unknown): FormState & { status: 'error' } {
     }
     return { status: 'error', message: INVALID_COPY, fields };
   }
+  if (e instanceof FormFieldError)
+    return { status: 'error', message: INVALID_COPY, fields: e.fields };
   if (e instanceof NotFoundError) return { status: 'error', message: NOT_FOUND_COPY, fields: {} };
   if (e instanceof NotPermittedError)
     return { status: 'error', message: NOT_PERMITTED_COPY[e.code], fields: {} };

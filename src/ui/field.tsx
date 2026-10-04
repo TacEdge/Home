@@ -12,6 +12,8 @@ type Common = {
   error?: string;
   required?: boolean;
   defaultValue?: string;
+  /** For a form that shows or hides other questions as this one changes. */
+  onChange?: (value: string) => void;
 };
 
 type FieldProps = Common &
@@ -43,6 +45,9 @@ export function Field(props: FieldProps) {
     'aria-describedby': described,
     'aria-invalid': props.error ? true : undefined,
     className: control,
+    onChange: props.onChange
+      ? (e: { target: { value: string } }) => props.onChange?.(e.target.value)
+      : undefined,
   };
 
   return (
@@ -116,11 +121,13 @@ export function Checkbox({
   label,
   hint,
   defaultChecked,
+  onChange,
 }: {
   name: string;
   label: string;
   hint?: string;
   defaultChecked?: boolean;
+  onChange?: (checked: boolean) => void;
 }) {
   const id = `field-${name}`;
   const hintId = hint ? `${id}-hint` : undefined;
@@ -132,6 +139,7 @@ export function Checkbox({
           name={name}
           type="checkbox"
           defaultChecked={defaultChecked}
+          onChange={onChange ? (e) => onChange(e.target.checked) : undefined}
           aria-describedby={hintId}
           className="accent-ink h-5 w-5 shrink-0"
         />
@@ -145,5 +153,71 @@ export function Checkbox({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A set of choices as inline checkboxes under one question (weekdays, who's
+ * going). Each box has its own name (`<name>_<value>`), so a submitted form
+ * carries each choice separately and a refused save shows them again.
+ */
+export function Choices({
+  name,
+  legend,
+  options,
+  checked,
+  hint,
+  error,
+}: {
+  name: string;
+  legend: string;
+  options: readonly { value: string; label: React.ReactNode }[];
+  checked: ReadonlySet<string>;
+  hint?: string;
+  error?: string;
+}) {
+  const hintId = hint ? `choices-${name}-hint` : undefined;
+  const errorId = error ? `choices-${name}-error` : undefined;
+  return (
+    <fieldset
+      className="mt-5"
+      aria-describedby={[hintId, errorId].filter(Boolean).join(' ') || undefined}
+    >
+      <legend className="text-ink-2 mb-1.5 text-[15px] font-medium">{legend}</legend>
+      <input type="hidden" name={`${name}_present`} value="1" />
+      <div className="flex flex-wrap gap-x-5 gap-y-1">
+        {options.map((o) => {
+          const id = `choice-${name}-${o.value}`;
+          return (
+            <span key={o.value} className="inline-flex min-h-11 items-center gap-2">
+              <input
+                id={id}
+                type="checkbox"
+                name={`${name}_${o.value}`}
+                defaultChecked={checked.has(o.value)}
+                className="accent-ink h-5 w-5 shrink-0"
+              />
+              <label htmlFor={id} className="text-ink">
+                {o.label}
+              </label>
+            </span>
+          );
+        })}
+      </div>
+      {hint ? (
+        <p id={hintId} className="text-muted mt-1 text-[14px]">
+          {hint}
+        </p>
+      ) : null}
+      {error ? (
+        <p id={errorId} className="text-ink mt-1.5 flex items-baseline gap-2 text-[15px]">
+          <span
+            aria-hidden="true"
+            className="bg-accent inline-block h-2 w-2 shrink-0 rounded-full"
+          />
+          {error}
+        </p>
+      ) : null}
+    </fieldset>
   );
 }

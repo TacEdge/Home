@@ -4,10 +4,12 @@ import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotFoundError } from '@/domain/common/errors';
 import type { ContextCategory } from '@/domain/context/schema';
 import { listContext } from '@/domain/context/service';
-import { ageOn, nextBirthday } from '@/domain/engines/profile';
+import { forPerson } from '@/domain/engines/agenda';
+import { ageOn } from '@/domain/engines/profile';
 import { listNotes } from '@/domain/notes/service';
 import { getPerson } from '@/domain/people/service';
-import { isoDateInZone, longDate } from '@/lib/dates';
+import { AgendaDays } from '@/app/_agenda/agenda-list';
+import { loadAgenda, todayInHomeZone } from '@/app/_agenda/load';
 import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { ItemRow, List } from '@/ui/list';
@@ -21,7 +23,8 @@ import { ageLabel, CONTEXT_CATEGORY_LABEL, roleLabel } from '../copy';
 // context, never a development record. Age and next birthday come from the
 // profile engine; things to know are normal context about them (sensitive
 // never appears here: the default read leaves it out); coming up is the
-// next birthday until Package 5 brings events. Archived people are shown,
+// what is coming up for them in the next 30 days (the agenda engine, as
+// Forward uses it). Archived people are shown,
 // with Restore.
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
@@ -34,9 +37,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     listContext(actor, { subject: { type: 'person', id: person.id } }),
     listNotes(actor, { subject: { type: 'person', id: person.id } }),
   ]);
-  const today = isoDateInZone(new Date(), env.HOME_TIMEZONE);
+  const today = todayInHomeZone();
   const age = ageOn(person.dateOfBirth, today);
-  const birthday = nextBirthday(person.dateOfBirth, today);
+  // Coming up: the same agenda engine as Forward, for this person (§3.4).
+  const coming = forPerson((await loadAgenda(actor, today, 30)).days, person.id);
+  const loadedPeople = new Map([[person.id, person]]);
   const you = person.userId === actor.userId;
   const linked = person.userId !== null;
   const archived = person.archivedAt !== null;
@@ -85,15 +90,15 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       )}
 
       <Label>Coming up</Label>
-      {birthday ? (
-        <List>
-          <ItemRow
-            time={longDate(birthday.date, 'short')}
-            title={birthday.date === today ? 'Birthday today' : `Turns ${birthday.age}`}
-          />
-        </List>
+      {coming.length === 0 ? (
+        <Quiet>Nothing in the next 30 days.</Quiet>
       ) : (
-        <Quiet>Nothing in the next while.</Quiet>
+        <AgendaDays
+          days={coming}
+          today={today}
+          timeZone={env.HOME_TIMEZONE}
+          people={loadedPeople}
+        />
       )}
 
       <Label>Notes</Label>

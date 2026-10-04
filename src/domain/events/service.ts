@@ -9,6 +9,7 @@ import { assertCanWrite } from '../common/guards';
 import { records } from '../common/records';
 import { assertNotReferencedByHousehold, checkReferences } from '../common/references';
 import { auditedWrite, provenanceOf, type Deps } from '../common/write';
+import { assertFamilyWritesOpen } from '../common/guards';
 import {
   createEventInput,
   eventPersonInput,
@@ -260,4 +261,59 @@ export async function listEventPeople(
     .where(and(eq(eventPerson.eventId, ev.id), visibleTo(actor, person)))
     .orderBy(asc(eventPerson.role), asc(eventPerson.createdAt), asc(eventPerson.id));
   return rows.map((r) => r.annotation);
+}
+
+export type EventPersonChoice = { personId: string; role: 'attending' | 'responsible' };
+
+/**
+ * Makes an event's annotations exactly this set, in one transaction (M3
+ * contract §3.6): missing ones are set, extra ones removed, each through
+ * setEventPerson / removeEventPerson so every rule and audit row is as
+ * usual. Only annotations for people the actor can see are compared, so
+ * another adult's private annotation (invisible here) is left alone.
+ */
+export async function setEventPeople(
+  actor: UserActor,
+  eventId: string,
+  people: readonly EventPersonChoice[],
+  deps: Deps = {},
+): Promise<EventPerson[]> {
+  assertCanWrite(actor);
+  assertFamilyWritesOpen();
+  const wanted = new Map(people.map((p) => [`${p.personId}:${p.role}`, p]));
+  const db = deps.db ?? getDb();
+  return db.transaction(async (tx) => {
+    const d = { ...deps, db: tx };
+    const current = await listEventPeople(actor, eventId, {}, d);
+    for (const c of current) {
+      const key = `${c.personId}:${c.role}`;
+      if (!wanted.has(key)) {
+        await removeEventPerson(
+          actor,
+          { eventId, personId: c.personId, role: c.role as EventPersonChoice['role'] },
+          d,
+        );
+      }
+      wanted.delete(key);
+    }
+    for (const p of wanted.values()) await setEventPerson(actor, { eventId, ...p }, d);
+    return listEventPeople(actor, eventId, {}, d);
+  });
+}
+
+/** Creates an event and says who is involved, in one transaction: a refused annotation leaves no event. */
+export async function createEventWithPeople(
+  actor: UserActor,
+  input: CreateEventInput,
+  people: readonly EventPersonChoice[],
+  deps: Deps = {},
+): Promise<Event> {
+  assertCanWrite(actor);
+  const db = deps.db ?? getDb();
+  return db.transaction(async (tx) => {
+    const d = { ...deps, db: tx };
+    const created = await createEvent(actor, input, d);
+    if (people.length > 0) await setEventPeople(actor, created.id, people, d);
+    return created;
+  });
 }
