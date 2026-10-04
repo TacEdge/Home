@@ -163,8 +163,15 @@ export async function updatePerson(
         throw new NotPermittedError('linked_person');
       }
     }
-    const row = await update(tx, actor, current.id, 'exclude', data);
-    return { result: row, audit: audit('update', row, { fields }) };
+    // Only what actually changes is written and audited (a form sends every
+    // field it shows). A patch that changes nothing is a true no-op.
+    const changes = Object.fromEntries(
+      Object.entries(data).filter(([k, v]) => v !== current[k as keyof Person]),
+    ) as UpdatePersonInput;
+    const changed = Object.keys(changes).sort();
+    if (changed.length === 0) return { result: current, audit: null };
+    const row = await update(tx, actor, current.id, 'exclude', changes);
+    return { result: row, audit: audit('update', row, { fields: changed }) };
   });
 }
 
@@ -267,5 +274,25 @@ export async function unlinkSelf(actor: UserActor, deps: Deps = {}): Promise<Per
     if (!current) throw new NotFoundError(SUBJECT);
     const row = await update(tx, actor, current.id, 'include', { userId: null }, mine);
     return { result: row, audit: audit('unlink_self', row) };
+  });
+}
+
+/**
+ * "Add me" (M3 contract §3.4): creates a household parent with the given
+ * name and links the acting user to it, in one transaction, so a refused
+ * link (the user is already linked, or loses a race) leaves no stray
+ * person behind. Everything else is createPerson and linkSelf unchanged.
+ */
+export async function createAndLinkSelf(
+  actor: UserActor,
+  input: { name: string },
+  deps: Deps = {},
+): Promise<Person> {
+  assertCanWrite(actor);
+  const data = createPersonInput.parse({ name: input.name, role: 'parent' });
+  const db = deps.db ?? getDb();
+  return db.transaction(async (tx) => {
+    const created = await createPerson(actor, data, { ...deps, db: tx });
+    return linkSelf(actor, created.id, { ...deps, db: tx });
   });
 }

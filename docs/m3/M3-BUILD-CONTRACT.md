@@ -127,7 +127,7 @@ The next 30 days from today in the home time zone, grouped by day, empty days om
 ### 3.4 People and linking
 
 - List: household people first, then others; colour dot and name; "you" beside the actor's own linked person.
-- Profile: name, age and next birthday (`profile`), relationship, stage note as written, *Things to know* (normal context about the person), *Coming up* (agenda for events the person attends or is responsible for, next 30 days), notes. Never sensitive context.
+- Profile: name, age and next birthday (`profile`), relationship, stage note as written, *Things to know* (normal context about the person), *Coming up* (agenda for events the person attends or is responsible for, next 30 days), notes. Never sensitive context. In Package 3 *Coming up* holds the next birthday only (events join it in Package 5) and notes are read-only (editing on the subject arrives in Package 6); ADR 0006 §30.
 - Create, edit, archive, restore. Rules the services enforce (`linked_person`, `referenced_by_household`) are explained in words on the form, not merely disabled.
 - **Linking** (`linkSelf`/`unlinkSelf`, ADR 0005 §19, §22): `/settings/you` lists unlinked, household-visible parents with "This is me". **Add me** creates a parent with the typed name and links it in one transaction. A person already linked to someone else is never offered; a race reads "Someone's already linked to that person." **Not me** unlinks after a confirmation. Nobody can link or unlink another adult. In Production linking is a domain write, so it waits for the gate.
 

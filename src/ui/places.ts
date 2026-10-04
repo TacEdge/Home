@@ -16,7 +16,7 @@ export type Place = {
 export const PLACES: readonly Place[] = [
   { id: 'today', name: 'Today', href: '/today', primary: true, ready: true },
   { id: 'forward', name: 'Forward', href: '/forward', primary: true, ready: true },
-  { id: 'people', name: 'People', href: '/people', primary: false, ready: false }, // Package 3
+  { id: 'people', name: 'People', href: '/people', primary: false, ready: true },
   { id: 'home', name: 'Home', href: '/home', primary: false, ready: false }, // Package 6
   { id: 'tasks', name: 'To do', href: '/tasks', primary: false, ready: false }, // Package 6
   { id: 'sort', name: 'To sort', href: '/sort', primary: false, ready: false }, // Package 7

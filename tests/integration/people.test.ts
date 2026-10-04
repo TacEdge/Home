@@ -150,6 +150,41 @@ describe('updatePerson', () => {
     expect(JSON.stringify(a)).not.toContain('starting school');
   });
 
+  it('writes and audits only the fields that change; an unchanged patch is a no-op', async () => {
+    const nana = await createPerson(
+      h.sam,
+      { ...FAMILY_PEOPLE.nanaJo, name: unique('Nana Audit') },
+      deps,
+    );
+    // A form sends every field it shows; only the stage note differs.
+    const updated = await updatePerson(
+      h.alex,
+      nana.id,
+      {
+        name: nana.name,
+        shortName: nana.shortName,
+        relationship: nana.relationship,
+        inHousehold: nana.inHousehold,
+        dateOfBirth: nana.dateOfBirth,
+        stageNote: 'visiting at Christmas',
+        colour: nana.colour as (typeof FAMILY_PEOPLE.sam)['colour'] | null,
+      },
+      deps,
+    );
+    expect(updated.stageNote).toBe('visiting at Christmas');
+    const rows = await auditFor(nana.id);
+    expect(rows.at(-1)).toMatchObject({ event: 'person.update', meta: { fields: ['stageNote'] } });
+    // Sending the same values again changes nothing and audits nothing.
+    const again = await updatePerson(
+      h.alex,
+      nana.id,
+      { name: nana.name, stageNote: 'visiting at Christmas' },
+      deps,
+    );
+    expect(again.updatedAt.getTime()).toBe(updated.updatedAt.getTime());
+    expect(await auditFor(nana.id)).toHaveLength(rows.length);
+  });
+
   it("cannot touch the other adult's private record", async () => {
     const mine = await createPerson(h.sam, privateOf('sam'), deps);
     await expectNotFound(updatePerson(h.alex, mine.id, { name: 'Taken' }, deps));

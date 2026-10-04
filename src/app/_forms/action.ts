@@ -28,12 +28,9 @@ import {
 // wrong becomes calm copy here: field errors by name, one message for the
 // form. Navigation (redirect, notFound) passes straight through.
 
-export type FormState =
-  | { status: 'idle' }
-  | { status: 'ok'; message?: string }
-  | { status: 'error'; message: string; fields: Record<string, string> };
+import type { FormState } from './state';
 
-export const idle: FormState = { status: 'idle' };
+export { idle, type FormState } from './state';
 
 /** Turns any error from a write into what the form shows. Pure; never echoes input. */
 export function toFormState(e: unknown): FormState & { status: 'error' } {
@@ -51,10 +48,25 @@ export function toFormState(e: unknown): FormState & { status: 'error' } {
   return { status: 'error', message: UNEXPECTED_COPY, fields: {} };
 }
 
-/** Runs a write as the signed-in person and reports the outcome as form state. */
+/**
+ * The submitted text fields, to hand back to the form on an error. Next's
+ * own `$ACTION…` fields and files are left out. Returned to the same browser
+ * only: never logged, audited or put in an error message.
+ */
+export function submittedValues(form: FormData): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of form.entries())
+    if (typeof v === 'string' && !k.startsWith('$ACTION')) out[k] = v;
+  return out;
+}
+
+/**
+ * Runs a write as the signed-in person and reports the outcome as form state.
+ * Pass `form` so a refused save hands the person's input back to the form.
+ */
 export async function formAction(
   run: (actor: UserActor) => Promise<void | { message?: string }>,
-  deps: { requireActor?: () => Promise<UserActor> } = {},
+  deps: { requireActor?: () => Promise<UserActor>; form?: FormData } = {},
 ): Promise<FormState> {
   try {
     const actor = await (deps.requireActor ?? requireActor)();
@@ -67,6 +79,6 @@ export async function formAction(
     // Only the error's class name is logged: never its message, input or actor.
     if (state.message === UNEXPECTED_COPY)
       log.error('form_action_failed', { error: e instanceof Error ? e.name : typeof e });
-    return state;
+    return deps.form ? { ...state, values: submittedValues(deps.form) } : state;
   }
 }

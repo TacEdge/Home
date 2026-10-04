@@ -70,3 +70,20 @@ export function isoDateInZone(instant: Date, timeZone: string): IsoDate {
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
+
+/**
+ * A calendar date in words, NZ style: "Tuesday 20 October" or, short,
+ * "20 Oct". The date is a date, not an instant, so it is formatted in UTC.
+ */
+export function longDate(date: IsoDate, style: 'long' | 'short' = 'long'): string {
+  const d = parseIsoDate(date);
+  const instant = new Date(Date.UTC(d.year, d.month - 1, d.day));
+  return new Intl.DateTimeFormat('en-NZ', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: style === 'long' ? 'long' : 'short',
+    ...(style === 'long' ? { weekday: 'long' } : {}),
+  })
+    .format(instant)
+    .replace(',', '');
+}

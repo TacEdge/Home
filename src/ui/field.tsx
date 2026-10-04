@@ -90,9 +90,18 @@ export function Field(props: FieldProps) {
 }
 
 /** Less-used fields, folded away until asked for (M3 contract §3.5). */
-export function More({ children, label = 'More' }: { children: React.ReactNode; label?: string }) {
+export function More({
+  children,
+  label = 'More',
+  open,
+}: {
+  children: React.ReactNode;
+  label?: string;
+  /** Start unfolded, e.g. when a field inside needs another look. */
+  open?: boolean;
+}) {
   return (
-    <details className="group mt-6">
+    <details className="group mt-6" open={open || undefined}>
       <summary className="text-ink-2 inline-flex min-h-11 cursor-pointer items-center gap-2 underline-offset-4 hover:underline">
         {label}
       </summary>
