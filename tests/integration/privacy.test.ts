@@ -453,6 +453,17 @@ function writeCalls(own: Adult): Record<string, Call> {
       events.setEventPerson(a, { eventId: c.event, personId: c.person, role: 'responsible' }, d),
     'events.removeEventPerson': (a) =>
       events.removeEventPerson(a, { eventId: c.event, personId: c.person, role: 'attending' }, d),
+    'events.editEventWithPeople': (a) =>
+      events.editEventWithPeople(
+        a,
+        c.event,
+        { title: 'x' },
+        [{ personId: c.person, role: 'attending' }],
+        d,
+      ),
+    'events.skipEventOccurrence': (a) => events.skipEventOccurrence(a, c.event, '2026-10-14', d),
+    'events.putBackEventOccurrence': (a) =>
+      events.putBackEventOccurrence(a, c.event, '2026-10-14', d),
     'events.setEventPeople': (a) =>
       events.setEventPeople(a, c.event, [{ personId: c.person, role: 'attending' }], d),
     'events.createEventWithPeople': (a) =>

@@ -179,3 +179,9 @@ export function instantFromWallClock(wall: WallClock, timeZone: string): Date {
   // offset lands just after the gap, shifted forward by its length.
   return new Date(matches[0] ?? target - before);
 }
+
+/** The wall-clock time of an instant in a zone, as "15:30". */
+export function clockOf(instant: Date, timeZone: string): string {
+  const w = wallClockOf(instant, timeZone);
+  return `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
+}

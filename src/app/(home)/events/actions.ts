@@ -3,14 +3,14 @@
 import { redirect } from 'next/navigation';
 import { formAction, type FormState } from '@/app/_forms/action';
 import { idOf, requiredTextOf } from '@/app/_forms/read';
-import { skipOccurrence } from '@/domain/engines/recurrence';
 import {
   archiveEvent,
   createEventWithPeople,
+  editEventWithPeople,
   getEvent,
+  putBackEventOccurrence,
   restoreEvent,
-  setEventPeople,
-  updateEvent,
+  skipEventOccurrence,
 } from '@/domain/events/service';
 import type { CreateEventInput, UpdateEventInput } from '@/domain/events/schema';
 import { listPeople } from '@/domain/people/service';
@@ -20,7 +20,8 @@ import { readEventForm } from './event-form-data';
 // Event server actions (M3 contract §3.6, §4.1). The actor comes from the
 // session inside formAction; the people a form may name are the people the
 // actor can see, read here rather than trusted from the form; the services
-// validate and enforce every rule. Edits apply to the whole series.
+// validate and enforce every rule. Edits apply to the whole series, and an
+// edit's fields and people are one change (ADR 0006 §40).
 
 export async function createEventAction(_: FormState, form: FormData): Promise<FormState> {
   return formAction(
@@ -50,8 +51,7 @@ export async function updateEventAction(
         peopleIds: people.map((p) => p.id),
         current,
       });
-      await updateEvent(actor, id, read.input as UpdateEventInput);
-      await setEventPeople(actor, id, read.people);
+      await editEventWithPeople(actor, id, read.input as UpdateEventInput, read.people);
       redirect(`/events/${id}`);
     },
     { form },
@@ -72,26 +72,20 @@ export async function restoreEventAction(_: FormState, form: FormData): Promise<
   });
 }
 
-/** "Skip this one": one more exdate, by the occurrence's own date (ADR 0006 §37). */
+/** "Skip this one" (ADR 0006 §37, §42): the service checks the date against the rule. */
 export async function skipOccurrenceAction(_: FormState, form: FormData): Promise<FormState> {
   return formAction(async (actor) => {
     const id = idOf(form);
-    const current = await getEvent(actor, id);
-    await updateEvent(actor, id, {
-      exdates: skipOccurrence(current.exdates, requiredTextOf(form, 'date').trim()),
-    });
+    await skipEventOccurrence(actor, id, requiredTextOf(form, 'date').trim());
     redirect(`/events/${id}`);
   });
 }
 
-/** Undoes a skip: the date is removed from the exdates; nothing else changes. */
+/** Undoes a skip: the service checks the date was skipped. */
 export async function putBackOccurrenceAction(_: FormState, form: FormData): Promise<FormState> {
   return formAction(async (actor) => {
     const id = idOf(form);
-    const date = requiredTextOf(form, 'date').trim();
-    const current = await getEvent(actor, id);
-    const remaining = (current.exdates ?? []).filter((x) => x !== date);
-    await updateEvent(actor, id, { exdates: remaining.length ? remaining : null });
+    await putBackEventOccurrence(actor, id, requiredTextOf(form, 'date').trim());
     redirect(`/events/${id}`);
   });
 }

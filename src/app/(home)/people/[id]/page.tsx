@@ -40,8 +40,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const today = todayInHomeZone();
   const age = ageOn(person.dateOfBirth, today);
   // Coming up: the same agenda engine as Forward, for this person (§3.4).
-  const coming = forPerson((await loadAgenda(actor, today, 30)).days, person.id);
-  const loadedPeople = new Map([[person.id, person]]);
+  const loaded = await loadAgenda(actor, today, 30);
+  const coming = forPerson(loaded.days, person.id);
   const you = person.userId === actor.userId;
   const linked = person.userId !== null;
   const archived = person.archivedAt !== null;
@@ -97,7 +97,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           days={coming}
           today={today}
           timeZone={env.HOME_TIMEZONE}
-          people={loadedPeople}
+          people={loaded.people}
         />
       )}
 

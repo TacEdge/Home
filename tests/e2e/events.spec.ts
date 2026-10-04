@@ -196,8 +196,37 @@ test("the other adult's private event reads as not found; a person's Coming up u
   );
   await page.goto(`/people/${milo}`);
   await expect(page.locator('section[aria-labelledby^="day-"]').first()).toBeVisible();
-  await expect(page.getByRole('link', { name: /Swimming/ }).first()).toBeVisible();
+  const swim = page.getByRole('link', { name: /Swimming/ }).first();
+  await expect(swim).toBeVisible();
+  await expect(swim).toContainText('Sam'); // the same people as Forward shows
   expect(await page.textContent('main')).not.toContain('Football'); // Isla's, not Milo's
+});
+
+test('a crafted skip of a one-off event is refused, calmly', async ({ page }) => {
+  await signInAsFixtureAdult(page, 'alex');
+  const swim = await eventIdNamed('Swimming');
+  const nana = await eventIdNamed("Nana Jo's birthday");
+  // Tamper after hydration (the server page is the same; React must not reset the values).
+  await page.goto(`/events/${swim}`, { waitUntil: 'networkidle' });
+  await page.evaluate((id) => {
+    const f = document.querySelector('button[aria-label^="Skip "]')!.closest('form')!;
+    (f.querySelector('input[name=id]') as HTMLInputElement).value = id;
+    (f.querySelector('input[name=date]') as HTMLInputElement).value = '2026-10-20';
+  }, nana);
+  await page.locator('button[aria-label^="Skip "]').first().click();
+  await expect(page.getByText('This happens once, so there’s nothing to skip.')).toBeVisible();
+  await page.goto('/forward');
+  await expect(
+    page.getByRole('link', { name: /Nana Jo’s birthday|Nana Jo's birthday/ }).first(),
+  ).toBeVisible();
+  // And a date the rule does not reach.
+  await page.goto(`/events/${swim}`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => {
+    const f = document.querySelector('button[aria-label^="Skip "]')!.closest('form')!;
+    (f.querySelector('input[name=date]') as HTMLInputElement).value = '2026-10-22';
+  });
+  await page.locator('button[aria-label^="Skip "]').first().click();
+  await expect(page.getByText('That isn’t one of the times this happens.')).toBeVisible();
 });
 
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {

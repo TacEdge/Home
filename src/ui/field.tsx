@@ -195,6 +195,7 @@ export function Choices({
                 type="checkbox"
                 name={`${name}_${o.value}`}
                 defaultChecked={checked.has(o.value)}
+                aria-invalid={error ? true : undefined}
                 className="accent-ink h-5 w-5 shrink-0"
               />
               <label htmlFor={id} className="text-ink">

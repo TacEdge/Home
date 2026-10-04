@@ -29,6 +29,7 @@ import {
 // wrong becomes calm copy here: field errors by name, one message for the
 // form. Navigation (redirect, notFound) passes straight through.
 
+import { RecurrenceError } from '@/domain/engines/recurrence';
 import type { FormState } from './state';
 
 export { idle, type FormState } from './state';
@@ -43,6 +44,7 @@ export function toFormState(e: unknown): FormState & { status: 'error' } {
     }
     return { status: 'error', message: INVALID_COPY, fields };
   }
+  if (e instanceof RecurrenceError) return { status: 'error', message: INVALID_COPY, fields: {} };
   if (e instanceof FormFieldError)
     return { status: 'error', message: INVALID_COPY, fields: e.fields };
   if (e instanceof NotFoundError) return { status: 'error', message: NOT_FOUND_COPY, fields: {} };

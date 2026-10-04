@@ -1,5 +1,6 @@
 import 'server-only';
 import { agenda, type AgendaDay, type AgendaEventInput } from '@/domain/engines/agenda';
+import { recurringOf } from '@/domain/events/occurrences';
 import { listEventPeople, listEvents } from '@/domain/events/service';
 import { listPeople, type Person } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
@@ -43,18 +44,9 @@ export async function loadAgenda(
   ]);
   const withPeople: AgendaEventInput[] = await Promise.all(
     events.map(async (e) => ({
-      ...(e.allDay
-        ? { allDay: true as const, startDate: e.startDate!, endDate: e.endDate! }
-        : {
-            allDay: false as const,
-            startsAt: e.startsAt!,
-            endsAt: e.endsAt!,
-            timeZone: e.timeZone!,
-          }),
+      ...recurringOf(e),
       id: e.id,
       title: e.title,
-      rrule: e.rrule,
-      exdates: e.exdates,
       people: (await listEventPeople(actor, e.id)).map((a) => ({
         personId: a.personId,
         role: a.role as 'attending' | 'responsible',

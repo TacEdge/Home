@@ -1,14 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { clock } from '@/app/_agenda/agenda-list';
 import { todayInHomeZone } from '@/app/_agenda/load';
 import { ActionForm } from '@/app/_forms/action-form';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotFoundError } from '@/domain/common/errors';
-import { expandEvent, readRRule, type EventStart } from '@/domain/engines/recurrence';
+import { expandEvent, readRRule, startDateOf } from '@/domain/engines/recurrence';
+import { recurringOf, startOf, upcomingSkips } from '@/domain/events/occurrences';
 import { getEvent, listEventPeople } from '@/domain/events/service';
 import { listPeople } from '@/domain/people/service';
-import { addDays, longDate } from '@/lib/dates';
+import { addDays, clockOf as clock, longDate } from '@/lib/dates';
 import { requireActor } from '@/trust/session';
 import { Button } from '@/ui/button';
 import { ItemRow, List } from '@/ui/list';
@@ -28,7 +28,7 @@ const UPCOMING_DAYS = 56;
 const UPCOMING_MAX = 6;
 
 // An event (M3 contract §3.6): when, how it repeats, who, where; the next
-// few times it happens with "Skip this one"; skipped dates with "Put back";
+// few times it happens with "Skip this one"; upcoming skipped dates with "Put back";
 // Edit, Archive and Restore. A synced event is read-only, and says so.
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
@@ -47,39 +47,22 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       .filter((a) => a.role === role)
       .map((a) => byId.get(a.personId))
       .filter((p): p is NonNullable<typeof p> => Boolean(p));
-  const start: EventStart = event.allDay
-    ? { allDay: true, startDate: event.startDate! }
-    : { allDay: false, startsAt: event.startsAt!, timeZone: event.timeZone! };
-  const startDate = event.allDay ? event.startDate! : longDateKey(event.startsAt!, event.timeZone!);
+  const start = startOf(event);
   const recurrence = readRRule(event.rrule, start);
-  const repeats = repeatLabel(recurrence, startDate);
+  const repeats = repeatLabel(recurrence, startDateOf(start));
   const archived = event.archivedAt !== null;
   const synced = event.source !== 'manual';
   const editable = !archived && !synced;
   const today = todayInHomeZone();
   const upcoming = event.rrule
-    ? expandEvent(
-        event.allDay
-          ? {
-              allDay: true,
-              startDate: event.startDate!,
-              endDate: event.endDate!,
-              rrule: event.rrule,
-              exdates: event.exdates,
-            }
-          : {
-              allDay: false,
-              startsAt: event.startsAt!,
-              endsAt: event.endsAt!,
-              timeZone: event.timeZone!,
-              rrule: event.rrule,
-              exdates: event.exdates,
-            },
-        today,
-        addDays(today, UPCOMING_DAYS - 1),
-      ).slice(0, UPCOMING_MAX)
+    ? expandEvent(recurringOf(event), today, addDays(today, UPCOMING_DAYS - 1)).slice(
+        0,
+        UPCOMING_MAX,
+      )
     : [];
-  const skipped = (event.exdates ?? []).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort();
+  // Skipped dates still ahead that the rule would put it on: a past skip,
+  // or one the rule no longer reaches, is not something to put back.
+  const skipped = upcomingSkips(event, today);
   const going = names('attending');
   const responsible = names('responsible');
 
@@ -235,15 +218,4 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       )}
     </Page>
   );
-}
-
-function longDateKey(d: Date, tz: string): string {
-  const s = new Intl.DateTimeFormat('en-NZ', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(d);
-  const g = (t: string) => s.find((p) => p.type === t)?.value ?? '';
-  return `${g('year')}-${g('month')}-${g('day')}`;
 }

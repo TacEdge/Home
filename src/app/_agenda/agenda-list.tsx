@@ -1,6 +1,6 @@
 import type { AgendaDay, AgendaItem } from '@/domain/engines/agenda';
 import type { Person } from '@/domain/people/service';
-import { addDays, longDate, wallClockOf, type IsoDate } from '@/lib/dates';
+import { addDays, clockOf as clock, longDate, type IsoDate } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { Label } from '@/ui/page';
 import type { PersonColour } from '@/ui/person-dot';
@@ -15,11 +15,6 @@ export function dayLabel(date: IsoDate, today: IsoDate): string {
   if (date === today) return `Today · ${name}`;
   if (date === addDays(today, 1)) return `Tomorrow · ${name}`;
   return name;
-}
-
-export function clock(instant: Date, timeZone: string): string {
-  const w = wallClockOf(instant, timeZone);
-  return `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
 }
 
 function who(item: AgendaItem, people: Map<string, Person>) {

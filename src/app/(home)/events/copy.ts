@@ -1,6 +1,12 @@
 import type { ReadRecurrence } from '@/domain/engines/recurrence';
 import type { Event } from '@/domain/events/service';
-import { addDays, longDate, wallClockOf, type IsoDate } from '@/lib/dates';
+import {
+  addDays,
+  clockOf as clock,
+  isoDateInZone as dateIn,
+  longDate,
+  type IsoDate,
+} from '@/lib/dates';
 
 // Words for events: kinds, when, and how they repeat.
 
@@ -27,11 +33,6 @@ export const WEEKDAY_LABEL = [
 ] as const;
 export const WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
-const clock = (d: Date, tz: string) => {
-  const w = wallClockOf(d, tz);
-  return `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
-};
-
 /** "Wednesday 14 October · 15:30–16:15", or the date range for all-day events. */
 export function whenLabel(e: Event): string {
   if (e.allDay) {
@@ -47,11 +48,6 @@ export function whenLabel(e: Event): string {
   return sameDay
     ? `${startDay} · ${clock(e.startsAt!, tz)}–${clock(e.endsAt!, tz)}`
     : `${startDay} ${clock(e.startsAt!, tz)} to ${longDate(endDay)} ${clock(e.endsAt!, tz)}`;
-}
-
-function dateIn(d: Date, tz: string): IsoDate {
-  const w = wallClockOf(d, tz);
-  return `${w.year}-${String(w.month).padStart(2, '0')}-${String(w.day).padStart(2, '0')}`;
 }
 
 const list = (names: string[]) =>

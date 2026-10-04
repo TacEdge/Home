@@ -1,10 +1,14 @@
+import { defaultWeekdays } from '@/domain/engines/recurrence';
+import { startOf } from '@/domain/events/occurrences';
 import type { Event, EventPerson } from '@/domain/events/service';
 import { addDays, wallClockOf, type IsoDate } from '@/lib/dates';
 import type { EventFormDefaults } from './event-form';
 import { recurrenceFields } from './event-form-data';
 
 // What the event form shows before anyone types: a new event today at
-// 09:00–10:00, or an existing event as it is stored, in its own zone.
+// 09:00–10:00, or an existing event as it is stored, in its own zone. The
+// weekday controls start on the first date's weekday (the engine's default)
+// until a rule says otherwise.
 
 const hhmm = (w: { hour: number; minute: number }) =>
   `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
@@ -19,7 +23,7 @@ export function newEventDefaults(today: IsoDate): EventFormDefaults {
     endTime: '10:00',
     allDay: false,
     repeat: 'none',
-    weekdays: new Set(),
+    weekdays: new Set(defaultWeekdays({ allDay: true, startDate: today }).map(String)),
     ends: 'never',
     endsOn: '',
     endsAfter: '',
@@ -54,7 +58,7 @@ export function existingEventDefaults(e: Event, annotations: EventPerson[]): Eve
   return {
     ...time,
     repeat: r.repeat,
-    weekdays: r.weekdays,
+    weekdays: r.weekdays.size ? r.weekdays : new Set(defaultWeekdays(startOf(e)).map(String)),
     ends: r.ends,
     endsOn: r.endsOn,
     endsAfter: r.endsAfter,
