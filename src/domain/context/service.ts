@@ -9,10 +9,11 @@ import type { UserActor } from '@/trust/actor';
 import { sensitivityFilter } from '@/trust/visibility';
 import { assessStaleness, type Staleness, type StalenessCategory } from '../engines/staleness';
 import { NotFoundError, NotPermittedError } from '../common/errors';
-import { assertCanWrite } from '../common/guards';
+import { assertCanWrite, assertFamilyWritesOpen } from '../common/guards';
 import { records } from '../common/records';
 import { checkReferences, type Ref } from '../common/references';
 import {
+  auditRead,
   auditedWrite,
   executionOf,
   provenanceOf,
@@ -92,10 +93,11 @@ const readable = (actor: UserActor, opts: ReadOpts): SQL =>
 async function auditSensitiveReads(actor: UserActor, rows: Context[], deps: Deps): Promise<void> {
   const sensitive = rows.filter((r) => r.sensitivity === 'sensitive');
   if (sensitive.length === 0) return;
-  await auditedWrite(actor, deps, async () => ({
-    result: null,
-    audit: sensitive.map((r) => audit('sensitive_read', r)),
-  }));
+  await auditRead(
+    actor,
+    deps,
+    sensitive.map((r) => audit('sensitive_read', r)),
+  );
 }
 
 /** Locks a record for a write. An executing proposal never reaches sensitive context. */
@@ -237,6 +239,9 @@ export async function updateContext(
   refuseSensitiveExecution(deps, data.sensitivity);
   const fields = Object.keys(data).sort();
   if (fields.length === 0) {
+    // A no-op update changes nothing, but it is still a write request: the
+    // real-data gate answers it the same way (ADR 0006 §2).
+    assertFamilyWritesOpen();
     const db = deps.db ?? getDb();
     return db.transaction(async (tx) => structural(await lockFor(tx, actor, id, deps)));
   }

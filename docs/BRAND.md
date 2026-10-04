@@ -88,7 +88,8 @@ Voice, in three pairs:
 
 ## 07. In the product
 
-- The shell header: wordmark (sm) left, the place switch centred, a quiet settings glyph right.
+- The shell header: wordmark (sm) left, the place switch centred, the quiet ⌂ menu right (horizon lines; the quiet places and Settings, ADR 0006 §16).
+- Focus is a 2px ring in Pine (Moon at night), never Sun: it must reach 3:1 on every surface, and Sun means “needs you”.
 - Sign-in: the wordmark (lg) as the page’s `h1`, then the calm copy and one input.
 - The Sun appears only where a person is needed: the “needs you” dot, the Who? chip, “Sort it”. On a quiet day there are none.
 - Kev is a voice, not a face: a spark in the input, a Plum edge on a proposal. No avatar, no bubble colour, no name in a headline.

@@ -37,7 +37,7 @@ If you already had a Docker volume from before M1.1, create the role once: `dock
 | `pnpm typecheck` | TypeScript, strict, including tests and scripts (`tsconfig.test.json`) |
 | `pnpm test` | Unit tests |
 | `pnpm test:integration` | Integration tests against `home_test`: reset and migrated from empty as the owner, then run as `home_app` |
-| `pnpm test:e2e` | Playwright; starts two dev servers on :3333 and :3334, connected as `home_app` |
+| `pnpm test:e2e` | Playwright; resets `home_test`, seeds the synthetic fixture family into it, and starts two dev servers on :3333 and :3334, connected as `home_app`. Screen specs sign in as a fixture adult (`tests/e2e/fixture-adults.ts`) and run the accessibility baseline (`tests/e2e/a11y.ts`) |
 | `pnpm build` / `pnpm start` | Production build and serve (needs a production-valid env: `provider` mail, https URL) |
 | `node scripts/vercel-bundle-check.mjs` | Builds what Vercel would upload (tracked files minus `.vercelignore`) in a temp dir — what the `Vercel bundle build` CI job runs |
 | `node scripts/check-boot-validation.mjs <db url>` | After `pnpm build`: proves a misconfigured server fails at boot |

@@ -95,7 +95,7 @@ test('6. sign-out ends the session server-side', async ({ page }) => {
       async (pool) => (await pool.query('select count(*)::int as n from "session"')).rows[0]?.n,
     );
   const before = await count();
-  await page.goto('/settings/activity');
+  await page.goto('/settings');
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
   await page.goto('/today');

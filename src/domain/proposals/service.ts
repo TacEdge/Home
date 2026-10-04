@@ -8,7 +8,7 @@ import { log } from '@/lib/log';
 import type { UserActor } from '@/trust/actor';
 import { lockForProposal, settleCapture } from '../captures/service';
 import { NotFoundError, NotPermittedError } from '../common/errors';
-import { assertCanWrite } from '../common/guards';
+import { assertCanWrite, assertFamilyWritesOpen } from '../common/guards';
 import { records } from '../common/records';
 import { auditedWrite, issueExecution, type Deps, type DomainAudit } from '../common/write';
 import { execute, failureCode, type ResultRef } from './executor';
@@ -315,6 +315,9 @@ export async function approveMany(
   deps: Deps = {},
 ): Promise<ManyResult[]> {
   assertCanWrite(actor);
+  // Refuse the whole batch while the real-data gate is closed, rather than
+  // reporting each proposal as refused (ADR 0006 §2).
+  assertFamilyWritesOpen();
   const results: ManyResult[] = [];
   for (const id of ids) {
     try {

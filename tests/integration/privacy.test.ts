@@ -12,8 +12,9 @@ import * as people from '@/domain/people/service';
 import * as projects from '@/domain/projects/service';
 import * as proposals from '@/domain/proposals/service';
 import * as tasks from '@/domain/tasks/service';
+import { env } from '@/lib/env';
 import { systemActor, type UserActor } from '@/trust/actor';
-import { listAudit, type AuditRow } from '@/trust/audit';
+import { listAudit, recordAudit, type AuditRow } from '@/trust/audit';
 import { CANARY_MARK } from '../fixtures/family';
 import {
   ARCHIVED_MARK,
@@ -549,5 +550,84 @@ describe('Kev and the system cannot write anywhere in the M2 domain', () => {
       expect(await outcome(call(sys)), name).toBe('not_a_user');
     const after = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
     expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The production real-data gate (ADR 0006 §2, M3 contract §6). With Vercel
+// Production simulated, every exported family-domain write is refused before
+// it writes anything, unless HOME_REAL_DATA is exactly `open`. Auth audit,
+// Activity and audited reads keep working.
+
+describe('the real-data gate in Production', () => {
+  const saved = { VERCEL_ENV: process.env.VERCEL_ENV, HOME_REAL_DATA: process.env.HOME_REAL_DATA };
+  const restore = () => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+  const production = (value: string | undefined) => {
+    // Parse the validated environment first, as it is at boot, so simulating
+    // Vercel here changes only what the gate reads (on every call).
+    void env.HOME_TIMEZONE;
+    process.env.VERCEL_ENV = 'production';
+    if (value === undefined) delete process.env.HOME_REAL_DATA;
+    else process.env.HOME_REAL_DATA = value;
+  };
+  const auditCount = async () =>
+    Number((await admin.db.execute(sql`select count(*)::int as n from audit_log`)).rows[0]?.n);
+
+  it.each([undefined, '', 'OPEN', ' open', 'open ', 'true', '1'])(
+    'HOME_REAL_DATA=%j: every family-domain write is refused and nothing is written',
+    async (value) => {
+      const before = await auditCount();
+      production(value);
+      try {
+        for (const a of ADULTS)
+          for (const [name, call] of Object.entries(writeCalls(a)))
+            expect(await outcome(call(actor(a))), name).toBe('real_data_closed');
+        // The no-op context update is a write request too.
+        expect(
+          await outcome(context.updateContext(actor('sam'), seed.canaries.sam.context, {}, deps)),
+        ).toBe('real_data_closed');
+      } finally {
+        restore();
+      }
+      expect(await auditCount()).toBe(before);
+    },
+  );
+
+  it('auth audit, Activity and audited sensitive reads keep working while it is closed', async () => {
+    production(undefined);
+    try {
+      const sam = actor('sam');
+      const { id } = await recordAudit(sam, { event: 'auth.sign_in' }, { db });
+      const page = await listAudit(sam, { limit: 5 }, { db });
+      expect(page.rows.map((r) => r.id)).toContain(id);
+      const read = await context.getContext(
+        sam,
+        seed.sensitive.household,
+        { includeSensitive: true },
+        deps,
+      );
+      expect(read.id).toBe(seed.sensitive.household);
+    } finally {
+      restore();
+    }
+  });
+
+  it('opens only for the exact value `open`', async () => {
+    production('open');
+    try {
+      const t = await tasks.createTask(
+        actor('alex'),
+        { title: 'gate open', visibility: 'private' },
+        deps,
+      );
+      expect(t.id).toBeTruthy();
+    } finally {
+      restore();
+    }
   });
 });

@@ -23,7 +23,8 @@ export type NotPermittedCode =
   | 'not_home_domain' // V0.1 projects are home projects
   | 'sensitive_context' // sensitive context is read and written only by a person, directly (D15)
   | 'proposal_not_pending' // a decided or expired proposal can never be approved or rejected
-  | 'kev_cannot_author'; // Kev captures only a person's own message, never text it supplies
+  | 'kev_cannot_author' // Kev captures only a person's own message, never text it supplies
+  | 'real_data_closed'; // Production refuses family-domain writes until the real-data gate opens (ADR 0006 §2)
 
 export class NotPermittedError extends Error {
   constructor(public readonly code: NotPermittedCode) {

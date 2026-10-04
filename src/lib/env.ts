@@ -35,6 +35,10 @@ const schema = z.object({
   // Host of the production database (M1.1 contract §1.4, I2). Previews must
   // never point at it; production must point at it when set.
   HOME_PRODUCTION_DB_HOST: z.string().min(1).optional(),
+  // The real-data gate (ADR 0006 §2). Any string is accepted so that a wrong
+  // value can never stop the app booting; only the exact value \`open\` opens
+  // the gate (realDataGateOpen, below).
+  HOME_REAL_DATA: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -168,6 +172,21 @@ export function normaliseDbHost(host: string): string {
   const lower = host.toLowerCase();
   if (!lower.endsWith('.neon.tech')) return lower;
   return lower.replace(/^([^.]+)-pooler\./, '$1.');
+}
+
+/**
+ * The production real-data gate (ADR 0006 §2, M3 contract §6). On a Vercel
+ * Production deployment family-domain writes are allowed only when
+ * HOME_REAL_DATA is exactly `open`: missing, blank, padded, differently cased
+ * or any other value keeps the gate closed. Everywhere else (local, CI,
+ * Preview) the gate does not apply, so synthetic development continues.
+ * Read from the raw environment on every call and never logged.
+ */
+export function realDataGateOpen(
+  source: Record<string, string | undefined> = process.env,
+): boolean {
+  if (source.VERCEL_ENV !== 'production') return true;
+  return source.HOME_REAL_DATA === 'open';
 }
 
 let cached: Env | undefined;

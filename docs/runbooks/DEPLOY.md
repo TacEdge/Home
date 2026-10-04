@@ -53,11 +53,13 @@ Order matters: create `home_app` → migrate (grants apply) → configure Vercel
 | `MAIL_FROM` | `home@auth.<your-domain>` | same |
 | `AUDIT_HASH_SECRET` | `openssl rand -base64 48` | a different random value |
 | `HOME_TIMEZONE` | `Pacific/Auckland` | same |
+| `HOME_REAL_DATA` | **unset** until §E item 11; then exactly `open` | **never set** (the gate applies only to Production) |
 
 Notes:
 - On Vercel, HOME refuses to boot unless `DATABASE_URL` carries exactly one `sslmode=verify-full` (`src/lib/env.ts`). The runtime log's first line, `[home] database tls: sslmode=… (n occurrence(s))`, reports what `pg` parsed from the URL and nothing else from it, so a wrong mode is diagnosed without exposing the credential. `pg` 8 verifies the certificate for `require` too; `verify-full` states it so `pg` 9, which will not, cannot weaken the connection silently.
 - `HOME_PRODUCTION_DB_HOST` is always derived from Production's `DATABASE_URL`, never typed from memory. For this check HOME treats Neon's pooled (`ep-x-pooler.<region>.aws.neon.tech`) and direct (`ep-x.<region>.aws.neon.tech`) names of one endpoint as the same database, so it does not matter which form is in which variable.
 - The migration/admin credential is **never** entered in Vercel. `DATABASE_URL_MIGRATE` exists only as a GitHub secret.
+- `HOME_REAL_DATA` is the real-data gate (ADR 0006 §2). In Production, every family-domain write is refused unless it is exactly `open` (lower case, no spaces); any other value, or none, keeps it closed and never stops the app booting. Sign-in, Activity and audit work either way.
 - No `NEXT_PUBLIC_*` variables exist. `BETTER_AUTH_URL` must be `https` in production (`env.ts` refuses otherwise). `VERCEL_ENV` is set by Vercel itself.
 - The client IP used for rate limiting is read **only** from `x-real-ip`, which Vercel sets to the public address of the client that made the request. Do not put another proxy in front of Vercel without preserving that header; if it is missing, every request shares one small rate-limit budget rather than an unlimited one.
 

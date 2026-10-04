@@ -2,8 +2,7 @@ import { redirect } from 'next/navigation';
 import { env } from '@/lib/env';
 import { listAudit } from '@/trust/audit';
 import { getActor } from '@/trust/session';
-import { Headline, Label, Quiet } from '@/ui/calm';
-import { signOutAction } from '../actions';
+import { Label, Page } from '@/ui/page';
 
 const describe: Record<string, string> = {
   'auth.link_requested': 'Sign-in link requested',
@@ -27,12 +26,14 @@ export default async function ActivityPage() {
 
   return (
     <>
-      <Headline>Activity</Headline>
-      <Quiet>Everything HOME has done, newest first. This record can&rsquo;t be edited.</Quiet>
+      <Page
+        title="Activity"
+        intro="Everything HOME has done, newest first. This record can’t be edited."
+      />
 
       <Label>Recent</Label>
       {entries.length === 0 ? (
-        <Quiet>Nothing yet.</Quiet>
+        <p className="text-ink-2">Nothing yet.</p>
       ) : (
         <ul>
           {entries.map((e) => (
@@ -51,13 +52,6 @@ export default async function ActivityPage() {
           ))}
         </ul>
       )}
-
-      <Label>Account</Label>
-      <form action={signOutAction}>
-        <button type="submit" className="text-accent">
-          Sign out
-        </button>
-      </form>
     </>
   );
 }

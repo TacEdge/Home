@@ -17,7 +17,7 @@ export function NavSwitch({ places }: { places: Place[] }) {
             href={p.href}
             aria-current={on ? 'page' : undefined}
             className={
-              'border-b-2 px-0.5 py-1 text-[16px] ' +
+              'flex min-h-11 items-center border-b-2 px-0.5 text-[16px] ' +
               (on ? 'border-ink text-ink' : 'border-transparent text-muted')
             }
           >
