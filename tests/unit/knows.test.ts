@@ -73,9 +73,12 @@ describe('groupContext', () => {
 });
 
 describe('copy', () => {
-  it('says "still true?" gently, naming the day it was last confirmed, not the day it went stale', () => {
+  it('says "still true?" gently, naming the item’s own dates, not the day it went stale', () => {
     expect(
-      stalenessLine({ possiblyStale: false, reason: null, since: null }, '2026-03-01'),
+      stalenessLine(
+        { possiblyStale: false, reason: null, since: null },
+        { lastConfirmedOn: '2026-03-01', validUntil: null },
+      ),
     ).toBeNull();
     // A routine last confirmed on 4 Sep 2025 is possibly stale from 4 Mar 2026 (6 months).
     const routine = assessStaleness(
@@ -87,13 +90,22 @@ describe('copy', () => {
       reason: 'unconfirmed_for',
       since: '2026-03-04',
     });
-    expect(stalenessLine(routine, '2025-09-04')).toBe('Still true? Not confirmed since 4 Sept.');
+    expect(stalenessLine(routine, { lastConfirmedOn: '2025-09-04', validUntil: null })).toBe(
+      'Still true? Not confirmed since 4 Sept.',
+    );
+    // Meant to hold until 1 Mar: the engine says stale from 2 Mar; the line names 1 Mar.
+    const timeBound = assessStaleness(
+      { category: 'intention', lastConfirmedOn: '2026-02-01', validUntil: '2026-03-01' },
+      '2026-10-04',
+    );
+    expect(timeBound).toEqual({
+      possiblyStale: true,
+      reason: 'past_valid_until',
+      since: '2026-03-02',
+    });
     expect(
-      stalenessLine(
-        { possiblyStale: true, reason: 'past_valid_until', since: '2026-03-02' },
-        '2025-09-04',
-      ),
-    ).toBe('Still true? It was meant to hold until 2 Mar.');
+      stalenessLine(timeBound, { lastConfirmedOn: '2026-02-01', validUntil: '2026-03-01' }),
+    ).toBe('Still true? It was meant to hold until 1 Mar.');
   });
   it('every kind has words; nothing reads as a code', () => {
     for (const c of CONTEXT_CATEGORIES) expect(CATEGORY_LABEL[c]).toMatch(/^[A-Z]/);

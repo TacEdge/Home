@@ -77,7 +77,10 @@ export default async function KnowsPage() {
                   <KnownItem
                     key={i.row.id}
                     item={i.row}
-                    staleLine={stalenessLine(i.staleness, isoDateInZone(i.row.lastConfirmedAt, tz))}
+                    staleLine={stalenessLine(i.staleness, {
+                      lastConfirmedOn: isoDateInZone(i.row.lastConfirmedAt, tz),
+                      validUntil: i.row.validUntil,
+                    })}
                     timeZone={tz}
                   />
                 ))}

@@ -25,14 +25,18 @@ export const categoryLabel = (c: string) => CATEGORY_LABEL[c as ContextCategory]
 /**
  * "Still true? Not confirmed since 4 Sep", or null when it looks current.
  * The engine's `since` is the day it became possibly stale; the line names
- * the day it was last confirmed (`lastConfirmedOn`, in the home zone), or
- * the day it was meant to hold until.
+ * the item's own dates instead: the day it was last confirmed
+ * (`lastConfirmedOn`, in the home zone), or the last day it was meant to
+ * hold (`validUntil`, the day before the engine's `since`).
  */
-export function stalenessLine(s: Staleness, lastConfirmedOn: IsoDate): string | null {
+export function stalenessLine(
+  s: Staleness,
+  item: { lastConfirmedOn: IsoDate; validUntil: IsoDate | null },
+): string | null {
   if (!s.possiblyStale) return null;
-  return s.reason === 'past_valid_until'
-    ? `Still true? It was meant to hold until ${longDate(s.since, 'short')}.`
-    : `Still true? Not confirmed since ${longDate(lastConfirmedOn, 'short')}.`;
+  return s.reason === 'past_valid_until' && item.validUntil
+    ? `Still true? It was meant to hold until ${longDate(item.validUntil, 'short')}.`
+    : `Still true? Not confirmed since ${longDate(item.lastConfirmedOn, 'short')}.`;
 }
 
 export const SENSITIVITY_OPTIONS = [
