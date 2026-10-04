@@ -23,9 +23,12 @@ export function ProjectForm({
   action,
   project,
   submitLabel,
+  initialTitle,
 }: {
   action: FormAction;
   project?: Project;
+  /** A new project's title before anyone types (from a capture's words). */
+  initialTitle?: string;
   submitLabel: string;
 }) {
   const [state, dispatch] = useActionState(action, idle);
@@ -44,7 +47,7 @@ export function ProjectForm({
         name="title"
         label="What"
         required
-        defaultValue={v('title', project?.title)}
+        defaultValue={v('title', project?.title ?? initialTitle)}
         error={errors.title}
       />
       <Field

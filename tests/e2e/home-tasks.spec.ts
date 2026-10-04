@@ -160,7 +160,7 @@ test('To do: open tasks by due date then project, done in one tap with undo, dro
   // Done in one tap, then undo.
   await page.getByRole('button', { name: 'Done: Oil the deck' }).click();
   await expect(page).toHaveURL(/\/tasks\?undo=/);
-  await expect(page.getByRole('status')).toHaveText('Oil the deck: done.');
+  await expect(page.locator('main').getByRole('status')).toHaveText('Oil the deck: done.');
   await expect(
     page
       .getByRole('list')

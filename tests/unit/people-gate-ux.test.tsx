@@ -29,6 +29,7 @@ vi.mock('@/trust/session', () => ({
   }),
 }));
 vi.mock('@/domain/people/service', () => ({ listPeople: async () => people }));
+vi.mock('@/domain/captures/service', () => ({ listCaptures: async () => [] }));
 vi.mock('@/app/(home)/settings/you/actions', () => ({
   addMeAction: async () => ({ status: 'idle' }),
   linkSelfAction: async () => ({ status: 'idle' }),

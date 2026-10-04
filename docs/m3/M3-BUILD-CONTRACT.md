@@ -155,7 +155,7 @@ Notes always live on a subject: a project, person or event. Create and edit inli
   - **Make another**: a capture may organise into several records.
   - **Not needed**: `dismissCapture`, with Undo (`undismissCapture`). Dismissed captures appear under Archived.
 - **`organiseCapture`** (new domain function, `src/domain/captures/` or `src/domain/proposals/`): in **one transaction**, the person creates a proposal for the chosen action against their own capture and approves it, and the existing executor runs it. This reuses the tested executor and capture settlement: the record gets `origin_capture_id`, the capture's `organised_into` and status are settled, provenance is `ui` (ADR 0005 §43), and context so created is sourced `capture`. A failed execution returns the stored outcome and the form shows the reason; nothing half-applies. No second organising path is added.
-- No counts beyond "N things to sort", no ageing colours, no reminders.
+- No counts beyond "N things to sort", no ageing colours, no reminders. Package 7's capture bar, To sort pages and `organiseCapture`: ADR 0006 §49–54.
 
 ### 3.9 What Kev knows
 
