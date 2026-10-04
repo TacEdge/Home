@@ -435,6 +435,7 @@ function writeCalls(own: Adult): Record<string, Call> {
     'people.restorePerson': (a) => people.restorePerson(a, c.person, d),
     'people.linkSelf': (a) => people.linkSelf(a, c.person, d),
     'people.unlinkSelf': (a) => people.unlinkSelf(a, d),
+    'people.createAndLinkSelf': (a) => people.createAndLinkSelf(a, { name: 'x' }, d),
     'events.createEvent': (a) =>
       events.createEvent(
         a,

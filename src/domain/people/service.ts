@@ -269,3 +269,23 @@ export async function unlinkSelf(actor: UserActor, deps: Deps = {}): Promise<Per
     return { result: row, audit: audit('unlink_self', row) };
   });
 }
+
+/**
+ * "Add me" (M3 contract §3.4): creates a household parent with the given
+ * name and links the acting user to it, in one transaction, so a refused
+ * link (the user is already linked, or loses a race) leaves no stray
+ * person behind. Everything else is createPerson and linkSelf unchanged.
+ */
+export async function createAndLinkSelf(
+  actor: UserActor,
+  input: { name: string },
+  deps: Deps = {},
+): Promise<Person> {
+  assertCanWrite(actor);
+  const data = createPersonInput.parse({ name: input.name, role: 'parent' });
+  const db = deps.db ?? getDb();
+  return db.transaction(async (tx) => {
+    const created = await createPerson(actor, data, { ...deps, db: tx });
+    return linkSelf(actor, created.id, { ...deps, db: tx });
+  });
+}

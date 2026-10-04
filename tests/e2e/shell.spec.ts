@@ -6,13 +6,22 @@ import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-
 // menu of quiet places, Settings, and the accessibility baseline at every
 // approved viewport. Signed in as a seeded fixture adult.
 
-const SCREENS = ['/today', '/forward', '/settings', '/settings/activity', '/settings/export'];
+const SCREENS = [
+  '/today',
+  '/forward',
+  '/settings',
+  '/settings/activity',
+  '/settings/export',
+  '/people',
+  '/people/new',
+  '/settings/you',
+];
 
 test('the ⌂ menu lists only places that exist, and closes on Escape', async ({ page }) => {
   await signInAsFixtureAdult(page, 'alex');
   await page.getByLabel('Menu', { exact: true }).click();
   const more = page.getByRole('navigation', { name: 'More places' });
-  await expect(more.getByRole('link')).toHaveText(['Settings']);
+  await expect(more.getByRole('link')).toHaveText(['People', 'Settings']);
   await page.keyboard.press('Escape');
   await expect(more).toBeHidden();
   await page.getByLabel('Menu', { exact: true }).click();

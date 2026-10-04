@@ -28,12 +28,9 @@ import {
 // wrong becomes calm copy here: field errors by name, one message for the
 // form. Navigation (redirect, notFound) passes straight through.
 
-export type FormState =
-  | { status: 'idle' }
-  | { status: 'ok'; message?: string }
-  | { status: 'error'; message: string; fields: Record<string, string> };
+import type { FormState } from './state';
 
-export const idle: FormState = { status: 'idle' };
+export { idle, type FormState } from './state';
 
 /** Turns any error from a write into what the form shows. Pure; never echoes input. */
 export function toFormState(e: unknown): FormState & { status: 'error' } {
