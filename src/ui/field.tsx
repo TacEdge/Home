@@ -7,6 +7,8 @@ type Option = { value: string; label: string };
 
 type Common = {
   name: string;
+  /** The control's id when one page holds several forms with the same field names. */
+  id?: string;
   label: string;
   hint?: string;
   error?: string;
@@ -33,7 +35,7 @@ const control =
   'bg-paper-2 border-line text-ink rounded-home-sm min-h-11 w-full border px-4 py-2.5 text-[17px]';
 
 export function Field(props: FieldProps) {
-  const id = `field-${props.name}`;
+  const id = props.id ?? `field-${props.name}`;
   const hintId = props.hint ? `${id}-hint` : undefined;
   const errorId = props.error ? `${id}-error` : undefined;
   const described = [hintId, errorId].filter(Boolean).join(' ') || undefined;

@@ -7,8 +7,7 @@ import type { PersonColour } from '@/ui/person-dot';
 
 // Agenda days as HOME shows them everywhere (Forward, Coming up, later
 // Today): a label per day, then item rows in the engine's order. Rows link
-// to the places that exist; tasks and projects link once Package 6 builds
-// theirs. Nothing here decides what is on a day: the engine did.
+// to the places that exist. Nothing here decides what is on a day: the engine did.
 
 export function dayLabel(date: IsoDate, today: IsoDate): string {
   const name = longDate(date);
@@ -63,9 +62,18 @@ export function AgendaItemRow({
         />
       );
     case 'project_target':
-      return <ItemRow time="All day" title={item.title} detail="Project target date" />;
+      return (
+        <ItemRow
+          href={`/home/projects/${item.projectId}`}
+          time="All day"
+          title={item.title}
+          detail="Project target date"
+        />
+      );
     case 'task_due':
-      return <ItemRow time="All day" title={item.title} detail="Due" />;
+      return (
+        <ItemRow href={`/tasks/${item.taskId}`} time="All day" title={item.title} detail="Due" />
+      );
   }
 }
 

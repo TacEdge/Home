@@ -3,10 +3,12 @@ import { notFound } from 'next/navigation';
 import { todayInHomeZone } from '@/app/_agenda/load';
 import { ActionForm } from '@/app/_forms/action-form';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
+import { NotesSection } from '@/app/_notes/notes-section';
 import { NotFoundError } from '@/domain/common/errors';
 import { expandEvent, readRRule, startDateOf } from '@/domain/engines/recurrence';
 import { recurringOf, startOf, upcomingSkips } from '@/domain/events/occurrences';
 import { getEvent, listEventPeople } from '@/domain/events/service';
+import { listNotes } from '@/domain/notes/service';
 import { listPeople } from '@/domain/people/service';
 import { addDays, clockOf as clock, longDate } from '@/lib/dates';
 import { requireActor } from '@/trust/session';
@@ -37,9 +39,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [annotations, people] = await Promise.all([
+  const [annotations, people, notes] = await Promise.all([
     listEventPeople(actor, event.id, { includeArchived: true }),
     listPeople(actor),
+    listNotes(actor, { subject: { type: 'event', id: event.id }, includeArchived: true }),
   ]);
   const byId = new Map(people.map((p) => [p.id, p]));
   const names = (role: string) =>
@@ -95,7 +98,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       ) : null}
       {event.description ? (
         <>
-          <Label>Notes</Label>
+          <Label>Details</Label>
           <p className="whitespace-pre-wrap">{event.description}</p>
         </>
       ) : null}
@@ -184,6 +187,14 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           ) : null}
         </>
       ) : null}
+
+      <NotesSection
+        notes={notes}
+        subject={{ type: 'event', id: event.id }}
+        subjectVisibility={event.visibility}
+        returnTo={`/events/${event.id}`}
+        readOnly={archived}
+      />
 
       <Label>This event</Label>
       {synced ? (

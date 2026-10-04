@@ -1,7 +1,7 @@
 import { defaultWeekdays } from '@/domain/engines/recurrence';
 import { startOf } from '@/domain/events/occurrences';
 import type { Event, EventPerson } from '@/domain/events/service';
-import { addDays, wallClockOf, type IsoDate } from '@/lib/dates';
+import { addDays, clockOf, isoDateInZone, type IsoDate } from '@/lib/dates';
 import type { EventFormDefaults } from './event-form';
 import { recurrenceFields } from './event-form-data';
 
@@ -9,11 +9,6 @@ import { recurrenceFields } from './event-form-data';
 // 09:00–10:00, or an existing event as it is stored, in its own zone. The
 // weekday controls start on the first date's weekday (the engine's default)
 // until a rule says otherwise.
-
-const hhmm = (w: { hour: number; minute: number }) =>
-  `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
-const dateOf = (w: { year: number; month: number; day: number }) =>
-  `${w.year}-${String(w.month).padStart(2, '0')}-${String(w.day).padStart(2, '0')}`;
 
 export function newEventDefaults(today: IsoDate): EventFormDefaults {
   return {
@@ -45,14 +40,15 @@ export function existingEventDefaults(e: Event, annotations: EventPerson[]): Eve
       endTime: '10:00',
     };
   } else {
-    const s = wallClockOf(e.startsAt!, e.timeZone!);
-    const t = wallClockOf(e.endsAt!, e.timeZone!);
+    const tz = e.timeZone!;
+    const startDate = isoDateInZone(e.startsAt!, tz);
+    const endDate = isoDateInZone(e.endsAt!, tz);
     time = {
       allDay: false,
-      startDate: dateOf(s),
-      startTime: hhmm(s),
-      endDate: dateOf(t) === dateOf(s) ? '' : dateOf(t),
-      endTime: hhmm(t),
+      startDate,
+      startTime: clockOf(e.startsAt!, tz),
+      endDate: endDate === startDate ? '' : endDate,
+      endTime: clockOf(e.endsAt!, tz),
     };
   }
   return {

@@ -229,11 +229,13 @@ describe('editEventWithPeople (ADR 0006 §40)', () => {
       'isla:responsible',
       'milo:attending',
     ]);
-    expect((await audits(e.id)).slice(-3).map((r) => r.event)).toEqual([
-      'event_person.remove',
-      'event.update',
-      'event_person.set',
-    ]);
+    // The three rows share one transaction clock, so compare them as a set.
+    expect(
+      (await audits(e.id))
+        .slice(-3)
+        .map((r) => r.event)
+        .sort(),
+    ).toEqual(['event.update', 'event_person.remove', 'event_person.set']);
     // Alex sees it now, without the private person ever having been visible.
     expect(roles(await listEventPeople(h.alex, e.id, {}, deps))).toEqual([
       'isla:responsible',

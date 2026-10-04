@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { PROJECT_STATUSES } from '@/db/schema/project';
+import { PROJECT_STATUSES, type ProjectStatus } from '@/db/schema/project';
+
+export { PROJECT_STATUSES, type ProjectStatus };
 import { isoDate, longText, requiredText, visibility } from '../common/inputs';
 
 // Project inputs. V0.1 projects are home projects (FAMILY-DATA-MODEL §3), so

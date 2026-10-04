@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { TASK_NEEDS, TASK_STATUSES } from '@/db/schema/task';
+import { TASK_NEEDS, TASK_STATUSES, type TaskNeed, type TaskStatus } from '@/db/schema/task';
+
+export { TASK_NEEDS, TASK_STATUSES, type TaskNeed, type TaskStatus };
 import {
   domain,
   instant,
