@@ -100,3 +100,41 @@ export function More({ children, label = 'More' }: { children: React.ReactNode; 
     </details>
   );
 }
+
+/** A single checkbox with its label beside it; unticked unless said otherwise. */
+export function Checkbox({
+  name,
+  label,
+  hint,
+  defaultChecked,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  defaultChecked?: boolean;
+}) {
+  const id = `field-${name}`;
+  const hintId = hint ? `${id}-hint` : undefined;
+  return (
+    <div className="mt-5">
+      <div className="flex min-h-11 items-center gap-3">
+        <input
+          id={id}
+          name={name}
+          type="checkbox"
+          defaultChecked={defaultChecked}
+          aria-describedby={hintId}
+          className="accent-ink h-5 w-5 shrink-0"
+        />
+        <label htmlFor={id} className="text-ink">
+          {label}
+        </label>
+      </div>
+      {hint ? (
+        <p id={hintId} className="text-muted mt-1 pl-8 text-[14px]">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}

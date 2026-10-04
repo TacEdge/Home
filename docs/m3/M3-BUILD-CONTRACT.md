@@ -229,9 +229,9 @@ Pure, deterministic, under `src/domain/engines/`, importing nothing from `db` or
 ### 7.1 Export (ADR 0006 §6)
 
 - `/settings/export`: **Download my HOME data**, with an unticked **Include sensitive items**.
-- Route handler (POST, `Cache-Control: no-store`, `Content-Disposition: attachment`), server-side actor, built only through the domain services (no second visibility implementation).
+- Route handler `POST /settings/export/download` (`Cache-Control: no-store`, `Content-Disposition: attachment`; ADR 0006 §25), server-side actor, built only through the domain services (no second visibility implementation).
 - Contents, for the actor: every household and own-private person, event (with annotations), project, task, note, context (normal; sensitive only when ticked, via the audited `includeSensitive` read), own captures, own proposals, own conversations and messages, own insight responses, and the actor's own Activity as Activity shows it. Archived records are included and marked. The other adult's private records never appear.
-- Format: JSON `{ "format": "home-export", "version": 1, "exportedAt", "timeZone", "exportedBy": { "personId"? }, "records": { "<type>": [...] } }`, ids preserved, stable order (type, then `created_at`, then id). A Zod schema describes version 1.
+- Format: JSON `{ "format": "home-export", "version": 1, "exportedAt", "timeZone", "exportedBy": { "personId" }, "includesSensitive", "records": { "<type>": [...] } }` (`src/domain/export/spec.ts`, ADR 0006 §22), ids preserved, stable order (type, then `created_at`, then id). A Zod schema describes version 1.
 - Audit: `export.download`, private to the actor, structural meta only (counts per type, whether sensitive was included).
 - **Completeness guard** (unit test): fails if any column of an exported domain table is neither exported nor listed as deliberately excluded, so a future column cannot silently fall out of the export.
 - No import. Restore is Neon point-in-time restore.

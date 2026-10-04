@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import { conversation, kevUsage } from '@/db/schema';
 import type { UserActor } from '@/trust/actor';
@@ -87,4 +87,19 @@ export async function monthToDateCostUsdMicros(
       ),
     );
   return BigInt(r?.total ?? '0');
+}
+
+/**
+ * The actor's own Kev runs, oldest first (for their export). Each run is
+ * private to its user (ADR 0005 §43); the household total is the only
+ * shared figure. Never another person's runs.
+ */
+export async function listOwnUsage(actor: UserActor, deps: Deps = {}) {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  const db = deps.db ?? getDb();
+  return db
+    .select()
+    .from(kevUsage)
+    .where(eq(kevUsage.userId, actor.userId))
+    .orderBy(asc(kevUsage.at), asc(kevUsage.id));
 }

@@ -6,7 +6,7 @@ import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-
 // menu of quiet places, Settings, and the accessibility baseline at every
 // approved viewport. Signed in as a seeded fixture adult.
 
-const SCREENS = ['/today', '/forward', '/settings', '/settings/activity'];
+const SCREENS = ['/today', '/forward', '/settings', '/settings/activity', '/settings/export'];
 
 test('the ⌂ menu lists only places that exist, and closes on Escape', async ({ page }) => {
   await signInAsFixtureAdult(page, 'alex');
