@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import { insightResponse } from '@/db/schema';
 import type { InsightResponseKind } from '@/db/schema/insight-response';
@@ -65,4 +65,15 @@ export async function respondedKeys(
       and(eq(insightResponse.userId, actor.userId), inArray(insightResponse.insightKey, valid)),
     );
   return Object.fromEntries(rows.map((r) => [r.key, r.response as InsightResponseKind]));
+}
+
+/** All of the actor's own responses, oldest first (for their export). Never another person's. */
+export async function listOwnResponses(actor: UserActor, deps: Deps = {}) {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  const db = deps.db ?? getDb();
+  return db
+    .select()
+    .from(insightResponse)
+    .where(eq(insightResponse.userId, actor.userId))
+    .orderBy(asc(insightResponse.respondedAt), asc(insightResponse.id));
 }

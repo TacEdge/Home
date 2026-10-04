@@ -50,6 +50,8 @@ export const CANARY = {
 
 /** Every canary string for one adult, including variants tests derive with a suffix. */
 export const CANARY_MARK = { sam: 'canary-sam-', alex: 'canary-alex-' } as const;
+export const ARCHIVED_MARK = 'canary-archived-';
+export const SENSITIVE_MARK = 'canary-sensitive-';
 
 // The fixture week around the scenario date (times are NZDT, UTC+13 from
 // 27 September 2026). Domain inputs only; tests attach people themselves.

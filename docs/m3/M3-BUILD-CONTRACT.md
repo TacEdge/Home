@@ -229,9 +229,9 @@ Pure, deterministic, under `src/domain/engines/`, importing nothing from `db` or
 ### 7.1 Export (ADR 0006 §6)
 
 - `/settings/export`: **Download my HOME data**, with an unticked **Include sensitive items**.
-- Route handler (POST, `Cache-Control: no-store`, `Content-Disposition: attachment`), server-side actor, built only through the domain services (no second visibility implementation).
+- Route handler `POST /settings/export/download` (`Cache-Control: no-store`, `Content-Disposition: attachment`; ADR 0006 §25), server-side actor, built only through the domain services (no second visibility implementation).
 - Contents, for the actor: every household and own-private person, event (with annotations), project, task, note, context (normal; sensitive only when ticked, via the audited `includeSensitive` read), own captures, own proposals, own conversations and messages, own insight responses, and the actor's own Activity as Activity shows it. Archived records are included and marked. The other adult's private records never appear.
-- Format: JSON `{ "format": "home-export", "version": 1, "exportedAt", "timeZone", "exportedBy": { "personId"? }, "records": { "<type>": [...] } }`, ids preserved, stable order (type, then `created_at`, then id). A Zod schema describes version 1.
+- Format: JSON `{ "format": "home-export", "version": 1, "exportedAt", "timeZone", "exportedBy": { "personId" }, "includesSensitive", "records": { "<type>": [...] } }` (`src/domain/export/spec.ts`, ADR 0006 §22), ids preserved, stable order (type, then `created_at`, then id). A Zod schema describes version 1.
 - Audit: `export.download`, private to the actor, structural meta only (counts per type, whether sensitive was included).
 - **Completeness guard** (unit test): fails if any column of an exported domain table is neither exported nor listed as deliberately excluded, so a future column cannot silently fall out of the export.
 - No import. Restore is Neon point-in-time restore.
@@ -241,7 +241,7 @@ Pure, deterministic, under `src/domain/engines/`, importing nothing from `db` or
 - Backup: Neon point-in-time restore with ≥ 7 days on `home` (M1-D5; DEPLOY.md §E item 6). No scheduled dump.
 - Runbook (`DEPLOY.md` §D): restore to a new branch of `home`, verify (migrations table, row counts, `audit_log` intact and append-only), switch the runtime credential's host, confirm boot, roll back by switching back. Never restore production data into `home-dev`.
 - Rehearsal before the gate opens, recorded with dates in DEPLOY.md §E:
-  1. `home-dev`, end to end: synthetic data entered through the Preview UI, restore to a branch, switch Preview's runtime host, app boots and shows the data, switch back.
+  1. `home-dev`, end to end: synthetic data entered through the Preview UI, restore to a branch, switch Preview's runtime host, app boots and shows the data, switch back. Run once M3 has at least one domain-entry screen, with synthetic household records as the before-and-after markers (ADR 0006 §27).
   2. `home`: create a restore branch, verify schema, migrations and `audit_log`, delete the branch. No family data is involved.
 
 ---

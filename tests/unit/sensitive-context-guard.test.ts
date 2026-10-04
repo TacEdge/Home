@@ -22,7 +22,41 @@ const ALLOWED = [
   join('src', 'trust', 'visibility.ts'),
 ];
 
+/**
+ * Screens where a person explicitly asks for sensitive context, each with
+ * its decision. Nothing else may even name the option.
+ */
+const PERSON_ASKS: Record<string, string> = {
+  // The export's unticked "Include sensitive items" (ADR 0006 §6).
+  [join('src', 'domain', 'export', 'service.ts')]: 'ADR 0006 §6',
+  [join('src', 'app', '(home)', 'settings', 'export', 'download', 'route.ts')]: 'ADR 0006 §6',
+  [join('src', 'app', '(home)', 'settings', 'export', 'page.tsx')]:
+    'ADR 0006 §6 (the unticked box)',
+};
+
 describe('sensitive context is never opted into automatically', () => {
+  it('only the reviewed person-asks call sites mention includeSensitive at all', () => {
+    const named = walk('src')
+      .filter((f) => /\.(ts|tsx)$/.test(f) && !ALLOWED.includes(f))
+      .filter((f) => /includeSensitive/.test(readFileSync(f, 'utf8')));
+    expect(named.sort()).toEqual(Object.keys(PERSON_ASKS).sort());
+  });
+
+  it('the export asks only when the person ticks the box, never by default', () => {
+    const route = readFileSync(
+      join('src', 'app', '(home)', 'settings', 'export', 'download', 'route.ts'),
+      'utf8',
+    );
+    expect(route).toMatch(/includeSensitive = form\?\.get\('includeSensitive'\) === 'on'/);
+    const service = readFileSync(join('src', 'domain', 'export', 'service.ts'), 'utf8');
+    expect(service).toMatch(/const includeSensitive = opts\.includeSensitive === true;/);
+    const page = readFileSync(
+      join('src', 'app', '(home)', 'settings', 'export', 'page.tsx'),
+      'utf8',
+    );
+    expect(page).not.toMatch(/defaultChecked/);
+  });
+
   it('no application code asks for sensitive context outside its own service', () => {
     const offenders = walk('src')
       .filter((f) => /\.(ts|tsx)$/.test(f) && !ALLOWED.includes(f))

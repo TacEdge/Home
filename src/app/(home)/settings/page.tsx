@@ -22,6 +22,7 @@ export default async function SettingsPage() {
       <Label>Household</Label>
       <List>
         <ItemRow title="Activity" detail="Everything HOME has done" href="/settings/activity" />
+        <ItemRow title="Export" detail="Download your HOME data" href="/settings/export" />
       </List>
 
       <Label>Account</Label>

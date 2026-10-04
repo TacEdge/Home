@@ -14,6 +14,7 @@ import { createProposal } from '@/domain/proposals/service';
 import { archiveTask, createTask } from '@/domain/tasks/service';
 import type { UserActor } from '@/trust/actor';
 import {
+  ARCHIVED_MARK,
   CANARY,
   CANARY_MARK,
   FAMILY_EVENTS,
@@ -21,6 +22,7 @@ import {
   FAMILY_PEOPLE,
   FAMILY_PROJECTS,
   FAMILY_TASKS,
+  SENSITIVE_MARK,
 } from './family';
 import { ALEX, SAM } from './users';
 
@@ -32,8 +34,7 @@ import { ALEX, SAM } from './users';
 // canary string starts with CANARY_MARK[adult] or ARCHIVED_MARK, so a test
 // can search any output for a leak. Synthetic only (D-M2-8).
 
-export const ARCHIVED_MARK = 'canary-archived-';
-export const SENSITIVE_MARK = 'canary-sensitive-';
+export { ARCHIVED_MARK, SENSITIVE_MARK };
 
 type Adult = 'sam' | 'alex';
 export type CanaryIds = {
