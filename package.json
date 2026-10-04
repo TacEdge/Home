@@ -22,6 +22,7 @@
     "db:migrate": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "db:reset:test": "node scripts/db-reset-test.mjs",
+    "db:seed:fixtures": "node --env-file-if-exists=.env.local scripts/seed-fixtures.mts",
     "test:e2e": "playwright test",
     "check:private-terms": "node scripts/check-private-terms.mts",
     "check:previous-schema": "node scripts/check-previous-schema.mts"

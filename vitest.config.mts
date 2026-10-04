@@ -36,6 +36,19 @@ export default defineConfig({
           globalSetup: ['tests/integration/global-setup.ts'],
         },
       },
+      {
+        // `pnpm db:seed:fixtures` only (scripts/seed-fixtures.mts): never part
+        // of a test run, and refuses to start without the launcher's flag.
+        extends: true,
+        test: {
+          name: 'seed',
+          include: ['tests/seed/seed.run.ts'],
+          environment: 'node',
+          // Deliberately without tests/setup.ts, which points DATABASE_URL at
+          // the test database: the seed writes to the developer's own local
+          // database, after its guard.
+        },
+      },
     ],
   },
 });
