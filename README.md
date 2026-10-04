@@ -6,7 +6,7 @@ This repository holds the product documentation, the M0 experience prototype (re
 
 - Start with [`CLAUDE.md`](./CLAUDE.md) — the operating rules for anyone (human or AI) working here.
 - Product and architecture: [`docs/`](./docs/).
-- Current milestone: **M1 — Foundations**, code complete ([`docs/m1/M1-BUILD-CONTRACT.md`](./docs/m1/M1-BUILD-CONTRACT.md)).
+- Current milestone: **M3 — Manual family data + capture**, in progress on synthetic data ([`docs/m3/M3-BUILD-CONTRACT.md`](./docs/m3/M3-BUILD-CONTRACT.md)). M2 is complete; M1 is deployed with its acceptance items open (`docs/runbooks/DEPLOY.md` §E).
 
 ## Local development
 

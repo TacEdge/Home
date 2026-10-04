@@ -101,6 +101,11 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
     - **Conversation ownership.** `createProposal` accepts only the requester's own conversation, as `recordUsage` already required.
     - **Retention.** The future 90-day conversation purge measures from `last_message_at`, falling back to `created_at` when a conversation has no message.
 
+## Later amendments
+
+- **ADR 0006 §1–2 (2026-10-04)** refines decision 1: the gate is on real household data in Production, enforced by `HOME_REAL_DATA`, not on building M3, which proceeds on synthetic data.
+- **ADR 0006 §12** moves the open question in §39 (Kev's own transcript and usage recording) to M8.
+
 ## Consequences
 
 - The roadmap's M2 and M4 rows are updated to show the moved tables and the regular-week deferral.

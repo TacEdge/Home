@@ -1,6 +1,6 @@
 # M0 — Experience Concepts
 
-Status: **Approved with refinements (below).** Next: M0.5 experience prototype (`/prototype`).
+Status: **Approved with refinements (below).** M0 complete (ADR 0002).
 
 M0 covers exactly three primary experiences:
 

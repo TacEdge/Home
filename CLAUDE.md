@@ -20,7 +20,7 @@ When designing any agent behaviour, identify which step of the trust model it be
 
 ## Status
 
-**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 complete (ADR 0002). **M1 — Foundations** (`docs/m1/`, ADR 0003) and **M1.1 — Security & Deployment Hardening** are implemented, verified and **deployed to production, but M1 is not accepted**: the outstanding acceptance items are in `docs/runbooks/DEPLOY.md` §E. **M2 — Knowledge Core** (ADR 0005, `docs/m2/M2-BUILD-CONTRACT.md`) is **code complete with Package 5b, awaiting owner review**; acceptance status in `docs/m2/M2-ACCEPTANCE.md`. Its PRs stop when CI is green and the owner merges each one. Schema-dependent changes are **migration-first** (`docs/runbooks/MIGRATIONS.md`): the migration merges and runs in production before the code that needs it merges. **No M3 real-user or real-data work until M1 is accepted and the Neon recovery condition in §E is met.** Runbooks: `docs/runbooks/`.
+**Architecture approved** (decisions in `docs/decisions/0001-v0.1-decisions.md`). M0 complete (ADR 0002). **M1 — Foundations** (`docs/m1/`, ADR 0003) and **M1.1 — Security & Deployment Hardening** are implemented, verified and **deployed to production, but M1 is not accepted**: the outstanding acceptance items are in `docs/runbooks/DEPLOY.md` §E. **M2 — Knowledge Core** (ADR 0005) is **complete** (`docs/m2/M2-ACCEPTANCE.md`). **M3 — Manual family data + capture** (ADR 0006, `docs/m3/M3-BUILD-CONTRACT.md`) is **in progress on synthetic data**; its PRs stop when CI is green and the owner merges each one. Schema-dependent changes are **migration-first** (`docs/runbooks/MIGRATIONS.md`): the migration merges and runs in production before the code that needs it merges. **No real household data in Production until the real-data gate opens** (`HOME_REAL_DATA=open`, ADR 0006 §2): every item in `docs/runbooks/DEPLOY.md` §E, including M1 acceptance, Neon recovery and the M3 restore rehearsal, must be recorded first. Runbooks: `docs/runbooks/`.
 
 ## Read first
 
@@ -64,7 +64,7 @@ If a request conflicts with these docs, stop and say so. Don't silently diverge;
 ```
 src/app           Experience layer (Next.js routes, screens)
 src/ui            Presentational components + design tokens
-src/domain        Family Knowledge layer: services + engines (agenda, conflicts, windows, profile, staleness, insights)
+src/domain        Family Knowledge layer: services + engines (recurrence, agenda, conflicts, windows, profile, staleness, insights)
 src/kev           Kev: orchestrator, router, providers, prompts, context assembly, tools, evals
 src/integrations  calendar (CalendarProvider + ics adapter), weather — read-only
 src/trust         auth, actor, visibility/sensitivity, audit, usage, retention

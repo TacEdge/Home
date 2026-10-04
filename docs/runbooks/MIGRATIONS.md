@@ -5,7 +5,7 @@ Drizzle Kit, forward-only, expand-then-contract (ADR 0003 §3). Deploy and migra
 - **Expand-then-contract** keeps the app already deployed working on the *newer* schema: migrations are additive.
 - **Migration-first** (ADR 0005 §16) keeps *new* code from running on the *older* schema: code that needs new schema merges only after that schema is live in production.
 
-Production is live and holds the household's data: every migration is run against that live database, so the additive rule below is not a style preference but what keeps the deployed app and its data safe.
+Production is live and serving: every migration runs against that live database, so the additive rule below is not a style preference but what keeps the deployed app safe. Production holds no household data yet (the real-data gate, ADR 0006 §2, is closed), but it will, and every migration is written as if it already did.
 
 Migrations always run with the **migration/admin credential** (`DATABASE_URL_MIGRATE`): the privileged database role used only for migrations and database administration. The application's own **runtime/app credential** (`DATABASE_URL`, role `home_app`) cannot create or alter anything, by design (M1.1 contract §1.7).
 
@@ -71,4 +71,4 @@ Run it whenever a migration has merged and a preview needs the new schema.
 
 1. In the Neon console for `home-dev`, SQL Editor, as the owner role: `drop schema public cascade; create schema public; drop schema if exists drizzle cascade;`
 2. Dispatch **Migrate preview database** from `main`.
-3. Fixtures: none. Users are created on first sign-in from the preview allowlist. M2's fixture seed runs against local and CI databases only and refuses any other host (ADR 0005); seeding `home-dev` is a later decision, and would load the synthetic fixture family only, never real data.
+3. Fixtures: none. Users are created on first sign-in from the preview allowlist. The fixture seed runs against local and CI databases only and refuses any other host (ADR 0005 §41). `home-dev` is never seeded (ADR 0006 §14): Preview data is synthetic and entered through the UI.

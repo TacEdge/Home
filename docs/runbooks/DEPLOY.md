@@ -91,7 +91,7 @@ Notes:
 - [ ] Sign out works; `/today` then redirects to sign-in.
 - [ ] Sessions are fixed at 30 days from sign-in; they are not extended by use.
 - [ ] Preview deployment prompts for Vercel authentication and uses the `home-dev` project (check Activity there is separate).
-- [ ] Neon: automated backups/PITR plan confirmed before M3.
+- [ ] Neon: ≥ 7-day point-in-time restore confirmed on `home` before any real family data (§E item 6).
 
 ## D. Rotation and recovery
 
@@ -102,7 +102,7 @@ Notes:
 
 ## E. Production status and M1 acceptance
 
-**M1 is deployed to production but not accepted.** M2 proceeds in parallel (ADR 0005); **M3 real-user and real-data work waits until every item below is closed.**
+**M1 is deployed to production but not accepted.** M2 is complete (ADR 0005). M3 is being built on synthetic data in local and Preview (ADR 0006 §1). **Real household data waits until every item below is closed**; the owner then opens the real-data gate (item 11).
 
 Confirmed by the owner, 2026-10-02:
 
@@ -121,5 +121,15 @@ Outstanding M1 acceptance items. Record the date and result of each here when it
 | 4 | **The remaining unsigned §C checks**, if not already recorded: HTTPS, `robots.txt`, the security headers, `POST /api/auth/sign-in/magic-link` returning 404, and the preview deployment prompting for Vercel authentication and using `home-dev`. | The production surface matches M1. |
 | 5 | **Rate-limit verification on the live deployment**, unless already recorded: from one network, repeated link requests hit the per-IP limit (5 per 15 minutes), and the limit is keyed on Vercel's `x-real-ip` (ADR 0003 §22). | Rate limiting sees real client addresses in production. |
 | 6 | **Neon recovery capability for `home`**: the project is on a plan with at least 7 days of point-in-time restore, confirmed in the Neon console (M1-D5), before any real family data. | Real data can be recovered. |
+
+Real-data gate items (ADR 0006 §2, §7; M3 contract §6–7). The procedures arrive with M3 Package 2; record each result here.
+
+| # | Item | Proves |
+|---|---|---|
+| 7 | **Restore rehearsal on `home-dev`**, end to end: synthetic data entered through the Preview UI, point-in-time restore to a new branch, Preview's runtime host switched to it, the app boots and shows the data, switched back. | The restore procedure works, including the app. |
+| 8 | **Restore check on `home`**: a point-in-time restore branch created, schema, migrations and `audit_log` verified, branch deleted. No family data involved. | Production can be restored. |
+| 9 | **Export check**: each adult downloads their export from Production (or Preview before then) and it validates against version 1. | The family can take its data away. |
+| 10 | **Logging review** (ADR 0003 §8): runtime logs confirmed to carry no family data; error tracking stays off unless decided otherwise. | Real data does not leak into logs. |
+| 11 | **Open the gate**: only after items 1–10 are recorded, set `HOME_REAL_DATA` to exactly `open` in Vercel **Production** (never Preview) and redeploy. Until then every family-domain write in Production is refused. | Real household data may enter. |
 
 Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.

@@ -29,7 +29,8 @@ The O in **HOME** is a sun that has just cleared the horizon: something is on it
 | Morning | `#F6F4EE` | `#161D1B` | `--paper` | Ground. Every screen starts here. |
 | Linen | `#EBE7DC` | `#212A27` | `--paper-2` | Second surface: inputs, the Kev bar, chips. |
 | Moss | `#4F6B62` | `#B9C4BF` | `--ink-2` | Secondary text, detail, “who”. |
-| Mist | `#8C9C95` | `#7F8D88` | `--muted` | Labels, times, muted marks. |
+| Mist (text) | `#5A6B64` | `#8E9B96` | `--muted` | Labels and times: the accessible Mist for any text (WCAG AA, ADR 0006 §5). |
+| Mist (mark) | `#8C9C95` | `#7F8D88` | `--muted-mark` | Decorative marks only: never text, never the only signal. |
 | Rule | `#D9D4C6` | `#303936` | `--line` | Horizon rules under lists. |
 | **Sun** | `#F0A05A` | `#F2B072` | `--accent` | **The one warm colour.** The O by day; “needs you”. |
 | Sun, soft | `#FBE7D3` | `#3A2A1B` | `--accent-soft` | The Who? chip and similar. |
@@ -52,7 +53,7 @@ Rules:
 | Headline | Bricolage Grotesque | 400 · 27px on phones (34px with room) · 1.15–1.18 · −0.015em | `--font-display` |
 | Kev says | Bricolage Grotesque | 500 · 22px · 1.25 | `--font-display` |
 | Body / interface | Figtree | 400–600 · 15–17px · 1.5 | `--font-sans` |
-| Label | DM Mono | 400 · 11.5px · +0.14em · uppercase · Mist | `--font-mono` |
+| Label | DM Mono | 400 · 11.5px · +0.14em · uppercase · Mist (text) | `--font-mono` |
 | Time, date | DM Mono | 400 · tabular numerals | `--font-mono` |
 
 - Headlines are never bold. The headline is the product: one sentence, written by code, read in five seconds.
@@ -63,8 +64,8 @@ Rules:
 - Icons are built from the mark’s two ideas: discs and horizon lines. 36-unit grid, one stroke (1.75), round caps and joins, no fills except Sun when something needs you.
 - Places: Today (disc on a line) · Forward (an arc rising off the line) · Family (two small discs) · Us (two overlapping discs) · Home (a roof on a line) · Life admin (a card) · Kev (a soft four-point spark, never a face).
 - Horizon rules: lists sit on hairlines, not inside boxes. A line is where the day stands.
-- Load reads as dots in Mist: `●` `●●` `●●●`. No bars, no percentages, no colour-coding by severity.
-- Insight marks: `●` Sun — needs you; `○` Mist — good to know.
+- Load reads as dots in Mist (mark): `●` `●●` `●●●`. No bars, no percentages, no colour-coding by severity.
+- Insight marks: `●` Sun — needs you; `○` Mist (text) — good to know (a meaningful mark keeps ≥ 3:1).
 - No illustration. HOME doesn’t draw families. The mark is the only picture.
 - Motion: things settle, nothing bounces. 250ms, ease-out, only when it says something. Respect reduced motion.
 
