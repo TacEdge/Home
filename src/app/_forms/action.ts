@@ -2,6 +2,7 @@ import 'server-only';
 import { redirect, unstable_rethrow } from 'next/navigation';
 import { ZodError } from 'zod';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
+import { FormFieldError } from './errors';
 import { log } from '@/lib/log';
 import { NotSignedInError, type UserActor } from '@/trust/actor';
 import { requireActor } from '@/trust/session';
@@ -28,6 +29,7 @@ import {
 // wrong becomes calm copy here: field errors by name, one message for the
 // form. Navigation (redirect, notFound) passes straight through.
 
+import { RecurrenceError } from '@/domain/engines/recurrence';
 import type { FormState } from './state';
 
 export { idle, type FormState } from './state';
@@ -42,6 +44,9 @@ export function toFormState(e: unknown): FormState & { status: 'error' } {
     }
     return { status: 'error', message: INVALID_COPY, fields };
   }
+  if (e instanceof RecurrenceError) return { status: 'error', message: INVALID_COPY, fields: {} };
+  if (e instanceof FormFieldError)
+    return { status: 'error', message: INVALID_COPY, fields: e.fields };
   if (e instanceof NotFoundError) return { status: 'error', message: NOT_FOUND_COPY, fields: {} };
   if (e instanceof NotPermittedError)
     return { status: 'error', message: NOT_PERMITTED_COPY[e.code], fields: {} };

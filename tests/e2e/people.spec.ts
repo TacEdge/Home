@@ -42,7 +42,9 @@ test('a profile: age and next birthday, things to know, no sensitive context', a
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Milo');
   await expect(page.locator('header').getByText(/Child · age \d+/)).toBeVisible();
   await expect(page.getByText('Enjoys dinosaurs at the moment.')).toBeVisible();
-  await expect(page.getByText(/Turns \d+|Birthday today/)).toBeVisible();
+  // Coming up is the next 30 days from the agenda engine: Milo's weekly swimming.
+  await expect(page.getByRole('heading', { level: 2, name: 'Coming up' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Swimming/ }).first()).toBeVisible();
   expect(await page.textContent('main')).not.toContain('canary-sensitive');
 });
 

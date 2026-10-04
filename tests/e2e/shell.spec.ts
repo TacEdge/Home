@@ -15,6 +15,7 @@ const SCREENS = [
   '/people',
   '/people/new',
   '/settings/you',
+  '/events/new',
 ];
 
 test('the ⌂ menu lists only places that exist, and closes on Escape', async ({ page }) => {

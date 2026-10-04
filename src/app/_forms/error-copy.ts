@@ -22,6 +22,9 @@ export const NOT_PERMITTED_COPY: Record<NotPermittedCode, string> = {
   sensitive_context: 'Sensitive details can only be handled by you, directly.',
   proposal_not_pending: 'That’s already been decided.',
   kev_cannot_author: 'Kev can only keep what you said, in your words.',
+  not_recurring: 'This happens once, so there’s nothing to skip.',
+  not_an_occurrence: 'That isn’t one of the times this happens.',
+  not_skipped: 'That one wasn’t skipped.',
 };
 
 export const NOT_FOUND_COPY = 'That isn’t here any more.';
