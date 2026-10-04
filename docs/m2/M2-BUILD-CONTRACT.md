@@ -84,8 +84,8 @@ Every PR stops when CI is green and is ready for review; **the owner merges it**
 | | **3b** application, **merged (#24)** | Their services, reference rules (§5.5), Activity registration, fixtures and leak tests. Opened only after `0004` has succeeded in production. | none |
 | **4 — Capture, context, proposals** | **4a** migration-only, **merged (#25), migrated in production and preview** | `capture`, `context`, `proposal` and `origin_capture_id` on `event`, `project`, `task`, `note`; their Drizzle schema, except `origin_capture_id` on those four existing tables, which waits for 4b (§2.1 rule 2, ADR 0005 §28); migration and `home_app` privilege tests. | `0005` |
 | | **4b** application, **merged (#26)** | The `staleness` engine, capture, context and proposal services, proposal approval (§5.7), the deferred `origin_capture_id` definitions, Activity registration and fixtures. Opened only after `0005` has succeeded in production. | none |
-| **5 — Kev bookkeeping, seed, privacy suite** | **5a** migration-only, in review | `conversation`, `message`, `kev_usage` (append-only), `insight_response`, and the planned foreign keys on `capture.message_id` and `proposal.conversation_id`; their Drizzle schema; migration and `home_app` privilege tests (ADR 0005 §38). | `0006` |
-| | **5b** application | Their services, `pnpm db:seed:fixtures`, the privacy suite (§8.3) and docs (§9). Opened only after `0006` has succeeded in production. | none |
+| **5 — Kev bookkeeping, seed, privacy suite** | **5a** migration-only, **merged (#27), migrated in production and preview** | `conversation`, `message`, `kev_usage` (append-only), `insight_response`, and the planned foreign keys on `capture.message_id` and `proposal.conversation_id`; their Drizzle schema; migration and `home_app` privilege tests (ADR 0005 §38). | `0006` |
+| | **5b** application, in review | Their services, `pnpm db:seed:fixtures`, the privacy suite (§8.3) and docs (§9). Opened only after `0006` has succeeded in production. Acceptance status: `docs/m2/M2-ACCEPTANCE.md`. | none |
 
 ### 2.3 Status of the first Package 2 attempt (PR #17)
 

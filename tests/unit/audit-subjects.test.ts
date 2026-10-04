@@ -18,6 +18,11 @@ import { auditSubjects } from '@/trust/audit-subjects';
 // starts using a table registers it and removes it from this list.
 const PENDING_REGISTRATION: Record<string, string> = {};
 
+// Tables private to one user by user_id (P-1 b): registered with an
+// owner-only rule although they carry no visibility column. Messages are
+// audited as their conversation; kev_usage is household information.
+const OWNER_ONLY = ['conversation', 'insight_response'];
+
 const tables = (Object.values(schema) as unknown[]).filter((v): v is PgTable => is(v, PgTable));
 const visibilityTables = tables
   .filter((t) => getTableConfig(t).columns.some((c) => c.name === 'visibility'))
@@ -70,9 +75,22 @@ describe('Activity subject registry', () => {
     expect(visibilityTables).toContain('person');
   });
 
-  it('registers every table with a visibility column, except those pending their application PR', () => {
-    const expected = visibilityTables.filter((t) => !(t in PENDING_REGISTRATION));
+  it('registers every table with a visibility column, except those pending their application PR, plus the owner-only tables', () => {
+    const expected = [
+      ...visibilityTables.filter((t) => !(t in PENDING_REGISTRATION)),
+      ...OWNER_ONLY,
+    ].sort();
     expect(Object.keys(auditSubjects).sort()).toEqual(expected);
+  });
+
+  it('owner-only subjects have no visibility column, a user_id, and their own read rule', () => {
+    for (const t of OWNER_ONLY) {
+      const table = tables.find((x) => getTableName(x) === t);
+      const cols = table ? getTableConfig(table).columns.map((c) => c.name) : [];
+      expect(cols, t).not.toContain('visibility');
+      expect(cols, t).toContain('user_id');
+      expect(auditSubjects[t]?.visible, t).toBeTypeOf('function');
+    }
   });
 
   it('lists as pending only real, unregistered visibility tables', () => {

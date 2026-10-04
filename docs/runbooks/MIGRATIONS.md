@@ -5,6 +5,8 @@ Drizzle Kit, forward-only, expand-then-contract (ADR 0003 §3). Deploy and migra
 - **Expand-then-contract** keeps the app already deployed working on the *newer* schema: migrations are additive.
 - **Migration-first** (ADR 0005 §16) keeps *new* code from running on the *older* schema: code that needs new schema merges only after that schema is live in production.
 
+Production is live and holds the household's data: every migration is run against that live database, so the additive rule below is not a style preference but what keeps the deployed app and its data safe.
+
 Migrations always run with the **migration/admin credential** (`DATABASE_URL_MIGRATE`): the privileged database role used only for migrations and database administration. The application's own **runtime/app credential** (`DATABASE_URL`, role `home_app`) cannot create or alter anything, by design (M1.1 contract §1.7).
 
 ## Making a change

@@ -5,7 +5,9 @@ import {
   auditLog,
   capture,
   context,
+  conversation,
   event,
+  insightResponse,
   note,
   person,
   project,
@@ -27,11 +29,23 @@ import { visibleTo, type VisibilityColumns } from './visibility';
 // An unregistered subject would fall back to its snapshot, which cannot
 // follow a later change of the record's visibility.
 
-export type AuditSubject = {
-  table: PgTable & { id: PgColumn } & VisibilityColumns;
-  /** The record's own read rule; owner-only tables override the default. */
-  visible?: (actor: Actor) => SQL;
-};
+export type AuditSubject =
+  | {
+      table: PgTable & { id: PgColumn } & VisibilityColumns;
+      /** The record's own read rule; owner-only tables override the default. */
+      visible?: (actor: Actor) => SQL;
+    }
+  | {
+      /** An owner-only table with no visibility column must say who its owner is. */
+      table: PgTable & { id: PgColumn };
+      visible: (actor: Actor) => SQL;
+    };
+
+/** Owner-only by `user_id` (conversations, insight responses): only that user, ever. */
+const ownedBy =
+  (column: PgColumn) =>
+  (actor: Actor): SQL =>
+    actor.kind === 'system' ? sql`true` : eq(column, actor.userId);
 
 const register = (...subjects: AuditSubject[]): Record<string, AuditSubject> =>
   Object.fromEntries(subjects.map((s) => [getTableName(s.table), s]));
@@ -49,6 +63,11 @@ export const auditSubjects: Record<string, AuditSubject> = register(
   { table: capture },
   { table: context },
   { table: proposal },
+  // Owner-only by user_id, with no visibility column (P-1 b). Messages are
+  // audited as their conversation; kev_usage rows are household information
+  // and are not a registered subject (their household snapshot decides).
+  { table: conversation, visible: ownedBy(conversation.userId) },
+  { table: insightResponse, visible: ownedBy(insightResponse.userId) },
 );
 
 /** The write-time snapshot: household, or private to its recorded owner. */
@@ -76,7 +95,9 @@ export function auditVisibleTo(actor: Actor): SQL {
   const domain = Object.entries(auditSubjects).map(([type, s]) => {
     // Text comparison: subject_id is free text, so a cast could fail.
     const same = sql`${s.table.id}::text = ${auditLog.subjectId}`;
-    const rule = s.visible ? s.visible(actor) : visibleTo(actor, s.table);
+    const rule = s.visible
+      ? s.visible(actor)
+      : visibleTo(actor, s.table as PgTable & VisibilityColumns);
     const canSeeNow = exists(sql`(select 1 from ${s.table} where ${same} and ${rule})`);
     const gone = not(exists(sql`(select 1 from ${s.table} where ${same})`));
     return and(eq(auditLog.subjectType, type), or(canSeeNow, and(gone, snapshot))) as SQL;

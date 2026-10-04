@@ -3,8 +3,10 @@ import type { Db } from '@/db/create';
 import {
   capture,
   context,
+  conversation,
   event,
   eventPerson,
+  insightResponse,
   note,
   person,
   project,
@@ -50,7 +52,10 @@ export async function ensureFixtureUsers(db: Db): Promise<Household> {
  * domain table, added in the package that adds the table.
  */
 export async function clearDomainRows(db: Db): Promise<void> {
-  // Children before the rows they reference.
+  // Children before the rows they reference. kev_usage is append-only and
+  // references no user, so it never blocks a user delete and is left alone.
+  await db.delete(insightResponse);
+  await db.delete(conversation); // messages go with their conversation
   await db.delete(proposal);
   await db.delete(context);
   await db.delete(eventPerson);

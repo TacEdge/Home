@@ -26,6 +26,16 @@ Every user-facing table has:
 | `archived_at` | timestamptz null | soft delete; purged after 30 days |
 | `origin_capture_id` | uuid null | on records organised from a capture (`event`, `project`, `task`, `note`, `context`; migration `0005`, `ON DELETE SET NULL`) |
 
+### M2 implementation notes (ADR 0005)
+
+- **User ids are text**: Better Auth's `user.id` is text, so every user reference is a `text` foreign key, `ON DELETE RESTRICT` except `person.user_id` (`SET NULL`) and `conversation.user_id` (`CASCADE`). `kev_usage` and `audit_log` keep plain user ids with no foreign key, so their append-only rows never block or change.
+- **Enums are `text` + `CHECK`**, never Postgres enum types, so a value can be added by an additive migration; each list is defined once and shared by the `CHECK`, the Zod schema and the type.
+- **All-day events have an exclusive end date** (RFC 5545); a task's scheduled window is two columns, both or neither.
+- **`event_person` has no visibility**: an annotation is visible, written and audited as its event.
+- **Owner-only tables** (`capture`, `proposal` by a `private` visibility; `conversation`, `message`, `insight_response` by `user_id`) are private to one user in every query and in Activity.
+- **Retention readiness** (no purge in M2): `archived_at` (30-day soft-delete purge), `capture.dismissed_at`, `message.created_at` and `conversation.last_message_at` (90 days), and foreign keys chosen so a hard delete never orphans or blocks (provenance `SET NULL`, owned children `CASCADE`).
+- **Deferred** (ADR 0005): CalendarConnection/CalendarSource and annotations on synced series to M4; regular-week derivation to recurrence support; `User.preferences` until a feature uses it.
+
 ## 3. V0.1 entities
 
 ### Person — lightweight profile
@@ -220,6 +230,8 @@ Kev chat history, owned by one user, retained 90 days, not used as memory.
 | `content` | provider-neutral structure: text, citations, tool-call summaries, proposal and capture refs |
 | `tier`, `model` | on Kev messages |
 
+Service (M2 Package 5b): conversations and messages are read and written only by their owner; adding a message moves `last_message_at`; message content is validated as version 1 of HOME's provider-neutral format. Writes are a signed-in person's (ADR 0005 §39).
+
 Implementation (migration `0006`, M2 Package 5a): `conversation` has `user_id` (→ `user`, `ON DELETE CASCADE`), `created_at`, `updated_at`, `last_message_at` (the 90-day retention clock) and `archived_at`; it is private to its owner by `user_id`, so it has no visibility column. `message` belongs to its conversation (`ON DELETE CASCADE`); `content` is a JSON object carrying a numeric `v` (the application validates each version's schema); a Kev message has `tier` (`fast` \| `deep`) and `model`, a person's has neither (`CHECK`). Deleting a conversation clears `capture.message_id` and `proposal.conversation_id` (`ON DELETE SET NULL`) and never touches a capture's words.
 
 ### Proposal
@@ -240,6 +252,8 @@ Implementation (`0005`): common fields with `visibility` always `private`; `crea
 - `audit_log` — append-only record of writes and Kev tool calls. Migration `0003` adds `visibility` (default `household`) and `visible_to_user_id`: a write-time snapshot of the affected record's visibility, so Activity never reveals more than the record would (ADR 0005 §9).
 - `kev_usage` — per Kev run: tier, model, tokens, cost estimate, escalated flag. Drives the spend cap (NZ$50/month initially) and the Usage view in Settings.
 
+Service (M2 Package 5b): `recordUsage` only inserts, with the provider's cost in whole micro-US-dollars (bigint); `monthToDateCostUsdMicros` totals the household's cost for a calendar month in the home time zone.
+
 Implementation (`0006`): `kev_usage` is append-only: `home_app` has only `SELECT` and `INSERT`, and a trigger refuses update, delete and truncate for every role, as for `audit_log`. It holds no content. Cost is the provider's cost in micro-US-dollars (`cost_usd_micros`, bigint); there is no NZD column or conversion in M2 (the NZ$ spend cap is M8's). `user_id` and `conversation_id` are plain values with no foreign key, so deleting a user or conversation never blocks on or rewrites the log. Token counts and cost are non-negative.
 
 ### WeatherCache
@@ -256,6 +270,8 @@ The only persisted part of insights. Insights themselves are derived on read (se
 | `responded_at` | |
 
 A dismissed insight doesn't reappear for that user. `not_useful` also feeds detector tuning (by us, deliberately) — never automatic inference.
+
+Service (M2 Package 5b): `respond` upserts the actor's own response; `respondedKeys` returns only the actor's own. Keys are deterministic (letters, digits, `: _ . -`), never free text.
 
 Implementation (`0006`): `insight_response` has a uuid id, `user_id` (→ `user`, `RESTRICT`), `insight_key`, `response` (`CHECK`) and `responded_at`; unique `(user_id, insight_key)`, so a response is upserted. Private to that user by `user_id`.
 
