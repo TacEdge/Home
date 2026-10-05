@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { connection } from 'next/server';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -17,7 +18,11 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Every page renders per request, so Next.js can put this request's CSP
+  // nonce on its scripts (src/proxy.ts). A page prerendered at build time
+  // would carry no nonce and its scripts would be refused.
+  await connection();
   return (
     <html lang="en-NZ" className="h-full">
       <body className="flex min-h-full flex-col">{children}</body>

@@ -83,7 +83,7 @@ Notes:
 ## C. Production smoke checklist (after setup, before any real data)
 
 - [ ] Production URL loads over HTTPS; `/robots.txt` disallows all.
-- [ ] Response headers include HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options: DENY`, CSP `frame-ancestors 'none'`, `X-Robots-Tag: noindex`; no `X-Powered-By`.
+- [ ] Response headers include HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options: DENY`, a `Content-Security-Policy` whose `script-src` is a `'nonce-…'` that changes on every reload plus `'strict-dynamic'` (no `'unsafe-inline'` or `'unsafe-eval'`), with `frame-ancestors 'none'`, `X-Robots-Tag: noindex`; no `X-Powered-By`. The browser console shows no "Refused to …" CSP message while signing in and moving between places.
 - [ ] Each parent requests a link on their phone, receives it from `home@auth.<domain>`, signs in, lands on Today.
 - [ ] The received link points **directly at the HOME domain** (`https://<production domain>/api/auth/magic-link/verify?…`), not a Postmark tracking host.
 - [ ] Reusing a link shows "That link didn't work."

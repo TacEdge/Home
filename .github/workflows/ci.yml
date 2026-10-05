@@ -69,6 +69,8 @@ jobs:
           NEXT_TELEMETRY_DISABLED: '1'
       - name: A misconfigured server fails at boot (contract §2.6)
         run: node scripts/check-boot-validation.mjs "$TEST_APP_DATABASE_URL"
+      - name: The production CSP, nonce per response (M4 Package 1)
+        run: node scripts/check-csp.mts "$TEST_APP_DATABASE_URL"
       # Migration-first (M2 contract §2.1, ADR 0005 §16): this code must work
       # on the schema production has before this change's migrations run.
       # Runs after the suites above; it rebuilds the test database from the
