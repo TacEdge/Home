@@ -27,7 +27,7 @@ Checked against `M3-BUILD-CONTRACT.md` §10 on 2026-10-05 (Package 10). Each cri
 
 `tests/e2e/m3-privacy-sweep.spec.ts` runs, for Sam and then for Alex:
 
-- **Every route.** The 16 fixed places plus every page of every record the adult can see, live or archived: profiles and their edit forms, events and their edit forms, projects and their edit forms, tasks, and the adult's own captures with all five organise forms. On a seeded run that is over 70 routes per adult. Each is fetched as the browser receives it: the whole HTML, including the data a page hands to its client components. Each must answer 200 and must not contain:
+- **Every route.** The 16 fixed places plus every page of every record the adult can see, live or archived: profiles and their edit forms, events and their edit forms, projects and their edit forms, tasks, and the adult's own captures with all five organise forms. The test requires more than 36 routes per adult; at the end of a full suite run it is about 75. Each is fetched as the browser receives it: the whole HTML, including the data a page hands to its client components. Each must answer 200 and must not contain:
   - the other adult's canary strings;
   - any sensitive marker;
   - any archived marker, except on Archived and on an archived record's own page.
