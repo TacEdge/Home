@@ -20,7 +20,7 @@ Every user-facing table has:
 |---|---|---|
 | `id` | uuid | |
 | `created_at`, `updated_at` | timestamptz | |
-| `created_by` | user id | null for `sync` |
+| `created_by` | user id | for `sync`, the calendar connection's owner (ADR 0007 §8), so the normal visibility rule applies to synced records |
 | `created_via` | enum `ui` \| `kev` \| `sync` | how the record came to be: `kev` when Kev proposed it (and a person approved), or when Kev captured or proposed it directly; a proposal the person made themselves executes as `ui` (ADR 0005 §43) |
 | `visibility` | enum `household` \| `private` | default `household` (captures default `private`) |
 | `archived_at` | timestamptz null | soft delete; purged after 30 days |
@@ -34,7 +34,7 @@ Every user-facing table has:
 - **`event_person` has no visibility**: an annotation is visible, written and audited as its event.
 - **Owner-only tables** (`capture`, `proposal` by a `private` visibility; `conversation`, `message`, `insight_response` by `user_id`) are private to one user in every query and in Activity.
 - **Retention readiness** (no purge in M2): `archived_at` (30-day soft-delete purge), `capture.dismissed_at`, `message.created_at` and `conversation.last_message_at` (90 days), and foreign keys chosen so a hard delete never orphans or blocks (provenance `SET NULL`, owned children `CASCADE`).
-- **Deferred** (ADR 0005): CalendarConnection/CalendarSource and annotations on synced series to M4; regular-week derivation to recurrence support; `User.preferences` until a feature uses it.
+- **Deferred** (ADR 0005): CalendarConnection/CalendarSource and annotations on synced series to M4; regular-week derivation to recurrence support; `User.preferences` until a feature uses it. M4 brings the calendar tables and regular week back into active scope (ADR 0007).
 
 ## 3. V0.1 entities
 
@@ -76,37 +76,39 @@ An authenticated login. Adults only in V0.1.
 Implementation (ADR 0005): the link is `person.user_id` in HOME's own table, so Better Auth's `user` table is never modified. `preferences` is deferred until a feature uses it.
 
 ### CalendarConnection
-A connection to an external calendar provider. Provider-agnostic.
+A connection to an external calendar provider, owned by one adult. Provider-agnostic.
 
-Built in **M4** with the ICS adapter and credential encryption, together with CalendarSource (ADR 0005). Until then `event.calendar_source_id` has no foreign key.
+Built in **M4** (ADR 0005 §3, ADR 0007; exact columns fixed by M4 Package 4a). Until then `event.calendar_source_id` has no foreign key. Owner-only: the other adult never reads a connection, so it has no visibility column.
 
 | Field | Notes |
 |---|---|
-| `provider` | `ics` (V0.1) \| `google` \| `microsoft` \| `caldav` (later) |
+| `provider` | `ics` in M4, accepting only Google Calendar's secret iCal address (ADR 0007 §3). Later, each by explicit decision: other ICS feeds, `google`, `microsoft`, `caldav` |
 | `owner_user_id` | whose connection it is |
-| `credentials_encrypted` | ICS: the secret URL. Later: OAuth tokens. Never sent to client or LLM |
-| `status`, `last_error` | |
+| `credentials_encrypted` | ICS: the secret address, sealed with AES-256-GCM and bound to this row; later: OAuth tokens. Cleared on disconnect. Never sent to the client, logs, audit, export or an LLM |
+| `credentials_key_id` | which key sealed it, for rotation |
+| `address_fingerprint` | keyed HMAC of the normalised address: recognises the same address (duplicate refusal, reconnect) without storing it in plain text; never exported |
+| `status`, `last_error_code`, `disconnected_at` | `active` \| `disconnected`; error codes only, never provider text |
 
 ### CalendarSource
-One calendar within a connection (for ICS, exactly one per connection).
+One calendar within a connection (for ICS, exactly one per connection). Holds the HOME-owned settings for that calendar.
 
 | Field | Notes |
 |---|---|
+| common fields | `created_by` = the connection's owner; `visibility` decides who sees the calendar and its events; archived on disconnect |
 | `connection_id` | |
-| `external_calendar_id` | provider's id (ICS: the URL hash) |
+| `external_calendar_id` | provider's id for the calendar |
 | `name` | "Parent A – work", "Family calendar" |
-| `default_person_ids` | whose events these usually are |
-| `default_kind` | e.g. `work` |
-| `visibility` | a work calendar might be `household`; a personal one `private` |
-| `sync_cursor` | provider sync token where supported |
-| `last_synced_at`, `last_sync_status` | freshness |
+| `default_person_ids` | whose events these usually are; shown for events without their own annotations, never written as annotations (ADR 0007 §14) |
+| `default_kind` | e.g. `work`; becomes the synced events' `kind` |
+| `feed_hash` | the last successful feed's hash, so an unchanged feed is not re-parsed |
+| `last_attempt_at`, `last_synced_at`, `last_sync_status`, `last_sync_error_code`, `last_skipped_count` | freshness and failure state (M4 contract §3.8) |
 
 ### Event
 Anything that happens at a time.
 
 | Field | Notes |
 |---|---|
-| `title`, `description`, `location` | description/location from sync are untrusted text |
+| `title`, `description`, `location` | from sync: untrusted external text, stored as bounded plain text with HTML stripped, never rendered as HTML or treated as instructions (ADR 0007 §9) |
 | `starts_at`, `ends_at`, `time_zone` | or `start_date`/`end_date` when `all_day` |
 | `all_day` | bool |
 | `rrule`, `exdates` | recurrence |
@@ -114,15 +116,18 @@ Anything that happens at a time.
 | `domain` | `family` \| `home` \| `us` \| `admin` \| null |
 | `source` | `manual` \| `synced` |
 | `calendar_source_id`, `external_uid`, `external_etag` | for synced events; provider-neutral |
+| `recurrence_parent_id`, `recurrence_original` | an occurrence override: its series and the original occurrence it replaces (M4, ADR 0007 §13); used by imported overrides and manual single-occurrence edits |
 
 Implementation (migration `0004`, M2 Package 3a): a timed event has `starts_at`, `ends_at` and `time_zone` and no dates; an all-day event has `start_date` and an **exclusive** `end_date` (RFC 5545) and no instants; both enforced by `CHECK`. `rrule` and `exdates` (`text[]`) are stored as given; nothing parses them in M2. From M3 the `recurrence` engine reads them: `rrule` is an RFC 5545 rule (HOME writes only its presets, and keeps any other rule as written), and an exdate is a date (skips that local day's occurrence) or an instant (skips the occurrence starting then); ADR 0006 §35–37. `source = 'synced'` requires `calendar_source_id` and `external_uid`; `calendar_source_id` has no foreign key until M4 (ADR 0005, D-M2-3). Indexes on `starts_at` and `start_date` serve range reads.
+
+Synced events (M4, ADR 0007): `created_by` is the calendar connection's owner, `created_via` is `sync`, and `visibility` is the calendar source's, so the normal visibility rule applies. Identity is `(calendar_source_id, external_uid, recurrence_original)`, unique, so the same event is the same row across refreshes; missing from a feed it is archived, back it is restored. Provider-owned fields are written only by the sync path; people and notes stay HOME-owned. Attendees and organisers are never imported.
 
 ### EventPerson (annotation)
 Who is involved and how. Works for manual and synced events.
 
 | Field | Notes |
 |---|---|
-| `event_id` (or `external_uid` for synced series), `person_id` | |
+| `event_id`, `person_id` | synced events keep their row across refreshes (ADR 0007 §13), so an annotation on a synced series or occurrence is an ordinary `event_id` |
 | `role` | `attending` \| `responsible` (e.g. doing drop-off/pickup) |
 
 Implementation (`0004`): `event_person` has its own uuid id, a unique `(event_id, person_id, role)`, and cascades with its event and its person. It has no visibility column.

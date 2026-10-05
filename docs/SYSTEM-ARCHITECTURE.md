@@ -99,7 +99,7 @@ interface CalendarProvider {
   kind: 'ics' | 'google' | 'microsoft' | 'caldav';
   listCalendars(conn): Promise<ExternalCalendar[]>;          // ICS: exactly one
   fetchEvents(conn, cal, range, cursor?): Promise<{
-    events: ExternalEvent[];        // normalised: uid, etag, start/end/tz, all-day, rrule, exdates, title, description, location, attendees
+    events: ExternalEvent[];        // normalised: uid, recurrence id, status, start/end/tz, all-day, rrule, exdates, title, description, location (no attendees or organiser)
     deletedUids: string[];
     nextCursor?: string;            // sync token where the provider supports it
   }>;
@@ -108,14 +108,14 @@ interface CalendarProvider {
 }
 ```
 
-- **V0.1:** the `ics` adapter (secret iCal URLs from Google / iCloud / Outlook). No sign-in integration, works across providers, refreshed on read when older than ~15 minutes.
+- **V0.1 (built in M4, ADR 0007):** the `ics` adapter, accepting only **Google Calendar's secret iCal address** (D1). No sign-in integration. Refreshed on use when older than ~15 minutes: the page asks for a refresh without waiting for it, and rendering never writes. iCloud, Outlook and any other real feed need an explicit later decision, even though they serve ICS; the adapter stays provider-neutral and is tested with synthetic feeds of any shape.
 - **Later:** authenticated `google` (Calendar API), `microsoft` (Graph) and `caldav` (iCloud) adapters can replace or sit alongside ICS **without changing `Event`, `EventPerson` or any engine**. A connection stores provider-specific credentials encrypted; the domain only ever sees normalised events.
 - Write-back, when approved in a later release, is an optional provider capability behind the proposal/approval flow.
 
 #### Weather
 Open-Meteo (free, no key, good NZ coverage), hourly forecast for the home location, cached ~1 hour.
 
-No background job infrastructure in V0.1: syncs happen lazily on read with a staleness threshold. A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
+No background job infrastructure in V0.1: syncs happen lazily on use with a staleness threshold (M4 contract §3.3). A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
 
 ### 2.5 Trust & permissions layer
 Cross-cutting. Detailed in §5.
@@ -313,7 +313,7 @@ Both are enforced in **one place** — the domain query layer, via the Actor —
 - Tool calls per turn, tokens per request and monthly spend are capped.
 
 ### 5.5 Untrusted content
-All text from integrations (event titles/descriptions, locations; later emails and documents) is wrapped and labelled as external data in Kev's context. Because Kev cannot take external actions and all writes require approval, the blast radius of a successful injection in V0.1 is an odd *proposal* that a human rejects. This must be re-examined before any email or write-capable integration is added.
+All text from integrations (event titles/descriptions, locations; later emails and documents) is untrusted external data. Calendar text is stored as bounded plain text with HTML stripped, rendered only through React's escaping under the nonce-based script CSP, and never treated as instructions (ADR 0007 §9). In Kev's context it is wrapped and labelled as external data. Because Kev cannot take external actions and all writes require approval, the blast radius of a successful injection in V0.1 is an odd *proposal* that a human rejects. This must be re-examined before any email or write-capable integration is added.
 
 ### 5.6 Data minimisation
 - V0.1 stores no government IDs, financial account numbers, health records or insurance documents.
@@ -321,7 +321,7 @@ All text from integrations (event titles/descriptions, locations; later emails a
 - Kev receives only the context needed for the current request.
 
 ### 5.7 Storage, retention and deletion
-- Encryption in transit and at rest. Integration credentials (ICS URLs now, OAuth tokens later) encrypted at the application level.
+- Encryption in transit and at rest. Integration credentials (ICS URLs now, OAuth tokens later) encrypted at the application level: AES-256-GCM bound to their row, a per-environment key, destroyed on disconnect, and never sent to the client, logs, audit, exports or the LLM (ADR 0007 §11).
 - Kev conversation transcripts retained **90 days** (approved), then deleted. Transcripts are not Kev's memory — context records are.
 - Captures remain until organised or dismissed; dismissed captures are purged after 30 days.
 - Soft delete with 30-day purge; hard delete on request.

@@ -162,7 +162,7 @@ Confirmed by the owner, 2026-10-02:
 - Postmark DKIM and Return-Path are verified for the sending subdomain.
 - A sign-in request from HOME reaches Postmark.
 
-**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
+**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. M4 (calendars, ADR 0007) is being built on synthetic data: no calendar credential exists in Production, and no real calendar is connected anywhere, until the gate opens and M4 is accepted. Preview may hold only a throwaway Google account's synthetic calendar (M4 contract §6.2). M4 adds its own rows here in its Package 9, and `HOME_CREDENTIALS_KEY` to the env table in its Package 2. The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
 
 Outstanding M1 acceptance items. Record the date and result of each here when it passes.
 
