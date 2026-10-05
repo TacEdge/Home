@@ -21,7 +21,8 @@ export const dynamic = 'force-dynamic';
 // ones in words ("from Tuesday"); "Two things to sort ›" only when
 // something waits; "Which one is you? ›" only for an unlinked adult while
 // the gate allows linking. No meaning, no insights, no weather: that is
-// M5. A quiet day says so and nothing more.
+// M5. A quiet day (nothing on, nothing due) says so and nothing more;
+// captures waiting don't make a day busy.
 export default async function TodayPage() {
   const actor = await requireActor();
   const today = todayInHomeZone();
@@ -43,15 +44,13 @@ export default async function TodayPage() {
     captures.filter((c) => c.status === 'new' || c.status === 'proposed').length,
   );
   const linked = people === null || people.some((p) => p.userId === actor.userId);
-  const quiet = items.length === 0 && due.length === 0 && !toSort;
+  const quiet = items.length === 0 && due.length === 0;
 
   return (
     <Page title={todayHeadline(today)}>
       {quiet ? (
         <EmptyState title="Nothing on today.">
-          <Link href="/forward" className="underline underline-offset-4">
-            See the next 30 days
-          </Link>
+          <ForwardLink />
         </EmptyState>
       ) : null}
 
@@ -119,12 +118,22 @@ export default async function TodayPage() {
       {quiet ? null : (
         <div className="mt-8">
           <Quiet>
-            <Link href="/forward" className="underline underline-offset-4">
-              The next 30 days ›
-            </Link>
+            <ForwardLink />
           </Quiet>
         </div>
       )}
     </Page>
+  );
+}
+
+/** The one way Today points at Forward, quiet day or busy: the same words, a tappable height. */
+function ForwardLink() {
+  return (
+    <Link
+      href="/forward"
+      className="inline-flex min-h-11 items-center underline underline-offset-4"
+    >
+      The next 30 days ›
+    </Link>
   );
 }

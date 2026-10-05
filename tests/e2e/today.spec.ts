@@ -27,6 +27,12 @@ const homeToday = async () =>
   )[0]!;
 
 const P9 = 'p9 ';
+const ALEX_PRIVATE = 'alex-only';
+const ARCHIVED = 'put-away';
+const WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+/** "Two things to sort ›", as Today says it (src/app/(home)/sort/copy.ts). */
+const toSortWords = (n: number) =>
+  `${WORDS[n] ?? String(n)} ${n === 1 ? 'thing' : 'things'} to sort ›`;
 test.afterAll(async () => {
   await q(`update event set archived_at = now() where title like 'p9 %' and archived_at is null`);
   await q(`update task set archived_at = now() where title like 'p9 %' and archived_at is null`);
@@ -70,6 +76,52 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
     [`${P9}remember the thing`],
   );
 
+  // Privacy, on the day itself: Alex's private records fall on today, so the
+  // assertions below can only pass because the services filter them out.
+  await q(
+    `insert into event (title, kind, all_day, start_date, end_date, created_by, created_via, visibility, source)
+     values ($1, 'other', true, $2, ($2::date + 1), 'fixture-alex', 'ui', 'private', 'manual')`,
+    [`${P9}${ALEX_PRIVATE} event`, t.d],
+  );
+  for (const [title, due] of [
+    [`${P9}${ALEX_PRIVATE} task due today`, t.d],
+    [`${P9}${ALEX_PRIVATE} task overdue`, t.y],
+  ] as const)
+    await q(
+      `insert into task (title, status, due_date, needs, created_by, created_via, visibility)
+       values ($1, 'open', $2, '[]', 'fixture-alex', 'ui', 'private')`,
+      [title, due],
+    );
+  await q(
+    `insert into capture (text, channel, visibility, created_by, created_via) values ($1, 'web', 'private', 'fixture-alex', 'ui')`,
+    [`${P9}${ALEX_PRIVATE} capture`],
+  );
+  // Archived, on the day itself: never shown, to anyone.
+  await q(
+    `insert into event (title, kind, all_day, start_date, end_date, created_by, created_via, visibility, source, archived_at)
+     values ($1, 'other', true, $2, ($2::date + 1), 'fixture-sam', 'ui', 'household', 'manual', now())`,
+    [`${P9}${ARCHIVED} event`, t.d],
+  );
+  await q(
+    `insert into task (title, status, due_date, needs, created_by, created_via, visibility, archived_at)
+     values ($1, 'open', $2, '[]', 'fixture-sam', 'ui', 'household', now())`,
+    [`${P9}${ARCHIVED} task`, t.y],
+  );
+  // What each adult should be told is waiting: their own captures, nobody else's.
+  const waiting = async (by: string) =>
+    Number(
+      (
+        await q(
+          `select count(*) as n from capture where created_by = $1 and status in ('new', 'proposed') and archived_at is null`,
+          [by],
+        )
+      )[0]!.n,
+    );
+  const samWaiting = await waiting('fixture-sam');
+  const alexWaiting = await waiting('fixture-alex');
+  expect(samWaiting).toBeGreaterThan(0);
+  expect(alexWaiting).toBeGreaterThan(0);
+
   await signInAsFixtureAdult(page, 'sam');
   await page.goto('/today');
   await expect(page.getByRole('heading', { level: 1, name: DAY })).toHaveText(t.long!);
@@ -100,48 +152,80 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   const todo = page.locator('section[aria-labelledby="today-todo"]');
   const tasks = await todo.getByRole('link').allTextContents();
   expect(tasks[0]).toContain('Return the library books');
-  expect(tasks[0]).toContain(`from ${t.ew}`);
+  expect(tasks[0]).toContain(`From ${t.ew}`);
   expect(tasks[1]).toContain('Book the car in');
-  expect(tasks[1]).toContain('from yesterday');
+  expect(tasks[1]).toContain('From yesterday');
   expect(tasks[2]).toContain('Pay the power bill');
   expect(tasks[2]).toContain('Due today');
   const main = (await page.textContent('main')) ?? '';
   expect(main).not.toContain('Next week thing');
   expect(main).not.toContain('Already done');
   expect(main).not.toContain('Dropped it');
-  expect(main).not.toMatch(/overdue|late|urgent/i);
+  expect(main).not.toMatch(/\boverdue\b|\blate\b|\burgent\b/i);
   expect(main).not.toContain(CANARY_MARK.alex);
   expect(main).not.toContain(SENSITIVE_MARK);
+  // Alex's private event, tasks and capture are on today, and not on Sam's Today.
+  expect(main).not.toContain(ALEX_PRIVATE);
+  expect(main).not.toContain(ARCHIVED);
   await todo.getByRole('link', { name: /Pay the power bill/ }).click();
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
   await page.goBack();
 
-  // Things to sort, in words.
+  // Things to sort, in words: Sam's own count, unmoved by Alex's capture.
   const sort = page.getByRole('link', { name: /things? to sort ›$/ });
-  await expect(sort).toBeVisible();
-  expect(await sort.textContent()).toMatch(
-    /^(One thing|Two|Three|Four|Five|Six|Seven|Eight|Nine|\d+) (thing|things) to sort ›$/,
-  );
+  await expect(sort).toHaveText(toSortWords(samWaiting));
   await sort.click();
   await expect(page).toHaveURL(/\/sort$/);
   await page.goto('/today');
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(['On today', 'To do']);
+  await expect(page.getByRole('link', { name: 'The next 30 days ›' })).toHaveCount(1);
   await shot(page, 'today-busy');
+
+  // The same day as Alex: the private records are there for their owner, so
+  // their absence above is filtering, not missing data.
+  const alexContext = await page.context().browser()!.newContext();
+  const alex = await alexContext.newPage();
+  try {
+    await signInAsFixtureAdult(alex, 'alex');
+    await alex.goto('/today');
+    const alexOn = alex.locator('section[aria-labelledby="today-on"]');
+    await expect(
+      alexOn.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} event`) }),
+    ).toBeVisible();
+    const alexTodo = alex.locator('section[aria-labelledby="today-todo"]');
+    await expect(
+      alexTodo.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} task overdue`) }),
+    ).toContainText('From yesterday');
+    await expect(
+      alexTodo.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} task due today`) }),
+    ).toContainText('Due today');
+    await expect(alex.getByRole('link', { name: /things? to sort ›$/ })).toHaveText(
+      toSortWords(alexWaiting),
+    );
+    const alexMain = (await alex.textContent('main')) ?? '';
+    expect(alexMain).not.toContain(ARCHIVED);
+    expect(alexMain).not.toContain(CANARY_MARK.sam);
+    expect(alexMain).not.toContain(SENSITIVE_MARK);
+  } finally {
+    await alexContext.close();
+  }
 });
 
-test('a quiet day says so; the identity prompt appears only for an unlinked adult', async ({
+test('a quiet day says so, even with things to sort; the identity prompt appears only for an unlinked adult', async ({
   page,
 }) => {
   const t = await homeToday();
-  // Everything Alex could see today is put away for a moment, and the waiting capture set aside.
+  // Everything Alex could see today is put away for a moment. A capture is
+  // left waiting: captures don't make a day busy.
   const held = await q(`select id from event where archived_at is null`);
   const heldTasks = await q(
     `select id from task where archived_at is null and status = 'open' and due_date <= $1`,
     [t.d],
   );
-  const heldCaptures = await q(
-    `select id, status from capture where created_by = 'fixture-alex' and status in ('new', 'proposed') and archived_at is null`,
+  const [me] = await q(
+    `select id from person where user_id = 'fixture-alex' and archived_at is null`,
   );
+  expect(me?.id).toBeTruthy();
   const birthdays = await q(
     `select id, date_of_birth from person where to_char(date_of_birth, 'MM-DD') = to_char(now() at time zone 'Pacific/Auckland', 'MM-DD') and archived_at is null`,
   );
@@ -157,8 +241,8 @@ test('a quiet day says so; the identity prompt appears only for an unlinked adul
       heldTasks.map((r) => r.id),
     ]);
     await q(
-      `update capture set status = 'dismissed', dismissed_at = now() where id = any($1::uuid[])`,
-      [heldCaptures.map((r) => r.id)],
+      `insert into capture (text, channel, visibility, created_by, created_via) values ($1, 'web', 'private', 'fixture-alex', 'ui')`,
+      [`${P9}quiet day capture`],
     );
     await q(`update person set date_of_birth = null where id = any($1::uuid[])`, [
       birthdays.map((r) => r.id),
@@ -172,32 +256,28 @@ test('a quiet day says so; the identity prompt appears only for an unlinked adul
     await expect(page.getByRole('heading', { level: 1, name: DAY })).toBeVisible();
     await expect(page.getByText('Nothing on today.')).toBeVisible();
     await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0);
-    expect(await page.textContent('main')).not.toContain('to sort');
-    expect(await page.textContent('main')).not.toContain('Which one is you?');
+    await expect(page.getByRole('link', { name: 'The next 30 days ›' })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: /things? to sort ›$/ })).toBeVisible();
+    const quietMain = (await page.textContent('main')) ?? '';
+    expect(quietMain.indexOf('Nothing on today.')).toBeLessThan(quietMain.indexOf('to sort'));
+    expect(quietMain).not.toContain('Which one is you?');
     await shot(page, 'today-quiet');
 
     // Unlinked: the prompt appears (the gate is open locally).
-    await q(`update person set user_id = null where user_id = 'fixture-alex'`);
+    await q(`update person set user_id = null where id = $1`, [me!.id]);
     await page.goto('/today');
     await expect(page.getByRole('link', { name: 'Which one is you? ›' })).toBeVisible();
     await shot(page, 'today-identity');
     await page.getByRole('link', { name: 'Which one is you? ›' }).click();
     await expect(page).toHaveURL(/\/settings\/you$/);
   } finally {
-    await q(
-      `update person set user_id = 'fixture-alex' where name = 'Alex' and archived_at is null`,
-    );
+    await q(`update person set user_id = 'fixture-alex' where id = $1`, [me!.id]);
     await q(`update event set archived_at = null where id = any($1::uuid[])`, [
       held.map((r) => r.id),
     ]);
     await q(`update task set archived_at = null where id = any($1::uuid[])`, [
       heldTasks.map((r) => r.id),
     ]);
-    for (const c of heldCaptures)
-      await q(`update capture set status = $2, dismissed_at = null where id = $1`, [
-        c.id,
-        c.status,
-      ]);
     for (const b of birthdays)
       await q(`update person set date_of_birth = $2 where id = $1`, [b.id, b.date_of_birth]);
     for (const p of targets)
