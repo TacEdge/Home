@@ -51,7 +51,7 @@ For each adult, plain and with **Include sensitive items**:
 
 `tests/e2e/m3-device-sweep.spec.ts`:
 
-- **Every M3 screen, at each viewport.** 375×812, 768×1024, 1024×768 and 1280×800. The screens are Today, Forward, People, a profile, an archived profile, the person, project, task and event forms and pages, To sort, a capture with its five organise forms, every Settings page and the not-found page. Every folded section is opened first. On each screen:
+- **Every M3 screen, at each viewport.** 375×812, 768×1024, 1024×768 and 1280×800. The screens are Today, Forward, People, a profile, an archived profile, the person, project, task and event forms and pages, To sort, a capture with its five organise forms, every Settings page and the not-found page. Every folded section in the page is opened first (the ⌂ menu stays closed, since opened it lies over the page by design). On each screen:
   - axe (WCAG 2.0–2.2 A/AA) finds no serious or critical violation;
   - there is no horizontal scroll;
   - every control is at least 44×44px. A checkbox counts with its label, and the skip link is measured when focused.

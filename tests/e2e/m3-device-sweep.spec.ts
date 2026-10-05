@@ -6,10 +6,11 @@ import { withDb } from './helpers';
 // M3 acceptance (contract §4.5, §10 items 10 and 11): the accessibility and
 // device pass over every M3 screen, at the four approved viewports. Each
 // screen: no serious or critical axe violation (with every folded section
-// opened, so what More hides is checked too), no horizontal scroll, and
-// every control a 44×44px target. Then the key flows by keyboard alone,
-// focus after a refusal kept clear of the sticky header and capture bar,
-// and reduced motion. Synthetic data only.
+// in the page opened, so what More hides is checked too; the ⌂ menu stays
+// closed, since opened it lies over the page by design), no horizontal
+// scroll, and every control a 44×44px target. Then the key flows by
+// keyboard alone, focus after a refusal kept clear of the sticky header and
+// capture bar, and reduced motion. Synthetic data only.
 
 const q = (sql: string, a: unknown[] = []) =>
   withDb(async (pool) => (await pool.query(sql, a)).rows as Record<string, string>[]);
@@ -103,7 +104,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       await page.goto(path);
       await page.waitForLoadState('networkidle'); // hydrated before folds are opened
       await page.evaluate(() =>
-        document.querySelectorAll('details').forEach((d) => d.setAttribute('open', '')),
+        document.querySelectorAll('main details').forEach((d) => d.setAttribute('open', '')),
       );
       await expectNoHorizontalScroll(page, `${name} ${path}`);
       await expectAccessible(page, `${name} ${path}`);
