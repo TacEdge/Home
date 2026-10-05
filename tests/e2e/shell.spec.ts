@@ -21,6 +21,8 @@ const SCREENS = [
   '/tasks',
   '/tasks/new',
   '/sort',
+  '/settings/knows',
+  '/settings/archived',
 ];
 
 test('the ⌂ menu lists only places that exist, and closes on Escape', async ({ page }) => {

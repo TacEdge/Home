@@ -32,6 +32,8 @@ const PERSON_ASKS: Record<string, string> = {
   [join('src', 'app', '(home)', 'settings', 'export', 'download', 'route.ts')]: 'ADR 0006 §6',
   [join('src', 'app', '(home)', 'settings', 'export', 'page.tsx')]:
     'ADR 0006 §6 (the unticked box)',
+  // What Kev knows: "Show sensitive items", a press, for that response only (ADR 0006 §55).
+  [join('src', 'app', '(home)', 'settings', 'knows', 'actions.ts')]: 'ADR 0006 §55',
 };
 
 describe('sensitive context is never opted into automatically', () => {
