@@ -27,7 +27,12 @@ test('2. an allowlisted user requests a link and signs in with it', async ({ pag
   expect(link).toContain('/api/auth/magic-link/verify?token=');
   await page.goto(link ?? '');
   await expect(page).toHaveURL(/\/today$/);
-  await expect(page.getByRole('heading', { name: 'Today will live here.' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d+ [A-Z][a-z]+$/,
+    }),
+  ).toBeVisible();
 });
 
 test('3. a non-allowlisted address gets the identical confirmation and no mail', async ({
@@ -141,7 +146,12 @@ test('9. sign-in and the Today shell render at phone and desktop widths', async 
     await expect(page.getByLabel('Email')).toBeVisible();
     await page.screenshot({ path: `test-results/${name}-sign-in.png` });
     await signIn(page, SAM.email);
-    await expect(page.getByRole('heading', { name: 'Today will live here.' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        level: 1,
+        name: /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d+ [A-Z][a-z]+$/,
+      }),
+    ).toBeVisible();
     // No horizontal overflow on phones.
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

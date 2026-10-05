@@ -30,6 +30,18 @@ vi.mock('@/trust/session', () => ({
 }));
 vi.mock('@/domain/people/service', () => ({ listPeople: async () => people }));
 vi.mock('@/domain/captures/service', () => ({ listCaptures: async () => [] }));
+vi.mock('@/domain/tasks/service', () => ({ listTasks: async () => [] }));
+vi.mock('@/domain/projects/service', () => ({ listProjects: async () => [] }));
+vi.mock('@/app/_agenda/load', () => ({
+  todayInHomeZone: () => '2026-10-14',
+  loadAgenda: async () => ({
+    today: '2026-10-14',
+    from: '2026-10-14',
+    to: '2026-10-14',
+    days: [],
+    people: new Map(),
+  }),
+}));
 vi.mock('@/app/(home)/settings/you/actions', () => ({
   addMeAction: async () => ({ status: 'idle' }),
   linkSelfAction: async () => ({ status: 'idle' }),
@@ -67,8 +79,11 @@ describe('gate open', () => {
     gate.open = true;
   });
 
-  it('Today prompts an unlinked adult, and not a linked one', async () => {
-    expect(await html(TodayPage)).toContain('Which one is you?');
+  it('Today prompts an unlinked adult, and not a linked one; a quiet day says so', async () => {
+    const page = await html(TodayPage);
+    expect(page).toContain('Which one is you?');
+    expect(page).toContain('Wednesday 14 October');
+    expect(page).toContain('Nothing on today.');
     people[0]!.userId = 'u-sam';
     expect(await html(TodayPage)).not.toContain('Which one is you?');
   });

@@ -205,6 +205,7 @@ test('Archived: every type, grouped, with Restore; set-aside captures with Back 
   await expect(page.locator('#capture-status')).toContainText('Kept');
   await page.goto('/sort');
   await page.getByRole('button', { name: 'Not needed: p8 maybe repaint the hall' }).click();
+  await expect(page).toHaveURL(/\/sort\?aside=/); // set aside before looking under Archived
   await page.goto('/settings/archived');
   await expect(page.getByRole('heading', { level: 1, name: 'Archived' })).toBeVisible();
   const headings = await page.locator('main section h2').allTextContents();
