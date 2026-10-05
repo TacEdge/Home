@@ -9,9 +9,10 @@ import {
 } from '@/domain/captures/service';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
 import { getContext } from '@/domain/context/service';
+import { getEvent } from '@/domain/events/service';
 import { getNote } from '@/domain/notes/service';
 import { createPerson } from '@/domain/people/service';
-import { createProject } from '@/domain/projects/service';
+import { createProject, getProject } from '@/domain/projects/service';
 import { listProposals, organiseCapture } from '@/domain/proposals/service';
 import { getTask, listTasks } from '@/domain/tasks/service';
 import { auditRowColumns } from '@/trust/audit';
@@ -90,6 +91,56 @@ describe('organiseCapture', () => {
     expect(metas).not.toContain('plumber');
     expect(metas).not.toContain('sink');
   });
+
+  // M3 acceptance (contract §10 item 3): each of the five kinds, end to end
+  // through the same path, keeps where it came from.
+  it.each([
+    ['task.create', { title: 'P10 organised task' }],
+    [
+      'event.create',
+      {
+        title: 'P10 organised event',
+        kind: 'other',
+        time: { allDay: true, startDate: '2027-02-01', endDate: '2027-02-02' },
+      },
+    ],
+    ['project.create', { title: 'P10 organised project', status: 'idea' }],
+    ['note.create', { body: 'P10 organised note' }],
+    [
+      'context.create',
+      { subject: { type: 'household' }, content: 'P10 organised context', category: 'other' },
+    ],
+  ] as const)(
+    'organises into %s with origin_capture_id and provenance ui',
+    async (action, payload) => {
+      const c = await capture(`P10 capture for ${action}`);
+      const d = await organiseCapture(
+        h.sam,
+        c.id,
+        { action, payload: payload as Record<string, unknown>, summary: action },
+        deps,
+      );
+      expect(d.outcome).toBe('approved');
+      if (d.outcome !== 'approved') return;
+      const ref = d.resultRef[0]!;
+      const get = {
+        task: getTask,
+        event: getEvent,
+        project: getProject,
+        note: getNote,
+        context: getContext,
+      }[ref.type as 'task' | 'event' | 'project' | 'note' | 'context'];
+      expect(get, ref.type).toBeDefined();
+      const made = (await get(h.sam, ref.id, {}, deps)) as {
+        originCaptureId: string | null;
+        createdVia: string;
+      };
+      expect(made).toMatchObject({ originCaptureId: c.id, createdVia: 'ui' });
+      const after = await getCapture(h.sam, c.id, {}, deps);
+      expect(after.status).toBe('organised');
+      expect(after.organisedInto).toEqual([ref]);
+    },
+  );
 
   it('makes another: one capture becomes several records', async () => {
     const c = await capture('Fence: paint it, and the gate needs a latch');

@@ -28,7 +28,10 @@ export default async function TasksPage({
     <Page title="To do">
       {tasks.length === 0 ? (
         <EmptyState title="Nothing to do.">
-          <Link href="/tasks/new" className="underline underline-offset-4">
+          <Link
+            href="/tasks/new"
+            className="inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+          >
             Add a task
           </Link>
         </EmptyState>
@@ -42,7 +45,10 @@ export default async function TasksPage({
             undo={justSettled && justSettled.status !== 'open' ? justSettled : undefined}
           />
           <p className="mt-8">
-            <Link href="/tasks/new" className="text-ink-2 underline underline-offset-4">
+            <Link
+              href="/tasks/new"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+            >
               Add a task
             </Link>
           </p>

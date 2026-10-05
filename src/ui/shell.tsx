@@ -20,7 +20,7 @@ export function Shell({
     <div className="flex min-h-full flex-col">
       <a
         href="#content"
-        className="bg-ink text-paper sr-only rounded-home-sm px-3 py-2 focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-30"
+        className="bg-ink text-paper sr-only rounded-home-sm px-3 py-2 focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-30 focus:inline-flex focus:min-h-11 focus:items-center"
       >
         Skip to content
       </a>

@@ -63,7 +63,10 @@ export default async function KnowsPage() {
           <section key={g.key} aria-labelledby={`knows-${g.key}`}>
             <Label id={`knows-${g.key}`}>
               {g.href ? (
-                <Link href={g.href} className="underline-offset-4 hover:underline">
+                <Link
+                  href={g.href}
+                  className="-my-[15px] inline-block min-w-11 py-[15px] underline-offset-4 hover:underline"
+                >
                   {g.title}
                 </Link>
               ) : (

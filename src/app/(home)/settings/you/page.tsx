@@ -28,7 +28,10 @@ export default async function YouPage() {
       <Page title="You">
         <Label>In HOME, you are</Label>
         <p className="text-[20px]">
-          <Link href={`/people/${me.id}`} className="underline underline-offset-4">
+          <Link
+            href={`/people/${me.id}`}
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
             <PersonName name={me.name} colour={me.colour as PersonColour | null} />
           </Link>
         </p>

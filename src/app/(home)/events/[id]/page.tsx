@@ -213,7 +213,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           <p>
             <Link
               href={`/events/${event.id}/edit`}
-              className="text-ink-2 underline underline-offset-4"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
             >
               Edit
             </Link>

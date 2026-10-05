@@ -163,6 +163,32 @@ test('Make it a task, then make another: a note; the capture leaves To sort', as
   expect(await page.textContent('main')).not.toContain('p7 back fence');
 });
 
+test('Make it a project, from a capture: the fifth kind keeps where it came from', async ({
+  page,
+}) => {
+  await signInAsFixtureAdult(page, 'sam');
+  await page.goto('/sort');
+  await tell(page, 'p7 sort out the shed');
+  const shed = await captureRow('p7 sort out the shed');
+  await page.goto(`/sort/${shed.id}/project`);
+  await expect(page.getByLabel('What', { exact: true })).toHaveValue('p7 sort out the shed');
+  await page.getByRole('button', { name: 'Make it a project' }).click();
+  await expect(page.getByRole('link', { name: /p7 sort out the shed/ })).toContainText('Project');
+  const made = await withDb(
+    async (pool) =>
+      (
+        await pool.query(
+          `select title, created_via, created_by from project where origin_capture_id = $1`,
+          [shed.id],
+        )
+      ).rows,
+  );
+  expect(made).toEqual([
+    { title: 'p7 sort out the shed', created_via: 'ui', created_by: 'fixture-sam' },
+  ]);
+  expect(await captureRow('p7 sort out the shed')).toMatchObject({ status: 'organised' });
+});
+
 test('Something to know and an event, from a capture; a failed organise reads calmly and keeps it waiting', async ({
   page,
 }) => {
