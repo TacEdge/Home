@@ -20,12 +20,29 @@ export const REDACTED_KEYS = [
   'secret',
   'apikey',
   'api_key',
+  // Calendar credentials (M4 contract §4.1): the secret address and everything
+  // made from it or used to protect it.
+  'address',
+  'credential',
+  'credentials',
+  'ciphertext',
+  'sealed',
+  'fingerprint',
+  'nonce',
+  'key',
 ] as const;
+
+/** A field whose name contains one of these is redacted wherever the word sits. */
+export const REDACTED_WORDS = ['credential', 'secret', 'ciphertext', 'password'] as const;
 
 const redactedSet = new Set<string>(REDACTED_KEYS);
 const shouldRedact = (key: string) => {
   const k = key.toLowerCase();
-  return redactedSet.has(k) || [...redactedSet].some((r) => k.endsWith(`_${r}`) || k.endsWith(r));
+  return (
+    redactedSet.has(k) ||
+    [...redactedSet].some((r) => k.endsWith(`_${r}`) || k.endsWith(r)) ||
+    REDACTED_WORDS.some((w) => k.includes(w))
+  );
 };
 
 export function redact(value: unknown, depth = 0): unknown {
@@ -52,7 +69,7 @@ export function sanitiseMessage(message: unknown): string {
   return text
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[url]')
-    .replace(/[A-Za-z0-9_-]{20,}/g, '[token]')
+    .replace(/[A-Za-z0-9_+/=-]{20,}/g, '[token]')
     .slice(0, 200);
 }
 

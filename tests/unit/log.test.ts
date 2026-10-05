@@ -96,3 +96,53 @@ describe('sanitiseMessage', () => {
     expect(sanitiseMessage({ toString: () => 'obj' })).toBe('obj');
   });
 });
+
+describe('calendar credentials never reach a log line (M4 contract §4.1)', () => {
+  const SECRET =
+    'https://calendar.google.com/calendar/ical/synthetic%40example.test/private-0123456789abcdef0123456789abcdef/basic.ics';
+  const WEBCAL = SECRET.replace('https', 'webcal');
+  const SEALED = `hc1.0123456789abcdef.${'A'.repeat(16)}.${'Bq9+/x'.repeat(10)}.${'C'.repeat(22)}`;
+  const KEY = Buffer.from('home-test-credentials-key-32byte').toString('base64');
+  const FINGERPRINT = `fp1.${'D'.repeat(43)}`;
+  const pieces = [
+    'calendar.google.com',
+    'private-0123456789abcdef',
+    SEALED.split('.')[3],
+    KEY,
+    'DDDDDDDD',
+  ];
+
+  it('under any field name a caller is likely to use, at any depth', () => {
+    const lines: string[] = [];
+    const log = createLogger({ sink: (l) => lines.push(l) });
+    log.error('calendar_refresh_failed', {
+      address: SECRET,
+      calendarAddress: WEBCAL,
+      secretUrl: SECRET,
+      feed_url: SECRET,
+      credential: SEALED,
+      credentialsEncrypted: SEALED,
+      ciphertext: SEALED,
+      sealed: SEALED,
+      key: KEY,
+      credentialsKey: KEY,
+      fingerprint: FINGERPRINT,
+      addressFingerprint: FINGERPRINT,
+      nonce: 'bm9uY2Utbm9uY2Utbm9uY2U=',
+      nested: { deeper: [{ address: SECRET, key: KEY }] },
+    });
+    for (const piece of pieces) expect(lines.join('\n'), piece).not.toContain(piece);
+  });
+
+  it('in free text a library might produce', () => {
+    for (const text of [
+      `fetch failed for ${SECRET}`,
+      `could not open ${WEBCAL} (timeout)`,
+      `bad value ${SEALED}`,
+      `key ${KEY} rejected`,
+    ]) {
+      const out = sanitiseMessage(text);
+      for (const piece of pieces) expect(out, `${text} → ${piece}`).not.toContain(piece);
+    }
+  });
+});

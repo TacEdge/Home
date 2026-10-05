@@ -39,6 +39,12 @@ const schema = z.object({
   // value can never stop the app booting; only the exact value \`open\` opens
   // the gate (realDataGateOpen, below).
   HOME_REAL_DATA: z.string().optional(),
+  // Calendar credential keys (M4 contract §4.1, src/trust/credentials.ts).
+  // Any string is accepted here so a wrong value never stops the app booting;
+  // credentials.ts validates the format, and a missing or malformed key only
+  // refuses calendar credentials. Never logged.
+  HOME_CREDENTIALS_KEY: z.string().optional(),
+  HOME_CREDENTIALS_KEY_PREVIOUS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;

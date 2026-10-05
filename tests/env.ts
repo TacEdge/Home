@@ -23,4 +23,7 @@ export const testEnv: Record<string, string> = {
   HOME_MAIL_TRANSPORT: 'test',
   AUDIT_HASH_SECRET: 'test-audit-hash-'.repeat(3),
   HOME_TIMEZONE: 'Pacific/Auckland',
+  // A synthetic credential key for tests only: 32 fixed bytes, base64. Never
+  // used anywhere else; real environments generate their own (DEPLOY.md).
+  HOME_CREDENTIALS_KEY: Buffer.from('home-test-credentials-key-32byte').toString('base64'),
 };

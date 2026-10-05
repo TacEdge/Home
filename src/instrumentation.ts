@@ -11,6 +11,14 @@ export async function register(): Promise<void> {
   console.log(`[home] database tls: sslmode=${tls.sslmode} (${tls.occurrences} occurrence(s))`);
   // Throws EnvError naming the bad variables (never their values).
   const env = parseEnv(process.env);
+  // The calendar credential key's state, never its value (M4 contract §4.1).
+  // A missing or malformed key refuses calendar credentials; it never stops
+  // HOME booting.
+  const { credentialKeysFrom } = await import('@/trust/credentials');
+  const keys = credentialKeysFrom(env);
+  console.log(
+    `[home] calendar credentials key: ${keys.status}${keys.status === 'invalid' ? ` (${keys.variable})` : ''}`,
+  );
   const [{ getDb }, { assertRuntimeRole }] = await Promise.all([
     import('@/db/client'),
     import('@/db/role-check'),
