@@ -142,7 +142,7 @@ Then, connected as **`home_app`** to the same branch: `update audit_log set summ
 2. R1 on the `home-dev` project, at time **T**.
 3. R2 on the branch: migrations count matches; the marker query returns only **A** (for people, `select count(*) from person where name like 'Rehearsal%'` returns 1; for tasks, the same on `task.title`); append-only checks hold.
 4. R3 for **Preview only**: change Preview's `DATABASE_URL` host to the branch's pooled host and redeploy the Preview branch. The preview boot guard still requires that host to differ from `HOME_PRODUCTION_DB_HOST`, which it does.
-5. Sign in to the Preview deployment: **A** is there and **B** is not, on the screen where they were added; Activity loads; Settings › Export downloads and `node scripts/check-export.mts <file>` reports it valid.
+5. Sign in to the Preview deployment: **A** is there and **B** is not, on the screen where they were added; Activity loads; Settings › Export downloads and `node scripts/check-export.mts <file>` reports it valid (Node 22.18 or later runs the `.mts` file directly).
 6. R4 roll back: Preview's host back to the original `home-dev` host, redeploy, confirm **B** is visible again. Delete the restore branch.
 
 **Rehearsal 2 — `home`, branch verification only (§E item 8).** No family data is involved (the real-data gate is closed, so `home` holds sign-in and audit rows only), nothing is pointed at the branch, and nothing leaves the `home` project.
@@ -161,6 +161,8 @@ Confirmed by the owner, 2026-10-02:
 - `DATABASE_URL` carries exactly one `sslmode=verify-full`; the TLS boot guard passes; the runtime shows no environment or TLS errors.
 - Postmark DKIM and Return-Path are verified for the sending subdomain.
 - A sign-in request from HOME reaches Postmark.
+
+**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
 
 Outstanding M1 acceptance items. Record the date and result of each here when it passes.
 

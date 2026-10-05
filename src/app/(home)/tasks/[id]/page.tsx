@@ -213,7 +213,10 @@ export default async function TaskPage({
         />
       )}
       <p className="mt-6">
-        <Link href="/tasks" className="text-ink-2 underline underline-offset-4">
+        <Link
+          href="/tasks"
+          className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+        >
           To do
         </Link>
       </p>

@@ -18,7 +18,10 @@ export default async function ForwardPage() {
     <Page title="Forward" intro="The next 30 days.">
       {loaded.days.length === 0 ? (
         <EmptyState title="Nothing in the next 30 days.">
-          <Link href="/events/new" className="underline underline-offset-4">
+          <Link
+            href="/events/new"
+            className="inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+          >
             Add an event
           </Link>
         </EmptyState>
@@ -31,7 +34,10 @@ export default async function ForwardPage() {
             people={loaded.people}
           />
           <p className="mt-8">
-            <Link href="/events/new" className="text-ink-2 underline underline-offset-4">
+            <Link
+              href="/events/new"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+            >
               Add an event
             </Link>
           </p>

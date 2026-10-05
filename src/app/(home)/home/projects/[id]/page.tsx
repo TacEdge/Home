@@ -77,7 +77,7 @@ export default async function ProjectPage({
         <p className="mt-4">
           <Link
             href={`/tasks/new?project=${project.id}`}
-            className="text-ink-2 underline underline-offset-4"
+            className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
           >
             Add a task
           </Link>
@@ -107,7 +107,7 @@ export default async function ProjectPage({
           <p>
             <Link
               href={`/home/projects/${project.id}/edit`}
-              className="text-ink-2 underline underline-offset-4"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
             >
               Edit
             </Link>

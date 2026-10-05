@@ -109,7 +109,7 @@ export function More({
 }) {
   return (
     <details className="group mt-6" open={open || undefined}>
-      <summary className="text-ink-2 inline-flex min-h-11 cursor-pointer items-center gap-2 underline-offset-4 hover:underline">
+      <summary className="text-ink-2 inline-flex min-h-11 min-w-11 cursor-pointer items-center gap-2 underline-offset-4 hover:underline">
         {label}
       </summary>
       <div>{children}</div>
@@ -135,7 +135,8 @@ export function Checkbox({
   const hintId = hint ? `${id}-hint` : undefined;
   return (
     <div className="mt-5">
-      <div className="flex min-h-11 items-center gap-3">
+      {/* The whole row is the label, so the tap target is the row, not the 20px box. */}
+      <label htmlFor={id} className="text-ink flex min-h-11 cursor-pointer items-center gap-3">
         <input
           id={id}
           name={name}
@@ -145,10 +146,8 @@ export function Checkbox({
           aria-describedby={hintId}
           className="accent-ink h-5 w-5 shrink-0"
         />
-        <label htmlFor={id} className="text-ink">
-          {label}
-        </label>
-      </div>
+        <span>{label}</span>
+      </label>
       {hint ? (
         <p id={hintId} className="text-muted mt-1 pl-8 text-[14px]">
           {hint}
@@ -191,7 +190,11 @@ export function Choices({
         {options.map((o) => {
           const id = `choice-${name}-${o.value}`;
           return (
-            <span key={o.value} className="inline-flex min-h-11 items-center gap-2">
+            <label
+              key={o.value}
+              htmlFor={id}
+              className="text-ink inline-flex min-h-11 min-w-11 cursor-pointer items-center gap-2"
+            >
               <input
                 id={id}
                 type="checkbox"
@@ -200,10 +203,8 @@ export function Choices({
                 aria-invalid={error ? true : undefined}
                 className="accent-ink h-5 w-5 shrink-0"
               />
-              <label htmlFor={id} className="text-ink">
-                {o.label}
-              </label>
-            </span>
+              <span>{o.label}</span>
+            </label>
           );
         })}
       </div>

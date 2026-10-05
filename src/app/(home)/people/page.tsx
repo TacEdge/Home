@@ -33,7 +33,10 @@ export default async function PeoplePage() {
     <Page title="People">
       {people.length === 0 ? (
         <EmptyState title="Nobody here yet.">
-          <Link href="/people/new" className="underline underline-offset-4">
+          <Link
+            href="/people/new"
+            className="inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+          >
             Add someone
           </Link>
         </EmptyState>
@@ -52,7 +55,10 @@ export default async function PeoplePage() {
             </>
           ) : null}
           <p className="mt-8">
-            <Link href="/people/new" className="text-ink-2 underline underline-offset-4">
+            <Link
+              href="/people/new"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+            >
               Add someone
             </Link>
           </p>

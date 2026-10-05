@@ -80,7 +80,7 @@ export function TaskList({
         <span className="min-w-0 flex-1">
           <Link
             href={`/tasks/${t.id}`}
-            className="block break-words underline-offset-4 hover:underline"
+            className="-my-2.5 block py-2.5 break-words underline-offset-4 hover:underline"
           >
             {overdue ? (
               <>

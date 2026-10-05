@@ -29,7 +29,10 @@ export default async function HomePage() {
     <Page title="Home" intro="Projects around the house.">
       {projects.length === 0 ? (
         <EmptyState title="No projects yet.">
-          <Link href="/home/projects/new" className="underline underline-offset-4">
+          <Link
+            href="/home/projects/new"
+            className="inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+          >
             Start one
           </Link>
         </EmptyState>
@@ -53,7 +56,10 @@ export default async function HomePage() {
             </details>
           ) : null}
           <p className="mt-8">
-            <Link href="/home/projects/new" className="text-ink-2 underline underline-offset-4">
+            <Link
+              href="/home/projects/new"
+              className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+            >
               Start a project
             </Link>
           </p>
