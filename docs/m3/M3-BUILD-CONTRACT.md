@@ -118,7 +118,7 @@ The ⌂ menu lists People, Home, To do, To sort and Settings, driven by `src/ui/
 - "2 things to sort", in words, only when the actor has captures waiting.
 - "Which one is you? ›" when the actor has no linked person.
 - An intentional empty state ("Nothing on today.").
-- No sensitive context, ever.
+- No sensitive context, ever. Package 9's screen: ADR 0006 §59.
 
 ### 3.3 Forward (plain)
 
