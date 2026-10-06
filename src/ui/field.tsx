@@ -21,8 +21,10 @@ type Common = {
 type FieldProps = Common &
   (
     | {
-        type?: 'text' | 'email' | 'date' | 'time' | 'number' | 'search';
+        type?: 'text' | 'email' | 'date' | 'time' | 'number' | 'search' | 'password';
         autoComplete?: string;
+        /** Off for a secret pasted once (an address), where correction suggestions would not help. */
+        spellCheck?: boolean;
         inputMode?: 'text' | 'email' | 'numeric' | 'decimal' | 'search';
         min?: string;
         max?: string;
@@ -73,6 +75,7 @@ export function Field(props: FieldProps) {
           {...shared}
           type={props.type ?? 'text'}
           autoComplete={props.autoComplete}
+          spellCheck={props.spellCheck}
           inputMode={props.inputMode}
           min={props.min}
           max={props.max}

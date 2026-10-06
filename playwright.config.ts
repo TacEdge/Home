@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { assertTestDatabase } from './tests/db-guard';
+import { FEED_DIR } from './tests/e2e/calendar-feeds';
 import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL, testEnv } from './tests/env';
 
 // End-to-end tests run against the dev server with the test mail transport
@@ -24,6 +25,8 @@ const serverEnv = (port: number, allowed: string) => ({
   ...process.env,
   ...testEnv,
   NODE_ENV: 'development',
+  // Synthetic calendar feeds for Settings › Calendars (tests/e2e/calendar-feeds.ts).
+  HOME_TEST_CALENDAR_FEEDS: FEED_DIR,
   BETTER_AUTH_URL: `http://localhost:${port}`,
   HOME_ALLOWED_EMAILS: allowed,
 });

@@ -3,6 +3,7 @@ import { calendarBoundary } from '@/domain/calendar/errors';
 import { refreshCalendar, refreshStaleCalendars } from '@/domain/calendar/sync';
 import { env } from '@/lib/env';
 import { icsProvider } from './ics/provider';
+import { testFeedDirectory, testFeedFetcher } from './test-feeds';
 
 // The calendar composition root (ADR 0007 §42). The one place the domain's
 // calendar refresh meets the real provider: the domain never imports an
@@ -15,8 +16,17 @@ import { icsProvider } from './ics/provider';
 type Actor = Parameters<typeof refreshCalendar>[0];
 
 let provider: ReturnType<typeof icsProvider> | null = null;
-/** The real `ics` provider: Google's secret address, through Package 2's guarded fetch. */
-const real = () => (provider ??= icsProvider({ homeTimeZone: env.HOME_TIMEZONE }));
+/**
+ * The real `ics` provider: Google's secret address, through Package 2's
+ * guarded fetch. In a local or CI run with HOME_TEST_CALENDAR_FEEDS set, the
+ * feed comes from synthetic files instead (test-feeds.ts; refused in any
+ * deployed environment).
+ */
+const real = () =>
+  (provider ??= icsProvider({
+    homeTimeZone: env.HOME_TIMEZONE,
+    ...(testFeedDirectory() ? { fetchFeed: testFeedFetcher(testFeedDirectory()!) } : {}),
+  }));
 
 /** Refresh one calendar now (Settings › Calendars' Refresh now). */
 export function refreshCalendarNow(actor: Actor, calendarId: string) {

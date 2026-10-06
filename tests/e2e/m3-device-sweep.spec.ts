@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
+import { seedCalendar } from './calendar-feeds';
 import { withDb } from './helpers';
 
 // M3 acceptance (contract §4.5, §10 items 10 and 11): the accessibility and
@@ -30,6 +31,20 @@ async function screens(): Promise<string[]> {
   );
   for (const id of [person, event, project, task, capture, archivedPerson])
     expect(id, 'a seeded record for the sweep').toBeTruthy();
+  // M4 Package 5: a connected and a disconnected calendar of Sam's.
+  const calendar = await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar',
+    visibility: 'household',
+    fingerprintTag: 'sweepconnected',
+  });
+  const disconnected = await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar (disconnected)',
+    visibility: 'household',
+    disconnected: true,
+    fingerprintTag: 'sweepdisconnected',
+  });
   return [
     '/today',
     '/forward',
@@ -53,6 +68,13 @@ async function screens(): Promise<string[]> {
     ...['task', 'event', 'project', 'note', 'know'].map((as) => `/sort/${capture}/${as}`),
     '/settings',
     '/settings/you',
+    '/settings/calendars',
+    '/settings/calendars/new',
+    `/settings/calendars/${calendar}`,
+    `/settings/calendars/${calendar}/edit`,
+    `/settings/calendars/${disconnected}`,
+    `/settings/calendars/${disconnected}/edit`,
+    `/settings/calendars/${disconnected}/reconnect`,
     '/settings/knows',
     '/settings/archived',
     '/settings/activity',
@@ -94,7 +116,7 @@ async function smallTargets(page: Page): Promise<string[]> {
 }
 
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {
-  test(`every M3 screen at ${name}: accessible, no horizontal scroll, 44px targets`, async ({
+  test(`every M3 and M4 screen at ${name}: accessible, no horizontal scroll, 44px targets`, async ({
     browser,
   }) => {
     test.setTimeout(300_000);

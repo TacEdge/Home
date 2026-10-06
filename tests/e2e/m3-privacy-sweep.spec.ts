@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { ARCHIVED_MARK, CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { fixtureAdultContext, type Adult } from './fixture-adults';
+import { seedCalendar } from './calendar-feeds';
 import { withDb } from './helpers';
 
 // M3 acceptance (contract §8.3, §10 items 4, 5 and 8): the two-adult privacy
@@ -35,6 +36,8 @@ const STATIC_ROUTES = [
   '/sort',
   '/settings',
   '/settings/you',
+  '/settings/calendars',
+  '/settings/calendars/new',
   '/settings/knows',
   '/settings/archived',
   '/settings/activity',
@@ -60,6 +63,11 @@ async function visibleIds(adult: Adult, archived: boolean) {
     captures: (await q(`select id from capture where ${arch} and created_by = $1`, [me])).map(
       (r) => r.id!,
     ),
+    // M4: calendars this adult can see; their own, whichever state, are managed too.
+    calendars: await rows('calendar_source'),
+    ownCalendars: (
+      await q(`select id from calendar_source where ${arch} and created_by = $1`, [me])
+    ).map((r) => r.id!),
   };
 }
 
@@ -67,7 +75,7 @@ async function visibleIds(adult: Adult, archived: boolean) {
 async function privateIdsOf(adult: Adult) {
   const them = USER[adult];
   const ids: Record<string, string[]> = {};
-  for (const t of ['person', 'event', 'project', 'task', 'note', 'context'])
+  for (const t of ['person', 'event', 'project', 'task', 'note', 'context', 'calendar_source'])
     ids[t] = (
       await q(`select id from ${t} where visibility = 'private' and created_by = $1`, [them])
     ).map((r) => r.id!);
@@ -119,6 +127,24 @@ async function routesFor(adult: Adult) {
     live.captures.flatMap((id) => [`/sort/${id}`, ...SORT_AS.map((as) => `/sort/${id}/${as}`)]),
     false,
   );
+  // A calendar's page is read by whoever can see it; its owner also edits and
+  // reconnects it, connected or not (so these pages are never "archived").
+  for (const [ids, own] of [
+    [live.calendars, live.ownCalendars],
+    [put.calendars, put.ownCalendars],
+  ] as const) {
+    add(
+      ids.map((id) => `/settings/calendars/${id}`),
+      false,
+    );
+    add(
+      own.flatMap((id) => [
+        `/settings/calendars/${id}/edit`,
+        `/settings/calendars/${id}/reconnect`,
+      ]),
+      false,
+    );
+  }
   return routes;
 }
 
@@ -141,6 +167,28 @@ async function activityIds(request: APIRequestContext): Promise<Set<string>> {
 }
 
 test.beforeAll(async () => {
+  // M4: a private calendar for each adult carrying their canary mark, and a
+  // household one of Sam's, connected and disconnected.
+  for (const adult of ['sam', 'alex'] as const)
+    await seedCalendar({
+      owner: USER[adult] as 'fixture-sam' | 'fixture-alex',
+      name: `${CANARY_MARK[adult]}${P10}calendar`,
+      visibility: 'private',
+      fingerprintTag: `p10private${adult}`,
+    });
+  await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar',
+    visibility: 'household',
+    fingerprintTag: 'sweepconnected',
+  });
+  await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar (disconnected)',
+    visibility: 'household',
+    disconnected: true,
+    fingerprintTag: 'sweepdisconnected',
+  });
   // Records dated today, for each adult, so Today and Forward have the other
   // adult's private items on the very day the sweep runs: an event, a timed
   // event, a task due today, an overdue task and a waiting capture, private
@@ -251,6 +299,11 @@ for (const adult of ['sam', 'alex'] as const) {
       ...theirs.event!.flatMap((id) => [`/events/${id}`, `/events/${id}/edit`]),
       ...theirs.project!.flatMap((id) => [`/home/projects/${id}`, `/home/projects/${id}/edit`]),
       ...theirs.task!.map((id) => `/tasks/${id}`),
+      ...theirs.calendar_source!.flatMap((id) => [
+        `/settings/calendars/${id}`,
+        `/settings/calendars/${id}/edit`,
+        `/settings/calendars/${id}/reconnect`,
+      ]),
       ...theirs.capture!.flatMap((id) => [
         `/sort/${id}`,
         ...SORT_AS.map((as) => `/sort/${id}/${as}`),

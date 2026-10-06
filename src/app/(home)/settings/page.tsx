@@ -5,8 +5,8 @@ import { ItemRow, List } from '@/ui/list';
 import { Label, Page, Quiet } from '@/ui/page';
 import { signOutAction } from './actions';
 
-// Settings (M3 contract §3.1): You · What Kev knows · Archived · Activity ·
-// Export. Calendars (M4) and Usage (M8) are not listed in M3.
+// Settings (M3 contract §3.1, M4 contract §5.1): You · Calendars · What Kev
+// knows · Archived · Activity · Export. Usage (M8) is not listed yet.
 export default async function SettingsPage() {
   const actor = await requireActor();
   return (
@@ -21,6 +21,11 @@ export default async function SettingsPage() {
       <Label>Household</Label>
       <List>
         <ItemRow title="You" detail="Which person you are in HOME" href="/settings/you" />
+        <ItemRow
+          title="Calendars"
+          detail="Google calendars HOME reads"
+          href="/settings/calendars"
+        />
         <ItemRow
           title="What Kev knows"
           detail="Things to know, dated, in your words"
