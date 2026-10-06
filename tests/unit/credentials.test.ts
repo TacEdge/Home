@@ -5,9 +5,12 @@ import {
   addressFingerprint,
   CredentialError,
   credentialKeysFrom,
+  fingerprintKeyFrom,
   openCredential,
   parseCredentialKey,
+  parseFingerprintKey,
   requireCredentialKeys,
+  requireFingerprintKey,
   sameFingerprint,
   sealCredential,
   sealedWithPreviousKey,
@@ -215,9 +218,10 @@ describe('rotation', () => {
   });
 });
 
-describe('address fingerprint', () => {
-  const keys = keysOf(keyText());
-  const fp = (a: string) => addressFingerprint(keys.current, normaliseCalendarAddress(a));
+describe('address fingerprint (HOME_FINGERPRINT_KEY, ADR 0007 §34)', () => {
+  const fpKey = keyText();
+  const key = parseFingerprintKey(fpKey);
+  const fp = (a: string, k = key) => addressFingerprint(k, normaliseCalendarAddress(a));
 
   it('is stable for the same address in any accepted spelling', () => {
     const webcal = SECRET.replace('https://', 'webcal://');
@@ -230,21 +234,87 @@ describe('address fingerprint', () => {
     expect(sameFingerprint(fp(webcal), fp(SECRET))).toBe(true);
   });
 
-  it('differs for a different address, and for the same address under another key', () => {
+  it('differs for a different address, and when the fingerprint key changes', () => {
     const other = SECRET.replace('private-0123456789abcdef', 'private-fedcba9876543210');
     expect(fp(other)).not.toBe(fp(SECRET));
     expect(sameFingerprint(fp(other), fp(SECRET))).toBe(false);
-    const elsewhere = addressFingerprint(
-      keysOf(keyText()).current,
-      normaliseCalendarAddress(SECRET),
-    );
-    expect(elsewhere).not.toBe(fp(SECRET));
+    expect(fp(SECRET, parseFingerprintKey(keyText()))).not.toBe(fp(SECRET));
   });
 
-  it('carries nothing of the address and is a fixed-size keyed hash', () => {
+  it('is unchanged by rotating HOME_CREDENTIALS_KEY: the sealing key plays no part', () => {
+    const before = keyText();
+    const after = keyText();
+    const env = (credentials: string, previous?: string) =>
+      requireFingerprintKey(
+        fingerprintKeyFrom({
+          HOME_FINGERPRINT_KEY: fpKey,
+          HOME_CREDENTIALS_KEY: credentials,
+          HOME_CREDENTIALS_KEY_PREVIOUS: previous,
+        }),
+      );
+    const original = fp(SECRET, env(before));
+    // During the rotation, and after the previous key is removed.
+    expect(fp(SECRET, env(after, before))).toBe(original);
+    expect(fp(SECRET, env(after))).toBe(original);
+    expect(original).toBe(fp(SECRET));
+  });
+
+  it('carries nothing of the address and is a fixed-size keyed hash, version 2', () => {
     const f = fp(SECRET);
-    expect(f).toMatch(/^fp1\.[A-Za-z0-9_-]{43}$/);
+    expect(f).toMatch(/^fp2\.[A-Za-z0-9_-]{43}$/);
     expect(f).not.toContain('google');
     expect(f).not.toContain('0123456789abcdef');
+    // The database accepts it (migration 0007's calendar_connection_fingerprint_check).
+    expect(f.length).toBeLessThanOrEqual(128);
+    expect(f).toMatch(/^fp[0-9]+\.[A-Za-z0-9_-]{16,}$/);
+  });
+});
+
+describe('HOME_FINGERPRINT_KEY format and state', () => {
+  it.each([
+    ['empty', ''],
+    ['too short', randomBytes(16).toString('base64')],
+    ['base64url, not base64', randomBytes(32).toString('base64url')],
+    ['a placeholder', 'replace-me'],
+    ['one byte repeated', Buffer.alloc(32, 7).toString('base64')],
+  ])('refuses %s', (_name, raw) => {
+    expect(codeOf(() => parseFingerprintKey(raw))).toBe('fingerprint_key_invalid');
+  });
+
+  it('is a state, never a throw: absent, invalid, or the same as a sealing key', () => {
+    const k = keyText();
+    expect(fingerprintKeyFrom({})).toEqual({ status: 'absent' });
+    expect(fingerprintKeyFrom({ HOME_FINGERPRINT_KEY: 'nope-secret' })).toEqual({
+      status: 'invalid',
+    });
+    // Separate key material: reusing the sealing key (current or previous) is refused.
+    expect(fingerprintKeyFrom({ HOME_FINGERPRINT_KEY: k, HOME_CREDENTIALS_KEY: k }).status).toBe(
+      'invalid',
+    );
+    expect(
+      fingerprintKeyFrom({
+        HOME_FINGERPRINT_KEY: k,
+        HOME_CREDENTIALS_KEY: keyText(),
+        HOME_CREDENTIALS_KEY_PREVIOUS: k,
+      }).status,
+    ).toBe('invalid');
+    expect(
+      fingerprintKeyFrom({ HOME_FINGERPRINT_KEY: k, HOME_CREDENTIALS_KEY: keyText() }).status,
+    ).toBe('ready');
+    expect(
+      JSON.stringify(fingerprintKeyFrom({ HOME_FINGERPRINT_KEY: 'nope-secret' })),
+    ).not.toContain('nope-secret');
+    expect(codeOf(() => requireFingerprintKey({ status: 'absent' }))).toBe(
+      'fingerprint_key_absent',
+    );
+    expect(codeOf(() => requireFingerprintKey({ status: 'invalid' }))).toBe(
+      'fingerprint_key_invalid',
+    );
+  });
+
+  it('the test environment has a valid fingerprint key, separate from the sealing key', async () => {
+    const { testEnv } = await import('../env');
+    expect(fingerprintKeyFrom(testEnv).status).toBe('ready');
+    expect(testEnv.HOME_FINGERPRINT_KEY).not.toBe(testEnv.HOME_CREDENTIALS_KEY);
   });
 });

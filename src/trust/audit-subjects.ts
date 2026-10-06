@@ -3,6 +3,8 @@ import { and, eq, exists, getTableName, not, or, sql, type SQL } from 'drizzle-o
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import {
   auditLog,
+  calendarConnection,
+  calendarSource,
   capture,
   context,
   conversation,
@@ -65,6 +67,12 @@ const register = (...subjects: AuditSubject[]): Record<string, AuditSubject> =>
 export const auditSubjects: Record<string, AuditSubject> = register(
   { table: person },
   { table: event },
+  // M4: a calendar's rows (its settings, each refresh) follow the calendar's
+  // own visibility; a connection's rows (connect, reconnect, disconnect) are
+  // its owner's alone, like a conversation (ADR 0007 §4, §37). Only the
+  // owner column is named here, never a credential.
+  { table: calendarSource },
+  { table: calendarConnection, visible: ownedBy(calendarConnection.ownerUserId) },
   { table: project },
   { table: task },
   { table: note },

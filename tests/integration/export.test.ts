@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NotPermittedError } from '@/domain/common/errors';
 import { exportFor } from '@/domain/export/service';
-import { EXPORT_TYPES, exportV1, type ExportType, type HomeExport } from '@/domain/export/spec';
+import { EXPORT_TYPES, exportSchema, type ExportType, type HomeExport } from '@/domain/export/spec';
 import { env } from '@/lib/env';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit } from '@/trust/audit';
@@ -53,10 +53,10 @@ describe.each(ADULTS)('%s’s default export', (a) => {
     e = await exportFor(actor(a), {}, deps);
   });
 
-  it('is a valid version-1 file', () => {
-    expect(exportV1.parse(JSON.parse(text(e)))).toBeTruthy();
+  it('is a valid file of the current version', () => {
+    expect(exportSchema.parse(JSON.parse(text(e)))).toBeTruthy();
     expect(e.format).toBe('home-export');
-    expect(e.version).toBe(1);
+    expect(e.version).toBe(2);
     expect(e.timeZone).toBe(env.HOME_TIMEZONE);
     expect(e.includesSensitive).toBe(false);
     expect(Object.keys(e.records)).toEqual(Object.keys(EXPORT_TYPES));
@@ -237,7 +237,7 @@ describe('scripts/check-export.mts (DEPLOY.md §E item 9)', () => {
     writeFileSync(file, JSON.stringify(e));
     const r = spawnSync('node', ['scripts/check-export.mts', file], { encoding: 'utf8' });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('valid home-export v1');
+    expect(r.stdout).toContain('valid home-export v2');
     expect(r.stdout).toContain(`people: ${e.records.people.length}`);
     expect(r.stdout + r.stderr).not.toContain(CANARY_MARK.sam);
   });

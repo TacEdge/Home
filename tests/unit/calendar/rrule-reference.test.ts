@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { RRule } from 'rrule';
 import { describe, expect, it } from 'vitest';
-import { expandEvent, occursWithin, type RecurringEvent } from '@/domain/engines/recurrence';
+import {
+  anchorFor,
+  expandEvent,
+  occursWithin,
+  type RecurringEvent,
+} from '@/domain/engines/recurrence';
 
 // The recurrence engine stops the rrule library's search at the end of each
 // query by relying on how rrule 2.8 iterates (src/domain/engines/recurrence.ts,
@@ -111,5 +116,82 @@ describe('bounded expansion matches the rrule library used plainly', () => {
       }
     }
     expect(edges).toBeGreaterThan(0);
+  });
+});
+
+// The agenda bound (ADR 0007 §39): expansion restarts a long-running rule two
+// of its periods before the window instead of walking from DTSTART. These
+// rules and starts are chosen to stress what the restart must keep: weeks
+// that start on another day (WKST) with an INTERVAL, a DTSTART mid-week,
+// week 1 of a year that begins in December, BYSETPOS over a week and a
+// month, the last day of the month, leap days and nth weekdays.
+const ANCHOR_RULES = [
+  'FREQ=DAILY;INTERVAL=3;BYDAY=TH,SA',
+  'FREQ=DAILY;INTERVAL=5',
+  'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,TH,SU;WKST=SU',
+  'FREQ=WEEKLY;INTERVAL=2;WKST=TH',
+  'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+  'FREQ=MONTHLY;INTERVAL=7;BYMONTHDAY=-1',
+  'FREQ=MONTHLY;INTERVAL=2;BYDAY=2TU,-1SA',
+  'FREQ=MONTHLY;BYMONTHDAY=29,30,31;BYSETPOS=1',
+  'FREQ=YEARLY;BYWEEKNO=1;BYDAY=MO,SU',
+  'FREQ=YEARLY;INTERVAL=3;BYYEARDAY=60,-1',
+  'FREQ=YEARLY;INTERVAL=2;BYMONTH=2;BYMONTHDAY=29',
+  'FREQ=YEARLY;BYDAY=20MO',
+  'FREQ=YEARLY;BYWEEKNO=53;BYDAY=FR;UNTIL=20400101T000000Z',
+];
+const OLD_STARTS = [
+  '1999-12-30T07:15:00', // a Thursday, in week 52 of 1999
+  '2004-02-29T18:00:00', // a leap day, a Sunday
+  '2009-08-12T09:30:00', // a Wednesday
+  '1987-01-01T00:00:00',
+];
+const FAR_WINDOWS: [string, string][] = [
+  ['2026-10-14', '2026-10-20'], // a week, as Today and Forward ask
+  ['2026-12-28', '2027-01-10'], // over a year boundary
+  ['2027-01-01', '2027-01-07'], // from New Year's Day: 2026's week 53 reaches into it
+  ['2028-02-26', '2028-03-02'], // a leap day
+  ['2026-09-14', '2027-11-18'], // the import window
+  ['2039-12-20', '2040-01-05'],
+];
+
+describe('the agenda bound: expansion near the window equals expansion from the start', () => {
+  it.each([...RULES, ...ANCHOR_RULES])('%s', (rule) => {
+    for (const start of OLD_STARTS)
+      for (const [from, to] of FAR_WINDOWS) {
+        const ev = event(start, rule);
+        expect(
+          expandEvent(ev, from, to).map((o) => o.date),
+          `${start} ${from}…${to}`,
+        ).toEqual(reference(start, rule, from, to));
+      }
+  });
+
+  it.each(ANCHOR_RULES)(
+    'restarts within three periods of the window, never with COUNT: %s',
+    (rule) => {
+      const o = RRule.parseString(rule);
+      const dtstart = utc('1987-01-01T00:00:00');
+      const windowStart = utc('2026-10-14T00:00:00');
+      const anchored = anchorFor(o, dtstart, windowStart);
+      expect(anchored, 'a rule decades old is restarted').not.toBeNull();
+      const period = ([366, 31, 7, 1] as const)[o.freq as 0 | 1 | 2 | 3] * (o.interval ?? 1);
+      const gapDays = (windowStart.getTime() - anchored!.dtstart!.getTime()) / 86_400_000;
+      expect(gapDays).toBeGreaterThan(0);
+      expect(gapDays).toBeLessThanOrEqual(3 * period + 7);
+      expect(anchorFor({ ...o, count: 10 }, dtstart, windowStart)).toBeNull();
+      // Near the start, nothing to gain: no restart.
+      expect(anchorFor(o, dtstart, utc('1987-01-02T00:00:00'))).toBeNull();
+    },
+  );
+
+  it('keeps a Today read of a series begun decades ago small', () => {
+    const ev = event('1950-01-01T08:00:00', 'FREQ=DAILY');
+    const t0 = performance.now();
+    for (let i = 0; i < 200; i++) expandEvent(ev, '2026-10-14', '2026-10-20');
+    const perRead = (performance.now() - t0) / 200;
+    // Walking 76 years of days was about 28,000 steps (~120 ms) a read.
+    expect(perRead).toBeLessThan(5);
+    expect(expandEvent(ev, '2026-10-14', '2026-10-20')).toHaveLength(7);
   });
 });

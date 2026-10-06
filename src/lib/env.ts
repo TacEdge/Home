@@ -45,6 +45,10 @@ const schema = z.object({
   // refuses calendar credentials. Never logged.
   HOME_CREDENTIALS_KEY: z.string().optional(),
   HOME_CREDENTIALS_KEY_PREVIOUS: z.string().optional(),
+  // The calendar-address fingerprint key (ADR 0007 §34): separate, stable
+  // key material, never rotated with HOME_CREDENTIALS_KEY. The same rules:
+  // any string here, validated by credentials.ts, never logged.
+  HOME_FINGERPRINT_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -193,6 +197,24 @@ export function realDataGateOpen(
 ): boolean {
   if (source.VERCEL_ENV !== 'production') return true;
   return source.HOME_REAL_DATA === 'open';
+}
+
+/**
+ * The calendar key variables as they are now (M4 contract §4.1, ADR 0007
+ * §34): read on each call, like the gate, so a rotation applies on the next
+ * request without a restart. Raw strings; src/trust/credentials.ts validates
+ * them. Never logged.
+ */
+export function calendarKeyEnv(source: Record<string, string | undefined> = process.env): {
+  HOME_CREDENTIALS_KEY?: string;
+  HOME_CREDENTIALS_KEY_PREVIOUS?: string;
+  HOME_FINGERPRINT_KEY?: string;
+} {
+  return {
+    HOME_CREDENTIALS_KEY: source.HOME_CREDENTIALS_KEY,
+    HOME_CREDENTIALS_KEY_PREVIOUS: source.HOME_CREDENTIALS_KEY_PREVIOUS,
+    HOME_FINGERPRINT_KEY: source.HOME_FINGERPRINT_KEY,
+  };
 }
 
 let cached: Env | undefined;

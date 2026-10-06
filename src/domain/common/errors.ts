@@ -27,6 +27,14 @@ export type NotPermittedCode =
   | 'not_recurring' // skip applies only to a repeating event
   | 'not_an_occurrence' // skip names a date the event's rule does not put it on
   | 'not_skipped' // put back names a date that was not skipped
+  | 'not_owner' // only a calendar's owner may change, disconnect or reconnect it (M4 §3.2)
+  | 'not_a_person' // connecting and refreshing calendars is a person's own act, never Kev's or the sync actor's
+  | 'sync_actor' // the sync actor writes only synced events, through the sync service (M4 §3.4)
+  | 'address_not_accepted' // only Google's secret iCal address is accepted (M4 §4.2)
+  | 'calendar_already_connected' // that exact address is already a live connection (M4 §4.4)
+  | 'calendar_keys_unavailable' // HOME_CREDENTIALS_KEY or HOME_FINGERPRINT_KEY is missing or invalid (M4 §4.1)
+  | 'calendar_credential_unreadable' // the stored credential no longer opens with HOME's keys
+  | 'calendar_disconnected' // a disconnected calendar is not refreshed
   | 'real_data_closed'; // Production refuses family-domain writes until the real-data gate opens (ADR 0006 §2)
 
 export class NotPermittedError extends Error {

@@ -130,6 +130,21 @@ export const IMPORT_LIMITS = Object.freeze({
   maxEvents: 5000,
 });
 
+/**
+ * The longest external UID HOME stores, in UTF-8 bytes (ADR 0007 §35). The
+ * synced-identity index (migration 0007) holds the UID itself, and an index
+ * entry over about 2,700 bytes cannot be written: a 1,000-character UID of
+ * three-byte characters would fail the whole refresh. A UID over this is
+ * never truncated (that would merge identities): its event is skipped and
+ * counted. Real Google UIDs are short ASCII.
+ */
+export const MAX_EXTERNAL_UID_BYTES = 512;
+
+/** Whether a provider's UID can be an identity in HOME: non-empty, within the byte limit. */
+export function uidFits(uid: string): boolean {
+  return uid.length > 0 && Buffer.byteLength(uid, 'utf8') <= MAX_EXTERNAL_UID_BYTES;
+}
+
 /** The import window around `today` (a date in the home time zone). */
 export function importWindow(today: IsoDate): FetchRange {
   return {

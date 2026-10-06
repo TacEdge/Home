@@ -9,6 +9,7 @@ import {
   type FetchNotes,
   type FetchRange,
   type FetchResult,
+  uidFits,
 } from '@/domain/calendar/provider';
 import { isReadableRRule, occursWithin } from '@/domain/engines/recurrence';
 import {
@@ -54,7 +55,6 @@ export const MAX_FEED_STEPS = 300_000;
 /** As the event schema allows (src/domain/events/schema.ts). */
 const MAX_EXDATES = 500;
 const MAX_RRULE = 1000;
-const MAX_UID = 1000;
 
 type Moment =
   { kind: 'date'; date: IsoDate } | { kind: 'instant'; at: Date; zone: string; wall: WallClock };
@@ -220,8 +220,8 @@ type Read = {
 function readEvent(raw: RawEvent, ctx: Context): Read {
   const uid =
     typeof raw.uid === 'string' || typeof raw.uid === 'number' ? String(raw.uid).trim() : '';
-  if (uid === '' || uid.length > MAX_UID || /[\u0000-\u001f\u007f]/.test(uid))
-    throw new Unreadable();
+  // Bounded in UTF-8 bytes, never truncated (ADR 0007 §35).
+  if (!uidFits(uid) || /[\u0000-\u001f\u007f]/.test(uid)) throw new Unreadable();
   if (raw.dtstart.length !== 1 || raw.dtend.length > 1 || raw.duration.length > 1)
     throw new Unreadable();
   if (raw.dtend.length && raw.duration.length) throw new Unreadable();
@@ -438,13 +438,18 @@ function inWindow(
 export function finish(
   calendar: ExternalCalendar,
   events: ExternalEvent[],
-  skipped: number,
+  skippedBefore: number,
   notes: FetchNotes,
   range: FetchRange,
 ): FetchResult {
+  let skipped = skippedBefore;
   const budget = { steps: MAX_FEED_STEPS };
   const groups = new Map<string, ExternalEvent[]>();
-  const copies = events.map((e) => ({
+  // Any provider's events, not only a parsed feed's: a UID that cannot be an
+  // identity is skipped and counted here too (ADR 0007 §35).
+  const fitting = events.filter((e) => uidFits(e.uid));
+  skipped += events.length - fitting.length;
+  const copies = fitting.map((e) => ({
     ...e,
     exdates: [...e.exdates],
     cancelledOccurrences: [...e.cancelledOccurrences],

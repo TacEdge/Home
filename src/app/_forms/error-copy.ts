@@ -25,6 +25,16 @@ export const NOT_PERMITTED_COPY: Record<NotPermittedCode, string> = {
   not_recurring: 'This happens once, so there’s nothing to skip.',
   not_an_occurrence: 'That isn’t one of the times this happens.',
   not_skipped: 'That one wasn’t skipped.',
+  not_owner: 'Only the person who connected this calendar can change it.',
+  not_a_person: 'Only a signed-in person can do this, by hand.',
+  sync_actor: 'Only a calendar refresh can change that.',
+  address_not_accepted:
+    'That isn’t a Google Calendar secret address. It starts with https://calendar.google.com and ends in basic.ics.',
+  calendar_already_connected: 'That calendar is already connected in HOME.',
+  calendar_keys_unavailable: 'Calendars can’t be connected here just now.',
+  calendar_credential_unreadable:
+    'HOME can’t read this calendar’s address any more. Connect it again to carry on.',
+  calendar_disconnected: 'This calendar is disconnected. Connect it again to refresh it.',
 };
 
 export const NOT_FOUND_COPY = 'That isn’t here any more.';

@@ -1,6 +1,6 @@
 # M4 — Calendar Integration: Build Contract
 
-Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–3 merged; Package 4a (migration `0007`, ADR 0007 §33) is the migration-only PR, to be run in Production and Preview by the owner before 4b merges.
+Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–4a merged; migration `0007` ran in Production and Preview; Package 4b (calendar and sync services, ADR 0007 §34–41) is in review.
 Implementers: per package (§2.3). Reviewer: Opus reviews every package before the owner merges it.
 
 M4 brings the family's calendars into HOME. At the end of M4 an adult can connect a Google calendar by its secret iCal address, see its events on Today, Forward, a profile's *Coming up* and each event's page beside the events entered by hand, say who is going and who is responsible for a synced event, see how fresh each calendar is, refresh it, and disconnect it. A person's profile shows their regular week. A repeating manual event can be changed for one occurrence. **HOME never writes to a calendar, nothing runs in the background, and nothing here is intelligence:** no conflicts, insights, weather, free windows or Kev.
@@ -183,7 +183,7 @@ No error ever shows the address, the provider's text or a stack. A failed refres
 
 - The secret address is a bearer credential. It is stored only as **AES-256-GCM** ciphertext (`credentials_encrypted`), with a fresh random IV, the key id, and the connection id and owner id as associated data so a ciphertext cannot be moved to another row. Node's built-in `crypto` only.
 - The key is `HOME_CREDENTIALS_KEY` (32 random bytes, base64), **different in every environment**, set by the owner, never committed (CLAUDE.md rule 10). An optional previous key allows rotation; a re-encryption step is documented in DEPLOY.md by Package 2. If the key is missing, connecting and refreshing are refused calmly and the rest of HOME runs; it never fails boot.
-- A **keyed fingerprint** of the normalised address (HMAC-SHA-256 with a key derived from `HOME_CREDENTIALS_KEY`) lets HOME recognise the exact same address without storing it in plain text (§4.4).
+- A **keyed fingerprint** of the normalised address (HMAC-SHA-256 under `HOME_FINGERPRINT_KEY`, separate stable key material never rotated with `HOME_CREDENTIALS_KEY`; ADR 0007 §34) lets HOME recognise the exact same address without storing it in plain text (§4.4).
 - The address, its ciphertext and its fingerprint never reach the client (not in HTML, client props or form state), logs, audit rows, Activity, exports, error copy or any LLM context. After connecting, HOME shows only the calendar's name and "Google Calendar".
 - **Disconnect destroys the credential at once** (ciphertext cleared in the same transaction that marks the connection disconnected).
 
@@ -211,7 +211,7 @@ No error ever shows the address, the provider's text or a stack. A failed refres
 
 ### 4.6 Audit (ADR 0007 §4)
 
-- `calendar_connection.create`, `.disconnect`, `.reconnect`; `calendar_source.update`: one structural row each (provider, status, which settings changed; never names typed by a person, never the address).
+- `calendar.connect`, `calendar.disconnect`, `calendar.reconnect` (about the connection); `calendar_source.create`, `.update`, `.archive`, `.restore` (about the calendar): one structural row each (provider, which settings changed, counts; never names typed by a person, never the address). Names as built in Package 4b (ADR 0007 §37).
 - **One `calendar.sync` row per refresh** on the source, with counts only: `added`, `changed`, `archived`, `restored`, `skipped`, and the status. No per-event rows, no provider text, no credential.
 - P-1 holds: a source's rows follow the source's visibility (registered in `audit-subjects.ts`); a connection's rows are its owner's only. Activity reads them in words ("Calendar refreshed: 3 added, 1 changed").
 

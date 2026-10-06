@@ -30,4 +30,22 @@ describe('execution tokens', () => {
       .filter((f) => f !== join('src', 'domain', 'common', 'write.ts'));
     expect(offenders).toEqual([]);
   });
+
+  it('sync actors are issued only by the calendar sync service (M4 contract §3.4)', () => {
+    const issuers = walk('src')
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .filter((f) => /\bissueSyncActor\b/.test(readFileSync(f, 'utf8')));
+    expect(issuers.sort()).toEqual([
+      join('src', 'domain', 'calendar', 'sync.ts'),
+      join('src', 'domain', 'common', 'write.ts'),
+    ]);
+  });
+
+  it("only the sync service sets created_via 'sync'", () => {
+    const offenders = walk('src')
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .filter((f) => /createdVia:\s*'sync'/.test(readFileSync(f, 'utf8')))
+      .filter((f) => f !== join('src', 'domain', 'calendar', 'mirror.ts'));
+    expect(offenders).toEqual([]);
+  });
 });

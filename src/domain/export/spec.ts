@@ -9,11 +9,14 @@ import { z } from 'zod';
 // Pure: no database, no server code.
 
 export const EXPORT_FORMAT = 'home-export';
-export const EXPORT_VERSION = 1;
+// Version 2 (M4 Package 4b): adds `calendars` and the events' occurrence
+// fields (`recurrenceParentId`, `recurrenceOriginal`). Version 1 was M3's.
+export const EXPORT_VERSION = 2;
 
 /** Record types in export order; each names its table and how it sorts. */
 export const EXPORT_TYPES = {
   people: { table: 'person', sortBy: 'createdAt' },
+  calendars: { table: 'calendar_source', sortBy: 'createdAt' },
   events: { table: 'event', sortBy: 'createdAt' },
   eventPeople: { table: 'event_person', sortBy: 'createdAt' },
   projects: { table: 'project', sortBy: 'createdAt' },
@@ -70,8 +73,29 @@ export const EXPORTED_COLUMNS: Record<ExportType, readonly string[]> = {
     'calendarSourceId',
     'externalUid',
     'externalEtag',
+    'recurrenceParentId',
+    'recurrenceOriginal',
     'originCaptureId',
     'visibility',
+    'createdBy',
+    'createdVia',
+    'createdAt',
+    'updatedAt',
+    'archivedAt',
+  ],
+  // A calendar as its readers see it: never its connection, credential or
+  // fingerprint (calendar_connection is excluded), nor its feed hash.
+  calendars: [
+    'id',
+    'name',
+    'visibility',
+    'defaultKind',
+    'defaultPersonIds',
+    'lastAttemptAt',
+    'lastSyncedAt',
+    'lastSyncStatus',
+    'lastSyncErrorCode',
+    'lastSkippedCount',
     'createdBy',
     'createdVia',
     'createdAt',
@@ -223,6 +247,13 @@ export const EXPORTED_COLUMNS: Record<ExportType, readonly string[]> = {
 
 /** Columns of exported tables left out on purpose, with the reason. */
 export const EXCLUDED_COLUMNS: Record<string, Record<string, string>> = {
+  calendar_source: {
+    connectionId:
+      'points at the owner-only connection row (credential infrastructure), which is never exported',
+    externalCalendarId:
+      'provider bookkeeping: which calendar within the connection (ICS: always default)',
+    feedHash: 'sync bookkeeping: a hash of the feed as last read, to skip unchanged refreshes',
+  },
   audit_log: {
     visibility: 'P-1 snapshot used to decide who sees the row; Activity never shows it',
     visibleToUserId: 'P-1 snapshot used to decide who sees the row; Activity never shows it',
@@ -236,17 +267,11 @@ export const EXCLUDED_TABLES: Record<string, string> = {
   account: 'authentication secret: provider credentials',
   verification: 'authentication secret: sign-in link tokens',
   rate_limit: 'sign-in rate-limit counters, not family data',
-  // M4 (migration 0007, ADR 0007 §33). The connection is credential
+  // M4 (migration 0007, ADR 0007 §33, §38). The connection is credential
   // infrastructure: its sealed address, key id and address fingerprint are
   // never exported (M4 contract §4.1), whatever happens to the rest.
   calendar_connection:
     'calendar credential infrastructure: the sealed address, its key id and fingerprint are never exported',
-  // The source's own settings (name, who can see it, usual kind and people)
-  // are family data and join the export with the calendar service in Package
-  // 4b, once 0007 has run in production (contract §7); until then the table
-  // is empty. Its feed hash and sync state are bookkeeping, not family data.
-  calendar_source:
-    'joins the export in M4 Package 4b with its service (contract §7); empty until then',
 };
 
 /**
@@ -258,8 +283,8 @@ export const SECRET_COLUMNS = {
   calendar_connection: ['credentialsEncrypted', 'credentialsKeyId', 'addressFingerprint'],
 } as const;
 
-/** Version 1 of the export, as a schema: what an export file must look like. */
-export const exportV1 = z
+/** The current version of the export, as a schema: what an export file must look like. */
+export const exportSchema = z
   .object({
     format: z.literal(EXPORT_FORMAT),
     version: z.literal(EXPORT_VERSION),
@@ -291,4 +316,4 @@ export const exportV1 = z
   })
   .strict();
 
-export type HomeExport = z.infer<typeof exportV1>;
+export type HomeExport = z.infer<typeof exportSchema>;

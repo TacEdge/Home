@@ -37,6 +37,31 @@ export function executionOf(deps: Deps): Execution | null {
   return deps.execution && issued.has(deps.execution) ? deps.execution : null;
 }
 
+const syncActors = new WeakSet<object>();
+
+/**
+ * The calendar sync actor (M4 contract §3.4, ADR 0007 §8): the calendar
+ * owner's user actor with `via: 'sync'`. For the sync service only
+ * (tests/unit/execution-guard.test.ts enforces it); never from a request.
+ * Its writes are the owner's, audited as from a calendar.
+ */
+export function issueSyncActor(owner: { userId: string; email: string }): UserActor {
+  const actor: UserActor = Object.freeze({
+    kind: 'user',
+    userId: owner.userId,
+    email: owner.email,
+    via: 'sync',
+    channel: 'web',
+  });
+  syncActors.add(actor);
+  return actor;
+}
+
+/** Whether an actor is one the sync service issued; a hand-made `via: 'sync'` is not. */
+export function isSyncActor(actor: UserActor): boolean {
+  return actor.via === 'sync' && syncActors.has(actor);
+}
+
 /** `created_via` and `origin_capture_id` for a record a service creates. */
 export function provenanceOf(deps: Deps): {
   createdVia: 'ui' | 'kev';

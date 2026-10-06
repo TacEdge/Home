@@ -14,6 +14,7 @@ const ALLOWED = [
   'src/db/schema/index.ts', // re-exports it
   'src/domain/export/spec.ts', // names the secret columns to keep them out of the export
   'src/trust/credentials.ts', // seals, opens and fingerprints (Package 2); reads no table
+  'src/trust/audit-subjects.ts', // registers the connection's owner-only Activity rule; names only its owner column
 ];
 const ALLOWED_DIR = 'src/domain/calendar/'; // the calendar service (Package 4b)
 const TOUCHES =

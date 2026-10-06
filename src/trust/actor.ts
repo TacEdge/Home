@@ -5,7 +5,10 @@ import 'server-only';
 // The system actor exists only for internal jobs (sync, retention) and can
 // never be produced from a request.
 
-export type Via = 'ui' | 'kev';
+// `sync` is the calendar sync actor (M4 contract §3.4): a calendar owner's
+// user actor, minted only by the sync service (src/domain/common/write.ts),
+// never from a request.
+export type Via = 'ui' | 'kev' | 'sync';
 export type Channel = 'web'; // later: 'voice' | 'share' | 'email'
 
 export type UserActor = {

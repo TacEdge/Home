@@ -22,4 +22,7 @@ export function assertCanWrite(actor: UserActor): void {
   // actor passed through a cast can never write as a person.
   if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
   if (actor.via === 'kev') throw new NotPermittedError('kev_cannot_write');
+  // The sync actor writes synced events through the sync service only, never
+  // through a person's services (M4 contract §3.4).
+  if (actor.via === 'sync') throw new NotPermittedError('sync_actor');
 }
