@@ -23,7 +23,7 @@ import { createTask, getTask } from '@/domain/tasks/service';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit } from '@/trust/audit';
 import { adminDb, testDb } from './db';
-import { ensureFixtureUsers, type Household } from './fixtures';
+import { ensureFixtureUsers, syntheticCalendarSource, type Household } from './fixtures';
 
 // Proposals and the executor (Package 4b; contract §5.7, P-2, P-3, ADR 0005
 // §30, §32). Kev proposes; only the requesting person, acting directly,
@@ -406,7 +406,7 @@ describe('failure leaves no write, with a fixed reason', () => {
         payload: {
           id: (
             await admin.db.execute(
-              sql`insert into event (created_via, title, kind, starts_at, ends_at, time_zone, source, calendar_source_id, external_uid) values ('sync', 'S', 'work', now(), now(), 'UTC', 'synced', gen_random_uuid(), gen_random_uuid()::text) returning id`,
+              sql`insert into event (created_by, created_via, title, kind, starts_at, ends_at, time_zone, source, calendar_source_id, external_uid) values (${h.sam.userId}, 'sync', 'S', 'work', now(), now(), 'UTC', 'synced', ${await syntheticCalendarSource(admin.db, h.sam.userId)}::uuid, gen_random_uuid()::text) returning id`,
             )
           ).rows[0]?.id as string,
           patch: { title: 'canary-prop-fail' },

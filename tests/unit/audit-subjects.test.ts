@@ -16,7 +16,9 @@ import { auditSubjects } from '@/trust/audit-subjects';
 // table may be PENDING between its migration PR and its application PR, and
 // only while nothing outside src/db refers to it. The application PR that
 // starts using a table registers it and removes it from this list.
-const PENDING_REGISTRATION: Record<string, string> = {};
+const PENDING_REGISTRATION: Record<string, string> = {
+  calendar_source: 'migration 0007 (M4 Package 4a); registered by the calendar service in 4b',
+};
 
 // Tables private to one user by user_id (P-1 b): registered with an
 // owner-only rule although they carry no visibility column. Messages are

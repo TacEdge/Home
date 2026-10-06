@@ -1,6 +1,6 @@
 # M4 — Calendar Integration: Build Contract
 
-Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code.
+Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–3 merged; Package 4a (migration `0007`, ADR 0007 §33) is the migration-only PR, to be run in Production and Preview by the owner before 4b merges.
 Implementers: per package (§2.3). Reviewer: Opus reviews every package before the owner merges it.
 
 M4 brings the family's calendars into HOME. At the end of M4 an adult can connect a Google calendar by its secret iCal address, see its events on Today, Forward, a profile's *Coming up* and each event's page beside the events entered by hand, say who is going and who is responsible for a synced event, see how fresh each calendar is, refresh it, and disconnect it. A person's profile shows their regular week. A repeating manual event can be changed for one occurrence. **HOME never writes to a calendar, nothing runs in the background, and nothing here is intelligence:** no conflicts, insights, weather, free windows or Kev.
@@ -259,7 +259,7 @@ While `HOME_REAL_DATA` is closed, every connect and sync write is refused by the
 
 ## 7. Schema (Package 4a, migration only)
 
-Additive only, under the existing migration rules (`MIGRATIONS.md`): new tables, nullable columns, constraints that existing rows already satisfy. Exact names and types are fixed in Package 4a and recorded in FAMILY-DATA-MODEL and ADR 0007.
+Additive only, under the existing migration rules (`MIGRATIONS.md`): new tables, nullable columns, constraints that existing rows already satisfy. Exact names and types are fixed in Package 4a (migration `0007`) and recorded in FAMILY-DATA-MODEL and ADR 0007 §33, which also record where 4a refined this section.
 
 - **`calendar_connection`**: `id`; `owner_user_id` (→ `user`); `provider` (`ics`); `credentials_encrypted` (nullable: cleared on disconnect); `credentials_key_id`; `address_fingerprint` (indexed; the duplicate rule in §4.4 is enforced by the service and a partial unique index over live connections); `status` (`active` | `disconnected`); `last_error_code`; `created_at`, `updated_at`, `disconnected_at`. No visibility column: owner-only.
 - **`calendar_source`**: common fields (`created_by` = the owner, `created_via`, `visibility`, `archived_at`); `connection_id` (→ `calendar_connection`); `external_calendar_id`; `name`; `default_kind`; `default_person_ids` (uuid array, validated by the service); `feed_hash`; `last_attempt_at`, `last_synced_at`, `last_sync_status`, `last_sync_error_code`, `last_skipped_count`.

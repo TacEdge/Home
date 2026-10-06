@@ -135,11 +135,11 @@ describe('runtime/app role (home_app)', () => {
     },
   );
 
-  it('gains no column-level grants and no privileges on any other table through 0005', async () => {
+  it('gains no column-level grants and no privileges on any other table through 0007', async () => {
     // No explicit column ACL on any table 0005 creates or alters.
     const cols = await db.execute(sql`
       select attrelid::regclass::text as table_name, attname from pg_attribute
-      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note']::regclass[])
+      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note', 'calendar_connection', 'calendar_source']::regclass[])
         and attacl is not null`);
     expect(cols.rows).toEqual([]);
     const tables = await db.execute(sql`
@@ -148,6 +148,8 @@ describe('runtime/app role (home_app)', () => {
     expect(tables.rows.map((r) => r.table_name)).toEqual([
       'account',
       'audit_log',
+      'calendar_connection', // 0007
+      'calendar_source', // 0007
       'capture',
       'context',
       'conversation', // 0006
@@ -181,8 +183,14 @@ describe('runtime/app role (home_app)', () => {
     expect(r.rows).toEqual([{ tgname: 'capture_source_immutable', tgenabled: 'O' }]);
   });
 
-  it.each(['conversation', 'message', 'insight_response'])(
-    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0006, through 0002's default privileges)",
+  it.each([
+    'conversation',
+    'message',
+    'insight_response',
+    'calendar_connection',
+    'calendar_source',
+  ])(
+    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0006–0007, through 0002's default privileges)",
     async (table) => {
       const grants = await db.execute(
         sql`select privilege_type, is_grantable from information_schema.role_table_grants
@@ -225,13 +233,18 @@ describe('runtime/app role (home_app)', () => {
     await expectPermissionDenied(db.execute(sql`truncate kev_usage`));
   });
 
-  it.each(['conversation', 'message', 'kev_usage', 'insight_response'])(
-    'cannot ALTER or DROP %s',
-    async (table) => {
-      await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
-      await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
-    },
-  );
+  it.each([
+    'conversation',
+    'message',
+    'kev_usage',
+    'insight_response',
+    'calendar_connection', // 0007
+    'calendar_source', // 0007
+  ])('cannot ALTER, DROP or TRUNCATE %s', async (table) => {
+    await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
+    await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
+    await expectPermissionDenied(db.execute(sql.raw(`truncate ${table}`)));
+  });
 
   it('cannot disable or drop the kev_usage triggers', async () => {
     await expectPermissionDenied(db.execute(sql`alter table kev_usage disable trigger all`));

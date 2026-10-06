@@ -7,6 +7,7 @@ import {
   EXCLUDED_TABLES,
   EXPORT_TYPES,
   EXPORTED_COLUMNS,
+  SECRET_COLUMNS,
   exportV1,
   type ExportType,
 } from '@/domain/export/spec';
@@ -89,5 +90,27 @@ describe('export completeness', () => {
       exportV1.safeParse({ ...base, records: { ...empty, people: [{ id: 'x', secret: 1 }] } })
         .success,
     ).toBe(false);
+  });
+
+  it('no credential column is exported, by any record type, and its table stays excluded', () => {
+    for (const [table, columns] of Object.entries(SECRET_COLUMNS)) {
+      expect(EXCLUDED_TABLES[table], `${table} must stay excluded`).toBeTruthy();
+      expect(exportedTables.has(table), table).toBe(false);
+      const defined = Object.keys(
+        getTableColumns(tables.find((t) => getTableName(t) === table) as PgTable),
+      );
+      for (const c of columns) {
+        expect(defined, `${table}.${c} exists`).toContain(c);
+        for (const type of types) expect(EXPORTED_COLUMNS[type], `${type}: ${c}`).not.toContain(c);
+      }
+    }
+  });
+
+  it('every column that can hold a calendar credential is listed as secret', () => {
+    const conn = tables.find((t) => getTableName(t) === 'calendar_connection') as PgTable;
+    const credentialish = Object.keys(getTableColumns(conn)).filter((c) =>
+      /credential|fingerprint|secret|token|key/i.test(c),
+    );
+    expect(credentialish.sort()).toEqual([...SECRET_COLUMNS.calendar_connection].sort());
   });
 });

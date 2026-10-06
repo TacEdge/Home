@@ -7,12 +7,18 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '@/db/create';
 import { captureVerbatim, listCaptures } from '@/domain/captures/service';
 import { createContext, listContext } from '@/domain/context/service';
-import { createEvent, listEvents, updateEvent } from '@/domain/events/service';
+import {
+  createEvent,
+  listEventPeople,
+  listEvents,
+  setEventPerson,
+  updateEvent,
+} from '@/domain/events/service';
 import { createNote, listNotes } from '@/domain/notes/service';
 import { createPerson, listPeople } from '@/domain/people/service';
 import { createProject, listProjects } from '@/domain/projects/service';
 import { approveProposal, createProposal, listProposals } from '@/domain/proposals/service';
-import { listTasks, updateTask } from '@/domain/tasks/service';
+import { createTask, listTasks, updateTask } from '@/domain/tasks/service';
 import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit, recordAudit } from '@/trust/audit';
 import { assertTestDatabase } from '../db-guard';
@@ -481,6 +487,8 @@ describe('0004: tables and columns', () => {
       ['external_uid', 'text', 'YES', null],
       ['external_etag', 'text', 'YES', null],
       ['origin_capture_id', 'uuid', 'YES', null], // added by 0005
+      ['recurrence_parent_id', 'uuid', 'YES', null], // added by 0007
+      ['recurrence_original', 'text', 'YES', null], // added by 0007
     ]);
   });
 
@@ -538,11 +546,10 @@ describe('0004: tables and columns', () => {
     ]);
   });
 
-  it('no CalendarConnection or CalendarSource tables, and no foreign key on calendar_source_id (D-M2-3)', async () => {
-    const r = await db.execute(sql`
-      select table_name from information_schema.tables
-      where table_schema = 'public' and table_name like 'calendar%'`);
-    expect(r.rows).toEqual([]);
+  it('0004 itself created no CalendarConnection or CalendarSource tables and no foreign key on calendar_source_id (D-M2-3; those are 0007)', async () => {
+    const text = readFileSync(join(MIGRATIONS, '0004_events_projects_tasks_notes.sql'), 'utf8');
+    expect(text).not.toMatch(/CREATE TABLE "calendar_/);
+    expect(text).not.toMatch(/FOREIGN KEY \("calendar_source_id"\)/);
   });
 });
 
@@ -559,7 +566,10 @@ describe('0004: constraints and indexes', () => {
       'event_created_via_check',
       'event_domain_check',
       'event_kind_check',
+      'event_recurrence_original_check', // 0007
+      'event_recurrence_parent_check', // 0007
       'event_source_check',
+      'event_sync_provenance_check', // 0007
       'event_synced_check',
       'event_time_order_check',
       'event_time_shape_check',
@@ -606,8 +616,10 @@ describe('0004: constraints and indexes', () => {
     expect(
       r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
     ).toEqual([
+      'event.calendar_source_id -> calendar_source RESTRICT', // 0007
       'event.created_by -> user RESTRICT',
       'event.origin_capture_id -> capture SET NULL', // 0005
+      'event.recurrence_parent_id -> event SET NULL', // 0007
       'event_person.created_by -> user RESTRICT',
       'event_person.event_id -> event CASCADE',
       'event_person.person_id -> person CASCADE',
@@ -630,10 +642,13 @@ describe('0004: constraints and indexes', () => {
     expect(r.rows.map((x) => x.indexname)).toEqual([
       'event_archived_at_idx',
       'event_created_by_idx',
+      'event_manual_override_unique', // 0007
       'event_origin_capture_id_idx', // 0005
       'event_pkey',
+      'event_recurrence_parent_id_idx', // 0007
       'event_start_date_idx',
       'event_starts_at_idx',
+      'event_synced_identity_unique', // 0007
       'event_visibility_created_by_idx',
       'event_person_created_by_idx',
       'event_person_event_person_role_unique',
@@ -747,10 +762,16 @@ describe('0004: constraint behaviour for the runtime role (each case rolled back
 
   it('event: a synced event with a source and uid is accepted; RRULE and EXDATEs are stored as given', () =>
     withBase(async (tx) => {
-      await ev(
-        tx,
-        "starts_at, ends_at, time_zone, source, calendar_source_id, external_uid, rrule, exdates|'2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'Pacific/Auckland', 'synced', gen_random_uuid(), 'uid-1', 'FREQ=WEEKLY;BYDAY=WE', array['2026-10-21T02:30:00Z']",
-      );
+      // Since 0007 the source must exist and the row is the sync path's (created_via 'sync').
+      const c =
+        await tx.execute(sql`insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint)
+        values (${U}, 'ics', ${`hc1.0123456789abcdef.${'A'.repeat(16)}.${'B'.repeat(24)}.${'C'.repeat(22)}`}, '0123456789abcdef', ${`fp1.${'D'.repeat(43)}`}) returning id`);
+      const src =
+        await tx.execute(sql`insert into calendar_source (created_by, created_via, connection_id, external_calendar_id, name)
+        values (${U}, 'ui', ${c.rows[0]?.id as string}, 'default', 'Synthetic') returning id`);
+      await tx.execute(sql`insert into event (created_by, created_via, title, kind, starts_at, ends_at, time_zone, source, calendar_source_id, external_uid, rrule, exdates)
+        values (${U}, 'sync', 'E', 'other', '2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z', 'Pacific/Auckland', 'synced',
+                ${src.rows[0]?.id as string}, 'uid-1', 'FREQ=WEEKLY;BYDAY=WE', array['2026-10-21T02:30:00Z'])`);
       const r = await tx.execute(
         sql`select rrule, exdates from event where source = 'synced' and created_at = now()`,
       );
@@ -1081,8 +1102,10 @@ describe('0005: tables and columns', () => {
   });
 
   it('adds a nullable origin_capture_id, with no default, as the last column of event, project, task and note', async () => {
-    for (const t of ORIGIN_TABLES)
-      expect((await columnsOf(t)).at(-1), t).toEqual(['origin_capture_id', 'uuid', 'YES', null]);
+    for (const t of ORIGIN_TABLES) {
+      const cols = (await columnsOf(t)).filter((c) => !c[0].startsWith('recurrence_')); // 0007's, after it
+      expect(cols.at(-1), t).toEqual(['origin_capture_id', 'uuid', 'YES', null]);
+    }
   });
 
   it('0005 creates no conversation or message tables, and no foreign key on message_id or conversation_id (those are 0006)', async () => {
@@ -1141,7 +1164,7 @@ describe('0005: constraints, foreign keys, indexes and trigger', () => {
     // No new CHECK on an existing table.
     for (const t of ORIGIN_TABLES)
       expect(
-        (await checksOf(t)).filter((c) => String(c).includes('origin')),
+        (await checksOf(t)).filter((c) => String(c).includes('origin_capture')),
         t,
       ).toEqual([]);
   });
@@ -1225,7 +1248,9 @@ describe('0005: constraints, foreign keys, indexes and trigger', () => {
     const u = await db.execute(sql`
       select indexname from pg_indexes
       where tablename in ('event', 'project', 'task', 'note') and indexdef ilike '%unique%'
-        and indexname <> tablename || '_pkey'`);
+        and indexname <> tablename || '_pkey'
+        -- 0007's approved partial indexes (migrations-additive.test.ts)
+        and indexname not in ('event_synced_identity_unique', 'event_manual_override_unique')`);
     expect(u.rows).toEqual([]);
   });
 });
@@ -1682,7 +1707,10 @@ describe('0005 upgrades the production schema (0000–0004) in place', () => {
       const rows = async (t: string) =>
         (
           await upAdmin.db.execute(
-            sql.raw(`select to_jsonb(r) - 'origin_capture_id' as row from ${t} r order by id`),
+            // Columns added by later migrations are not part of what 0005 changed.
+            sql.raw(
+              `select to_jsonb(r) - 'origin_capture_id' - 'recurrence_parent_id' - 'recurrence_original' as row from ${t} r order by id`,
+            ),
           )
         ).rows;
       const snapshot = async () => ({
@@ -2161,6 +2189,801 @@ describe('0006 upgrades the production schema (0000–0005) in place', () => {
       expect((await listAudit(sam, {}, deps)).rows.length).toBeGreaterThan(0);
     } finally {
       await upApp.close();
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0007: calendar connections and sources, synced identity and occurrence
+// overrides (M4 Package 4a, contract §7, ADR 0007 §33). Synthetic values only:
+// the sealed credential and fingerprint below have Package 2's shapes and
+// open nothing.
+
+const SEALED = `hc1.0123456789abcdef.${'A'.repeat(16)}.${'B'.repeat(24)}.${'C'.repeat(22)}`;
+const KEY_ID = '0123456789abcdef';
+const FINGERPRINT = (n: number) => `fp1.${String(n).repeat(43).slice(0, 43)}`;
+const PLAIN_ADDRESS =
+  'https://calendar.google.com/calendar/ical/synthetic.family%40example.test/private-0123456789abcdef/basic.ics';
+
+describe('0007: tables and columns', () => {
+  it('calendar_connection: owner, provider, sealed credential, key id, fingerprint, state; no visibility, no address', async () => {
+    expect(await columnsOf('calendar_connection')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['owner_user_id', 'text', 'NO', null],
+      ['provider', 'text', 'NO', null],
+      ['credentials_encrypted', 'text', 'YES', null],
+      ['credentials_key_id', 'text', 'YES', null],
+      ['address_fingerprint', 'text', 'YES', null],
+      ['status', 'text', 'NO', "'active'::text"],
+      ['last_error_code', 'text', 'YES', null],
+      ['created_at', TS, 'NO', 'now()'],
+      ['updated_at', TS, 'NO', 'now()'],
+      ['disconnected_at', TS, 'YES', null],
+    ]);
+  });
+
+  it("calendar_source: common fields, its connection, HOME's settings and freshness", async () => {
+    expect(await columnsOf('calendar_source')).toEqual([
+      ...COMMON,
+      ['connection_id', 'uuid', 'NO', null],
+      ['external_calendar_id', 'text', 'NO', null],
+      ['name', 'text', 'NO', null],
+      ['default_kind', 'text', 'YES', null],
+      ['default_person_ids', '_uuid', 'NO', "'{}'::uuid[]"],
+      ['feed_hash', 'text', 'YES', null],
+      ['last_attempt_at', TS, 'YES', null],
+      ['last_synced_at', TS, 'YES', null],
+      ['last_sync_status', 'text', 'YES', null],
+      ['last_sync_error_code', 'text', 'YES', null],
+      ['last_skipped_count', 'integer', 'YES', null],
+    ]);
+  });
+
+  it('adds only two nullable columns to event, with no default, and nothing to any other existing table', async () => {
+    expect((await columnsOf('event')).slice(-2)).toEqual([
+      ['recurrence_parent_id', 'uuid', 'YES', null],
+      ['recurrence_original', 'text', 'YES', null],
+    ]);
+    const text = readFileSync(join(MIGRATIONS, '0007_calendar_schema.sql'), 'utf8');
+    expect(
+      [...text.matchAll(/ALTER TABLE "([^"]+)" ADD COLUMN "([^"]+)"/g)].map(
+        (m) => `${m[1]}.${m[2]}`,
+      ),
+    ).toEqual(['event.recurrence_parent_id', 'event.recurrence_original']);
+    expect(text).not.toMatch(/\b(DROP|RENAME|ALTER COLUMN|UPDATE "|DELETE FROM)\b/);
+  });
+});
+
+describe('0007: constraints, foreign keys and indexes', () => {
+  const checksOf = async (table: string) =>
+    (
+      await db.execute(
+        sql`select conname from pg_constraint where conrelid = ${table}::regclass and contype = 'c' order by 1`,
+      )
+    ).rows.map((r) => r.conname);
+
+  it('has the CHECK constraints for state, credential shapes, codes, names and kinds', async () => {
+    expect(await checksOf('calendar_connection')).toEqual([
+      'calendar_connection_credentials_check',
+      'calendar_connection_error_code_check',
+      'calendar_connection_fingerprint_check',
+      'calendar_connection_ics_fingerprint_check',
+      'calendar_connection_key_id_check',
+      'calendar_connection_provider_check',
+      'calendar_connection_state_check',
+      'calendar_connection_status_check',
+    ]);
+    expect(await checksOf('calendar_source')).toEqual([
+      'calendar_source_created_via_check',
+      'calendar_source_default_kind_check',
+      'calendar_source_error_code_check',
+      'calendar_source_external_calendar_id_check',
+      'calendar_source_feed_hash_check',
+      'calendar_source_last_sync_status_check',
+      'calendar_source_name_check',
+      'calendar_source_skipped_check',
+      'calendar_source_visibility_check',
+    ]);
+  });
+
+  it('has exactly these foreign keys: nothing calendar-related cascades; an override outlives its series', async () => {
+    const r = await admin.db.execute(sql`
+      select tc.table_name, kcu.column_name, ccu.table_name as target, rc.delete_rule
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu using (constraint_schema, constraint_name)
+      join information_schema.referential_constraints rc using (constraint_schema, constraint_name)
+      join information_schema.constraint_column_usage ccu using (constraint_schema, constraint_name)
+      where tc.constraint_type = 'FOREIGN KEY'
+        and (tc.table_name like 'calendar%' or ccu.table_name like 'calendar%'
+             or kcu.column_name = 'recurrence_parent_id')
+      order by 1, 2`);
+    expect(
+      r.rows.map((x) => `${x.table_name}.${x.column_name} -> ${x.target} ${x.delete_rule}`),
+    ).toEqual([
+      'calendar_connection.owner_user_id -> user RESTRICT',
+      'calendar_source.connection_id -> calendar_connection RESTRICT',
+      'calendar_source.created_by -> user RESTRICT',
+      'event.calendar_source_id -> calendar_source RESTRICT',
+      'event.recurrence_parent_id -> event SET NULL',
+    ]);
+  });
+
+  it('indexes the owner, one live fingerprint, one source per calendar, synced identity and overrides', async () => {
+    const r = await db.execute(sql`
+      select tablename, indexname, indexdef from pg_indexes
+      where tablename in ('calendar_connection', 'calendar_source')
+         or indexname in ('event_synced_identity_unique', 'event_manual_override_unique', 'event_recurrence_parent_id_idx')
+      order by 1, 2`);
+    expect(r.rows.map((x) => x.indexname)).toEqual([
+      'calendar_connection_live_fingerprint_unique',
+      'calendar_connection_owner_user_id_idx',
+      'calendar_connection_pkey',
+      'calendar_source_connection_calendar_unique',
+      'calendar_source_created_by_idx',
+      'calendar_source_pkey',
+      'calendar_source_visibility_created_by_idx',
+      'event_manual_override_unique',
+      'event_recurrence_parent_id_idx',
+      'event_synced_identity_unique',
+    ]);
+    const def = (n: string) => String(r.rows.find((x) => x.indexname === n)?.indexdef);
+    // A NULL recurrence_original would never collide, so it is compared as ''.
+    expect(def('event_synced_identity_unique')).toMatch(
+      /UNIQUE INDEX .* \(calendar_source_id, external_uid, COALESCE\(recurrence_original, ''::text\)\) WHERE \(source = 'synced'::text\)/,
+    );
+    expect(def('event_manual_override_unique')).toMatch(
+      /UNIQUE INDEX .* \(recurrence_parent_id, recurrence_original\) WHERE \(\(source = 'manual'::text\) AND \(recurrence_parent_id IS NOT NULL\) AND \(archived_at IS NULL\)\)/,
+    );
+    expect(def('calendar_connection_live_fingerprint_unique')).toMatch(
+      /UNIQUE INDEX .* \(address_fingerprint\) WHERE \(status = 'active'::text\)/,
+    );
+  });
+
+  it('adds no trigger and no column-level grant; home_app has SELECT, INSERT, UPDATE and DELETE on both tables, nothing more', async () => {
+    const t = await admin.db.execute(sql`
+      select count(*)::int as n from pg_trigger
+      where tgrelid in ('calendar_connection'::regclass, 'calendar_source'::regclass) and not tgisinternal`);
+    expect(t.rows[0]?.n).toBe(0);
+    const cols = await db.execute(sql`
+      select attname from pg_attribute
+      where attrelid in ('calendar_connection'::regclass, 'calendar_source'::regclass) and attacl is not null`);
+    expect(cols.rows).toEqual([]);
+    for (const table of ['calendar_connection', 'calendar_source']) {
+      const grants = await db.execute(
+        sql`select privilege_type, is_grantable from information_schema.role_table_grants
+            where grantee = 'home_app' and table_name = ${table} order by 1`,
+      );
+      expect(grants.rows, table).toEqual(
+        ['DELETE', 'INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+          privilege_type,
+          is_grantable: 'NO',
+        })),
+      );
+    }
+  });
+});
+
+describe('0007: constraint behaviour for the runtime role (each case rolled back)', () => {
+  const U = 'u-0007';
+  const V = 'u-0007b';
+  type Ids = { connection: string; source: string; source2: string };
+  const one = async (tx: Db, q: ReturnType<typeof sql>) =>
+    (await tx.execute(q)).rows[0]?.id as string;
+  /** Expects a failure inside a savepoint, so the case can go on after it. */
+  const expectIn = (tx: Db, q: (sp: Db) => PromiseLike<unknown>, code: string) =>
+    expectCode(
+      tx.transaction(async (sp) => {
+        await q(sp as unknown as Db);
+      }),
+      code,
+    );
+  const withBase = (fn: (tx: Db, ids: Ids) => Promise<void>) =>
+    rolledBack(async (tx) => {
+      await tx.execute(
+        sql`insert into "user" (id, name, email) values (${U}, 'U', 'u-0007@example.test'), (${V}, 'V', 'u-0007b@example.test')`,
+      );
+      const connection = await one(
+        tx,
+        sql`insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint)
+            values (${U}, 'ics', ${SEALED}, ${KEY_ID}, ${FINGERPRINT(1)}) returning id`,
+      );
+      const connection2 = await one(
+        tx,
+        sql`insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint)
+            values (${V}, 'ics', ${SEALED}, ${KEY_ID}, ${FINGERPRINT(2)}) returning id`,
+      );
+      const source = await one(
+        tx,
+        sql`insert into calendar_source (created_by, created_via, visibility, connection_id, external_calendar_id, name)
+            values (${U}, 'ui', 'household', ${connection}, 'default', 'Synthetic family calendar') returning id`,
+      );
+      const source2 = await one(
+        tx,
+        sql`insert into calendar_source (created_by, created_via, visibility, connection_id, external_calendar_id, name)
+            values (${V}, 'ui', 'private', ${connection2}, 'default', 'Synthetic work calendar') returning id`,
+      );
+      await fn(tx, { connection, source, source2 });
+    });
+  /** A synced event row as the sync path will write it. */
+  const synced = (
+    source: string,
+    uid: string,
+    original: string | null,
+    parent: string | null = null,
+    via = 'sync',
+  ) => sql`insert into event (created_by, created_via, visibility, title, kind, all_day, start_date, end_date,
+                              source, calendar_source_id, external_uid, recurrence_original, recurrence_parent_id)
+           values (${U}, ${via}, 'household', 'Synthetic', 'other', true, '2026-10-20', '2026-10-21',
+                   'synced', ${source}, ${uid}, ${original}, ${parent}) returning id`;
+  const manual = (original: string | null = null, parent: string | null = null) =>
+    sql`insert into event (created_by, created_via, title, kind, all_day, start_date, end_date, recurrence_original, recurrence_parent_id)
+        values (${U}, 'ui', 'Manual', 'other', true, '2026-10-20', '2026-10-21', ${original}, ${parent}) returning id`;
+  const conn = (state: string) =>
+    sql.raw(
+      `insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint, status, disconnected_at) values ${state}`,
+    );
+
+  describe('calendar_connection', () => {
+    it('a live connection holds a sealed credential and its key; disconnecting clears both and keeps the row and its fingerprint', () =>
+      withBase(async (tx, { connection }) => {
+        await tx.execute(sql`update calendar_connection
+          set status = 'disconnected', credentials_encrypted = null, credentials_key_id = null, disconnected_at = now()
+          where id = ${connection}`);
+        const r = await tx.execute(
+          sql`select status, credentials_encrypted, credentials_key_id, address_fingerprint from calendar_connection where id = ${connection}`,
+        );
+        expect(r.rows[0]).toEqual({
+          status: 'disconnected',
+          credentials_encrypted: null,
+          credentials_key_id: null,
+          address_fingerprint: FINGERPRINT(1),
+        });
+      }));
+
+    it.each([
+      [
+        'a live connection without a credential',
+        `('${U}', 'ics', null, null, '${FINGERPRINT(3)}', 'active', null)`,
+      ],
+      [
+        'a live connection without a key id',
+        `('${U}', 'ics', '${SEALED}', null, '${FINGERPRINT(3)}', 'active', null)`,
+      ],
+      [
+        'a live connection with a disconnection time',
+        `('${U}', 'ics', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(3)}', 'active', now())`,
+      ],
+      [
+        'a disconnected connection that kept its credential',
+        `('${U}', 'ics', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(3)}', 'disconnected', now())`,
+      ],
+      [
+        'a disconnected connection that kept its credential but not its key id',
+        `('${U}', 'ics', '${SEALED}', null, '${FINGERPRINT(3)}', 'disconnected', now())`,
+      ],
+      [
+        'a disconnected connection with no time',
+        `('${U}', 'ics', null, null, '${FINGERPRINT(3)}', 'disconnected', null)`,
+      ],
+      [
+        'the plain address as the credential',
+        `('${U}', 'ics', '${PLAIN_ADDRESS}', '${KEY_ID}', '${FINGERPRINT(3)}', 'active', null)`,
+      ],
+      [
+        'the plain address as the fingerprint',
+        `('${U}', 'ics', '${SEALED}', '${KEY_ID}', '${PLAIN_ADDRESS}', 'active', null)`,
+      ],
+      [
+        'a key id that is not 16 hex',
+        `('${U}', 'ics', '${SEALED}', 'not-a-key', '${FINGERPRINT(3)}', 'active', null)`,
+      ],
+      [
+        'an ICS connection with no fingerprint',
+        `('${U}', 'ics', '${SEALED}', '${KEY_ID}', null, 'active', null)`,
+      ],
+      [
+        'an unknown provider',
+        `('${U}', 'caldav', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(3)}', 'active', null)`,
+      ],
+      [
+        'an unknown status',
+        `('${U}', 'ics', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(3)}', 'paused', null)`,
+      ],
+    ])('refuses %s', (_label, values) =>
+      withBase(async (tx) => {
+        await expectIn(tx, (sp) => sp.execute(conn(values)), '23514');
+      }),
+    );
+
+    it('refuses provider text as an error code; accepts a structural code', () =>
+      withBase(async (tx, { connection }) => {
+        await tx.execute(
+          sql`update calendar_connection set last_error_code = 'address_rejected' where id = ${connection}`,
+        );
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(
+              sql`update calendar_connection set last_error_code = 'Forbidden: see https://example.test' where id = ${connection}`,
+            ),
+          '23514',
+        );
+      }));
+
+    it('one live connection per address fingerprint, whoever made it; a disconnected one does not block reconnecting', () =>
+      withBase(async (tx, { connection }) => {
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(
+              conn(
+                `('${U}', 'ics', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(1)}', 'active', null)`,
+              ),
+            ),
+          '23505',
+        );
+        await tx.execute(sql`update calendar_connection
+          set status = 'disconnected', credentials_encrypted = null, credentials_key_id = null, disconnected_at = now()
+          where id = ${connection}`);
+        await tx.execute(
+          conn(`('${V}', 'ics', '${SEALED}', '${KEY_ID}', '${FINGERPRINT(1)}', 'active', null)`),
+        );
+      }));
+
+    it('a connection is never deleted while a source points at it, and its owner cannot be deleted (RESTRICT)', () =>
+      withBase(async (tx, { connection }) => {
+        await expectIn(
+          tx,
+          (sp) => sp.execute(sql`delete from calendar_connection where id = ${connection}`),
+          '23503',
+        );
+        await expectIn(tx, (sp) => sp.execute(sql`delete from "user" where id = ${U}`), '23503');
+      }));
+  });
+
+  describe('calendar_source', () => {
+    it('defaults: household, no kind, no default people', () =>
+      withBase(async (tx, { source }) => {
+        const r = await tx.execute(
+          sql`select visibility, default_kind, default_person_ids, feed_hash, last_sync_status from calendar_source where id = ${source}`,
+        );
+        expect(r.rows[0]).toEqual({
+          visibility: 'household',
+          default_kind: null,
+          default_person_ids: [],
+          feed_hash: null,
+          last_sync_status: null,
+        });
+      }));
+
+    it('accepts a refresh record in HOME’s terms', () =>
+      withBase(async (tx, { source }) => {
+        await tx.execute(sql`update calendar_source set feed_hash = ${`h1:${'a'.repeat(64)}`}, last_attempt_at = now(),
+          last_synced_at = now(), last_sync_status = 'partial', last_sync_error_code = null, last_skipped_count = 3,
+          default_kind = 'work' where id = ${source}`);
+      }));
+
+    it.each([
+      [
+        'a source of no connection',
+        sql`insert into calendar_source (created_by, created_via, connection_id, external_calendar_id, name)
+        values (${U}, 'ui', gen_random_uuid(), 'x', 'X')`,
+        '23503',
+      ],
+      ['a second source for the same calendar', null, '23505'],
+    ])('refuses %s', (_l, q, code) =>
+      withBase(async (tx, { connection }) => {
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(
+              q ??
+                sql`insert into calendar_source (created_by, created_via, connection_id, external_calendar_id, name)
+                  values (${U}, 'ui', ${connection}, 'default', 'Again')`,
+            ),
+          code,
+        );
+      }),
+    );
+
+    it.each([
+      ['an address as its name', sql`name = ${PLAIN_ADDRESS}`],
+      ['an empty name', sql`name = '   '`],
+      ['a name over 200 characters', sql`name = ${'n'.repeat(201)}`],
+      ['an address as its calendar id', sql`external_calendar_id = ${PLAIN_ADDRESS}`],
+      ['an unknown kind', sql`default_kind = 'party'`],
+      ['an unknown status', sql`last_sync_status = 'broken'`],
+      ['a raw feed hash', sql`feed_hash = 'abc'`],
+      ['provider text as an error code', sql`last_sync_error_code = 'Not Found (404)'`],
+      ['a negative skipped count', sql`last_skipped_count = -1`],
+      ['an unknown visibility', sql`visibility = 'public'`],
+    ])('refuses %s', (_l, set) =>
+      withBase(async (tx, { source }) => {
+        await expectIn(
+          tx,
+          (sp) => sp.execute(sql`update calendar_source set ${set} where id = ${source}`),
+          '23514',
+        );
+      }),
+    );
+  });
+
+  describe('synced identity: source, external uid and occurrence', () => {
+    it('one series per uid per source: a second row with no occurrence is refused (NULL is not left to collide)', () =>
+      withBase(async (tx, { source }) => {
+        await tx.execute(synced(source, 'uid-1@example.test', null));
+        await expectIn(tx, (sp) => sp.execute(synced(source, 'uid-1@example.test', null)), '23505');
+      }));
+
+    it('two overrides of the same occurrence are refused; different occurrences are fine', () =>
+      withBase(async (tx, { source }) => {
+        await tx.execute(synced(source, 'uid-1@example.test', '2026-10-21T02:30:00Z'));
+        await tx.execute(synced(source, 'uid-1@example.test', '2026-10-28T02:30:00Z'));
+        await tx.execute(synced(source, 'uid-1@example.test', '2026-11-04'));
+        await expectIn(
+          tx,
+          (sp) => sp.execute(synced(source, 'uid-1@example.test', '2026-10-21T02:30:00Z')),
+          '23505',
+        );
+      }));
+
+    it('identity holds archived or not: an archived row is restored, never duplicated', () =>
+      withBase(async (tx, { source }) => {
+        const id = await one(tx, synced(source, 'uid-1@example.test', null));
+        await tx.execute(sql`update event set archived_at = now() where id = ${id}`);
+        await expectIn(tx, (sp) => sp.execute(synced(source, 'uid-1@example.test', null)), '23505');
+      }));
+
+    it('the same uid in another source is another event (no cross-source merging)', () =>
+      withBase(async (tx, { source, source2 }) => {
+        await tx.execute(synced(source, 'uid-1@example.test', null));
+        await tx.execute(synced(source2, 'uid-1@example.test', null));
+        await tx.execute(synced(source, 'uid-1@example.test', '2026-10-21'));
+        await tx.execute(synced(source2, 'uid-1@example.test', '2026-10-21'));
+      }));
+
+    it('an orphan override (its series not in the feed) is accepted with no parent; linking it later keeps its identity', () =>
+      withBase(async (tx, { source }) => {
+        const orphan = await one(tx, synced(source, 'uid-2@example.test', '2026-10-21T02:30:00Z'));
+        const series = await one(tx, synced(source, 'uid-2@example.test', null));
+        await tx.execute(
+          sql`update event set recurrence_parent_id = ${series} where id = ${orphan}`,
+        );
+        await expectIn(
+          tx,
+          (sp) => sp.execute(synced(source, 'uid-2@example.test', '2026-10-21T02:30:00Z')),
+          '23505',
+        );
+      }));
+
+    it('a parent must exist; a parent needs the occurrence it replaces; the occurrence is an ISO date or a UTC instant', () =>
+      withBase(async (tx, { source }) => {
+        await expectIn(
+          tx,
+          (sp) => sp.execute(synced(source, 'uid-3@example.test', '2026-10-21', randomUuid())),
+          '23503',
+        );
+        const series = await one(tx, synced(source, 'uid-3@example.test', null));
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(
+              sql`update event set recurrence_parent_id = ${series} where external_uid = 'uid-3@example.test' and id <> ${series} or false`,
+            ),
+          '00000',
+        ).catch(() => undefined);
+        for (const bad of [
+          '21/10/2026',
+          '2026-10-21T15:30:00+13:00',
+          '2026-10-21T02:30:00.000Z',
+          'x',
+        ])
+          await expectIn(
+            tx,
+            (sp) => sp.execute(synced(source, 'uid-3@example.test', bad)),
+            '23514',
+          );
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(
+              sql`update event set recurrence_parent_id = ${series}, recurrence_original = null where id = ${series}`,
+            ),
+          '23514',
+        );
+      }));
+
+    it('only the sync path makes synced events, and it makes nothing else', () =>
+      withBase(async (tx, { source }) => {
+        await expectIn(
+          tx,
+          (sp) => sp.execute(synced(source, 'uid-4@example.test', null, null, 'ui')),
+          '23514',
+        );
+        await expectIn(
+          tx,
+          (sp) =>
+            sp.execute(sql`insert into event (created_by, created_via, title, kind, all_day, start_date, end_date)
+                         values (${U}, 'sync', 'Manual?', 'other', true, '2026-10-20', '2026-10-21')`),
+          '23514',
+        );
+      }));
+
+    it('a source with events cannot be deleted (RESTRICT): disconnecting archives, never removes', () =>
+      withBase(async (tx, { source }) => {
+        await tx.execute(synced(source, 'uid-5@example.test', null));
+        await expectIn(
+          tx,
+          (sp) => sp.execute(sql`delete from calendar_source where id = ${source}`),
+          '23503',
+        );
+      }));
+
+    it('removing a series leaves its override as an orphan with its people (SET NULL, no cascade)', () =>
+      withBase(async (tx, { source }) => {
+        const series = await one(tx, synced(source, 'uid-6@example.test', null));
+        const override = await one(tx, synced(source, 'uid-6@example.test', '2026-10-21', series));
+        const person = await one(
+          tx,
+          sql`insert into person (created_by, created_via, name, role) values (${U}, 'ui', 'Milo', 'child') returning id`,
+        );
+        await tx.execute(sql`insert into event_person (event_id, person_id, role, created_by, created_via)
+                             values (${override}, ${person}, 'attending', ${U}, 'ui')`);
+        await tx.execute(sql`delete from event where id = ${series}`);
+        const r = await tx.execute(
+          sql`select e.recurrence_parent_id, e.recurrence_original, count(ep.id)::int as people
+              from event e left join event_person ep on ep.event_id = e.id where e.id = ${override}
+              group by 1, 2`,
+        );
+        expect(r.rows[0]).toEqual({
+          recurrence_parent_id: null,
+          recurrence_original: '2026-10-21',
+          people: 1,
+        });
+      }));
+  });
+
+  describe('manual events and manual overrides', () => {
+    it('manual events are unaffected: any number share titles and times, with no source or identity', () =>
+      withBase(async (tx) => {
+        for (let i = 0; i < 3; i++) await tx.execute(manual());
+      }));
+
+    it('one live change per occurrence of a manual series; once it is put back (archived) a new one may be made', () =>
+      withBase(async (tx) => {
+        const series = await one(tx, manual());
+        const first = await one(tx, manual('2026-10-27', series));
+        await expectIn(tx, (sp) => sp.execute(manual('2026-10-27', series)), '23505');
+        await tx.execute(manual('2026-11-03', series));
+        await tx.execute(sql`update event set archived_at = now() where id = ${first}`);
+        await tx.execute(manual('2026-10-27', series));
+      }));
+  });
+});
+
+const randomUuid = () => crypto.randomUUID();
+
+describe('0007 upgrades the production schema (0000–0006) in place', () => {
+  const sam: UserActor = {
+    kind: 'user',
+    userId: 'u-up7',
+    email: 'sam@example.test',
+    via: 'ui',
+    channel: 'web',
+  };
+  const kev: UserActor = { ...sam, via: 'kev' };
+  const DOMAIN_TABLES = [
+    'person',
+    'event',
+    'event_person',
+    'project',
+    'task',
+    'note',
+    'capture',
+    'context',
+    'proposal',
+    'audit_log',
+  ];
+
+  /** Every row of each table, in the columns the table had before 0007, so new columns do not count as a change. */
+  async function snapshot(on: Db, columns?: Record<string, string[]>) {
+    const out: Record<string, { cols: string[]; rows: unknown[] }> = {};
+    for (const t of DOMAIN_TABLES) {
+      const cols =
+        columns?.[t] ??
+        (
+          await on.execute(sql`select column_name from information_schema.columns
+            where table_schema = 'public' and table_name = ${t} order by ordinal_position`)
+        ).rows.map((r) => String(r.column_name));
+      const list = cols.map((c) => `"${c}"`).join(', ');
+      out[t] = {
+        cols,
+        rows: (await on.execute(sql.raw(`select ${list} from "${t}" order by id`))).rows,
+      };
+    }
+    return out;
+  }
+
+  it('applies on top of 0006 with M3 data the current app wrote, changing nothing that was there, and the app keeps working', async () => {
+    const name = 'home_upgrade_0007_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const upApp = createDb(appUrl);
+    const production = migrationsUpTo('0006_bookkeeping');
+    const deps = { db: upApp.db };
+    try {
+      // Production today: 0000–0006, written through the deployed M3 services.
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upApp.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up7', 'Sam', 'sam@example.test')`,
+      );
+      const milo = await createPerson(sam, { name: 'Milo', role: 'child' }, deps);
+      const swim = await createEvent(
+        sam,
+        {
+          title: 'Swimming',
+          kind: 'activity',
+          time: {
+            allDay: false,
+            startsAt: '2026-10-14T02:30:00Z',
+            endsAt: '2026-10-14T03:30:00Z',
+            timeZone: 'Pacific/Auckland',
+          },
+          rrule: 'FREQ=WEEKLY;BYDAY=WE',
+          exdates: ['2026-10-21'],
+        },
+        deps,
+      );
+      await setEventPerson(sam, { eventId: swim.id, personId: milo.id, role: 'attending' }, deps);
+      await createEvent(
+        sam,
+        {
+          title: 'School holidays',
+          kind: 'school',
+          time: { allDay: true, startDate: '2026-10-20', endDate: '2026-10-24' },
+          visibility: 'private',
+        },
+        deps,
+      );
+      const fence = await createProject(sam, { title: 'Back fence' }, deps);
+      await createTask(sam, { title: 'Paint the fence', projectId: fence.id }, deps);
+      await createNote(sam, { body: 'Charcoal', subject: { type: 'event', id: swim.id } }, deps);
+      const cap = await captureVerbatim(sam, { text: 'book the WOF' }, deps);
+      const p = await createProposal(
+        kev,
+        {
+          action: 'task.create',
+          payload: { title: 'WOF' },
+          summary: 'Add a task',
+          captureId: cap.id,
+        },
+        deps,
+      );
+      await approveProposal(sam, p.id, deps);
+      await createContext(
+        sam,
+        { subject: { type: 'household' }, content: 'Bins Tuesday', category: 'routine' },
+        deps,
+      );
+      const before = await snapshot(upAdmin.db);
+      const columnsBefore = Object.fromEntries(Object.entries(before).map(([t, v]) => [t, v.cols]));
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.calendar_source') as t`)).rows[0]
+          ?.t,
+      ).toBeNull();
+
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      // Every existing row and value is unchanged; the new tables are empty;
+      // the new event columns are empty on every existing event.
+      expect(await snapshot(upAdmin.db, columnsBefore)).toEqual(before);
+      for (const t of ['calendar_connection', 'calendar_source']) {
+        const r = await upAdmin.db.execute(sql.raw(`select count(*)::int as n from ${t}`));
+        expect(r.rows[0]?.n, t).toBe(0);
+      }
+      const extra = await upAdmin.db.execute(
+        sql`select count(*)::int as n from event where recurrence_parent_id is not null or recurrence_original is not null`,
+      );
+      expect(extra.rows[0]?.n).toBe(0);
+      expect(before.event?.rows).toHaveLength(2);
+
+      // The deployed M3 app keeps working on the upgraded schema: reads, the
+      // recurrence and people it wrote, and new writes.
+      const events = await listEvents(sam, {}, deps);
+      expect(events.map((e) => e.title).sort()).toEqual(['School holidays', 'Swimming']);
+      expect((await listEventPeople(sam, swim.id, {}, deps)).map((x) => x.personId)).toEqual([
+        milo.id,
+      ]);
+      await updateEvent(
+        sam,
+        swim.id,
+        { title: 'Swimming lessons', exdates: ['2026-10-21', '2026-10-28'] },
+        deps,
+      );
+      await expect(
+        createEvent(
+          sam,
+          {
+            title: 'Dentist',
+            kind: 'appointment',
+            time: { allDay: true, startDate: '2026-10-22', endDate: '2026-10-23' },
+          },
+          deps,
+        ),
+      ).resolves.toBeDefined();
+      expect(await listPeople(sam, {}, deps)).toHaveLength(1);
+      expect(await listProjects(sam, {}, deps)).toHaveLength(1);
+      expect((await listTasks(sam, {}, deps)).length).toBe(2);
+      expect(await listNotes(sam, {}, deps)).toHaveLength(1);
+      expect((await listCaptures(sam, {}, deps)).map((c) => c.status)).toEqual(['organised']);
+      expect((await listAudit(sam, {}, deps)).rows.length).toBeGreaterThan(0);
+    } finally {
+      await upApp.close();
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+
+  it('a migration that cannot apply changes nothing: the whole of 0007 rolls back, the data and the schema are as before', async () => {
+    const name = 'home_upgrade_0007_fail_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const production = migrationsUpTo('0006_bookkeeping');
+    try {
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upAdmin.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up7f', 'Sam', 'sam@example.test')`,
+      );
+      // A row no deployed code could write (the services never make synced
+      // events): it breaks 0007's new rules, so the migration must refuse it.
+      await upAdmin.db
+        .execute(sql`insert into event (created_by, created_via, title, kind, all_day, start_date, end_date, source, calendar_source_id, external_uid)
+        values ('u-up7f', 'ui', 'Stray', 'other', true, '2026-10-20', '2026-10-21', 'synced', gen_random_uuid(), 'stray')`);
+      const rowsBefore = (await upAdmin.db.execute(sql`select * from event`)).rows;
+      const columnsBefore = (
+        await upAdmin.db.execute(
+          sql`select count(*)::int as n from information_schema.columns where table_name = 'event'`,
+        )
+      ).rows[0]?.n;
+
+      await expect(migrate(upAdmin.db, { migrationsFolder: MIGRATIONS })).rejects.toThrow();
+
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(
+        journal.entries.findIndex((e) => e.tag === '0006_bookkeeping') + 1,
+      );
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.calendar_connection') as t`))
+          .rows[0]?.t,
+      ).toBeNull();
+      expect(
+        (await upAdmin.db.execute(sql`select to_regclass('public.calendar_source') as t`)).rows[0]
+          ?.t,
+      ).toBeNull();
+      expect(
+        (
+          await upAdmin.db.execute(
+            sql`select count(*)::int as n from information_schema.columns where table_name = 'event'`,
+          )
+        ).rows[0]?.n,
+      ).toBe(columnsBefore);
+      expect((await upAdmin.db.execute(sql`select * from event`)).rows).toEqual(rowsBefore);
+    } finally {
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });
       await dropDatabase(name);

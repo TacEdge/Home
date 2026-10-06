@@ -165,9 +165,20 @@ test('an all-day event over several days shows each day on Forward', async ({ pa
 test('a synced event is read-only, with calm copy', async ({ page }) => {
   await signInAsFixtureAdult(page, 'sam');
   const id = await withDb(async (pool) => {
+    // A synthetic connection and source (migration 0007): the credential and
+    // fingerprint have Package 2's shapes and seal nothing.
     const r = await pool.query(
-      `insert into event (title, kind, all_day, start_date, end_date, source, calendar_source_id, external_uid, created_by, created_via, visibility)
-       values ('Dentist (from calendar)', 'appointment', true, '2027-05-05', '2027-05-06', 'synced', gen_random_uuid(), 'uid-e2e', 'fixture-sam', 'sync', 'household')
+      `with c as (
+         insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint)
+         values ('fixture-sam', 'ics', 'hc1.0123456789abcdef.${'A'.repeat(16)}.${'B'.repeat(24)}.${'C'.repeat(22)}', '0123456789abcdef', 'fp1.e2e-synced-event-fingerprint-0000000000000')
+         returning id
+       ), s as (
+         insert into calendar_source (created_by, created_via, visibility, connection_id, external_calendar_id, name)
+         select 'fixture-sam', 'ui', 'household', c.id, 'primary', 'Appointments' from c
+         returning id
+       )
+       insert into event (title, kind, all_day, start_date, end_date, source, calendar_source_id, external_uid, created_by, created_via, visibility)
+       select 'Dentist (from calendar)', 'appointment', true, '2027-05-05', '2027-05-06', 'synced', s.id, 'uid-e2e', 'fixture-sam', 'sync', 'household' from s
        returning id`,
     );
     return r.rows[0].id as string;
@@ -178,7 +189,16 @@ test('a synced event is read-only, with calm copy', async ({ page }) => {
   await expect(page.locator('summary', { hasText: 'Archive' })).toHaveCount(0);
   await page.goto(`/events/${id}/edit`);
   await expect(page).toHaveURL(new RegExp(`/events/${id}$`));
-  await withDb((pool) => pool.query(`delete from event where id = $1`, [id]));
+  await withDb(async (pool) => {
+    const s = await pool.query(`delete from event where id = $1 returning calendar_source_id`, [
+      id,
+    ]);
+    const c = await pool.query(
+      `delete from calendar_source where id = $1 returning connection_id`,
+      [s.rows[0].calendar_source_id],
+    );
+    await pool.query(`delete from calendar_connection where id = $1`, [c.rows[0].connection_id]);
+  });
 });
 
 test("the other adult's private event reads as not found; a person's Coming up uses the agenda", async ({

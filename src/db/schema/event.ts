@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth';
+import { calendarSource } from './calendar';
 import { capture } from './capture';
 import { commonColumns, CREATED_VIA, DOMAINS, oneOf, VISIBILITY } from './common';
 import { person } from './person';
@@ -21,8 +22,12 @@ import { person } from './person';
 // EXCLUSIVE end, as RFC 5545 (a one-day event on the 14th ends on the 15th).
 // RRULE and EXDATEs are stored as given: nothing parses or expands them in
 // M2 (ADR 0005, D-M2-4). Sync fields are provider-neutral; calendar_source_id
-// has no foreign key until CalendarSource exists in M4 (D-M2-3).
-// Package 3a defines the tables only; services arrive in Package 3b.
+// gained its foreign key with calendar_source in migration 0007 (M4 Package
+// 4a, D-M2-3). An occurrence override (an imported moved occurrence, or a
+// manual single-occurrence edit) names the occurrence it replaces in
+// recurrence_original and, when its series is there, the series in
+// recurrence_parent_id; synced identity is the source, the external uid and
+// recurrence_original, never the parent (ADR 0007 §13, §26).
 
 export const EVENT_KINDS = [
   'appointment',
@@ -65,9 +70,21 @@ export const event = pgTable(
     kind: text('kind').notNull(),
     domain: text('domain'),
     source: text('source').notNull().default('manual'),
-    calendarSourceId: uuid('calendar_source_id'),
+    // RESTRICT: a source is archived, never deleted, so its events and their
+    // people and notes are never removed with it (ADR 0007 §5).
+    calendarSourceId: uuid('calendar_source_id').references(() => calendarSource.id, {
+      onDelete: 'restrict',
+    }),
     externalUid: text('external_uid'),
     externalEtag: text('external_etag'),
+    // recurrence_parent_id and recurrence_original (migration 0007, with
+    // their checks event_recurrence_original_check and
+    // event_recurrence_parent_check, and the indexes
+    // event_synced_identity_unique, event_manual_override_unique and
+    // event_recurrence_parent_id_idx) are defined here by the application PR
+    // that first uses them, after 0007 has run in production: the deployed
+    // event services insert and return every column defined here
+    // (migration-first, MIGRATIONS.md; tests/unit/deferred-columns.test.ts).
   },
   (t) => [
     check('event_created_via_check', oneOf(t.createdVia, CREATED_VIA)),
@@ -92,6 +109,11 @@ export const event = pgTable(
     check(
       'event_synced_check',
       sql`${t.source} <> 'synced' or (${t.calendarSourceId} is not null and ${t.externalUid} is not null)`,
+    ),
+    // Only the sync path writes synced events, as the connection's owner (ADR 0007 §8).
+    check(
+      'event_sync_provenance_check',
+      sql`(${t.source} = 'synced') = (${t.createdVia} = 'sync')`,
     ),
     index('event_origin_capture_id_idx').on(t.originCaptureId),
     index('event_created_by_idx').on(t.createdBy),
