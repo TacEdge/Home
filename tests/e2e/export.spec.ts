@@ -22,7 +22,7 @@ test('Settings › Export downloads the adult’s own view, sensitive items left
   const body = await readFile((await download.path())!, 'utf8');
   const data = JSON.parse(body);
   expect(data.format).toBe('home-export');
-  expect(data.version).toBe(1);
+  expect(data.version).toBe(2);
   expect(data.includesSensitive).toBe(false);
   expect(body).toContain(CANARY_MARK.sam);
   expect(body).not.toContain(CANARY_MARK.alex);
