@@ -62,7 +62,8 @@ function stripMarkup(s: string): string {
  * Bidi controls (Trojan Source), zero-width and other invisible formatting,
  * the byte-order mark, and every control character except line breaks and tabs.
  */
-const INVISIBLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f­؜᠎​‎‏‪-‮⁠-⁤⁦-⁯﻿￹-￻]/g;
+const INVISIBLE =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00AD\u061C\u180E\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g;
 
 /** Cut to at most `max` UTF-16 units without splitting a character, marking the cut. */
 function bound(s: string, max: number): string {

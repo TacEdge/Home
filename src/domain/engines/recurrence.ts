@@ -317,6 +317,43 @@ function untilWall(rrule: string, until: Date, start: EventStart): Date {
   return fakeUtc({ ...parseIsoDate(lastDay), hour: 23, minute: 59, second: 59 });
 }
 
+/** Days in one step of each frequency, at least (RRule.YEARLY … DAILY). */
+const DAYS_PER_STEP: Record<number, number> = {
+  [RRule.YEARLY]: 365,
+  [RRule.MONTHLY]: 28,
+  [RRule.WEEKLY]: 7,
+  [RRule.DAILY]: 1,
+};
+
+/**
+ * Stops the rrule library searching past `end`. Its UNTIL is checked only
+ * when a date passes the rule's filters, so a rule that never yields (the
+ * 30th of February, every day) is searched step by step to the year 9999,
+ * seconds of work. The library's one per-step way out is its check that
+ * `options.interval === 0`; it reads `options.interval` once on entry and
+ * then twice a step (that check, then to advance), so the property is made to
+ * answer 0 at the check once the steps needed to pass `end`, with a margin,
+ * are spent. Every date up to `end` is still produced as before. Tied to
+ * rrule 2.8's iteration; tests/unit/calendar/review-fixes.test.ts fails
+ * if an upgrade changes it (the hostile rules would take seconds again, or
+ * occurrences would go missing).
+ */
+function searchNoFurtherThan(rr: RRule, end: Date): RRule {
+  const o = rr.options;
+  const interval = o.interval;
+  const perStep = DAYS_PER_STEP[o.freq];
+  if (!perStep || interval < 1) return rr; // HOME expands nothing finer than daily
+  const days = Math.max(0, (end.getTime() - o.dtstart.getTime()) / 86_400_000);
+  const maxSteps = Math.ceil(days / perStep / interval) + 2;
+  let reads = 0;
+  Object.defineProperty(o, 'interval', {
+    configurable: true,
+    enumerable: true,
+    get: () => (++reads % 2 === 0 && reads / 2 > maxSteps ? 0 : interval),
+  });
+  return rr;
+}
+
 /** What expansion needs about one event, shared by expandEvent and occursWithin. */
 function prepare(event: RecurringEvent) {
   const start: EventStart = event.allDay
@@ -353,20 +390,26 @@ function prepare(event: RecurringEvent) {
     : wallClockOf(event.startsAt, event.timeZone);
 
   const rule = event.rrule ? parseRule(event.rrule) : null;
-  let rr: RRule | null = null;
-  if (rule && event.rrule) {
-    // Floating expansion: DTSTART and UNTIL are local wall clocks written as
-    // if they were UTC; occurrences come back the same way.
+  const ruleUntil = rule?.until && event.rrule ? untilWall(event.rrule, rule.until, start) : null;
+  /**
+   * The rule, never evaluated past `end`. Floating expansion: DTSTART and
+   * UNTIL are local wall clocks written as if they were UTC; occurrences come
+   * back the same way. The rule's own UNTIL and COUNT still apply; the cap
+   * only stops the rrule library searching beyond the query, which for a
+   * rule that never yields (30 February, every day) would run to year 9999.
+   */
+  const ruleTo = (end: Date): RRule | null => {
+    if (!rule) return null;
     const options: Partial<Options> = { ...rule, dtstart: fakeUtc(startWall) };
-    if (rule.until) options.until = untilWall(event.rrule, rule.until, start);
+    options.until = ruleUntil && ruleUntil < end ? ruleUntil : end;
     if (rule.count != null) options.count = Math.min(rule.count, MAX_COUNT);
-    rr = new RRule(options);
-  }
+    return searchNoFurtherThan(new RRule(options), end);
+  };
   const windowOf = (from: IsoDate, to: IsoDate) => ({
     start: fakeUtc({ ...parseIsoDate(from < first ? first : from), hour: 0, minute: 0, second: 0 }),
     end: fakeUtc({ ...parseIsoDate(to), hour: 23, minute: 59, second: 59 }),
   });
-  return { first, occurrenceOn, excluded, startWall, rr, windowOf };
+  return { first, occurrenceOn, excluded, startWall, recurs: rule !== null, ruleTo, windowOf };
 }
 
 /**
@@ -382,13 +425,14 @@ export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): 
   if (to < from) return [];
   const p = prepare(event);
   const kept = (o: Occurrence) => o.date >= from && o.date <= to && !p.excluded(o);
-  if (!p.rr) {
+  if (!p.recurs) {
     const only = p.occurrenceOn(p.startWall);
     return kept(only) ? [only] : [];
   }
   if (to < p.first) return [];
   const w = p.windowOf(from, to);
-  return p.rr
+  return p
+    .ruleTo(w.end)!
     .between(w.start, w.end, true)
     .map((d) => p.occurrenceOn(wallOfFake(d)))
     .filter(kept);
@@ -414,13 +458,14 @@ export function occursWithin(
   if (to < from) return { occurs: false, steps: 0, exhausted: false };
   const p = prepare(event);
   const inRange = (o: Occurrence) => o.date >= from && o.date <= to && !p.excluded(o);
-  if (!p.rr) return { occurs: inRange(p.occurrenceOn(p.startWall)), steps: 1, exhausted: false };
+  if (!p.recurs)
+    return { occurs: inRange(p.occurrenceOn(p.startWall)), steps: 1, exhausted: false };
   if (to < p.first) return { occurs: false, steps: 0, exhausted: false };
   const w = p.windowOf(from, to);
   let steps = 0;
   let occurs = false;
   let exhausted = false;
-  p.rr.all((d) => {
+  p.ruleTo(w.end)!.all((d) => {
     if (++steps > maxSteps) {
       exhausted = true;
       return false;

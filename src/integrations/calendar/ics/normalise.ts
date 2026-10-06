@@ -17,6 +17,7 @@ import {
   formatIsoDate,
   instantFromWallClock,
   isValidIsoDate,
+  offsetAt,
   wallClockOf,
   type IsoDate,
   type WallClock,
@@ -128,6 +129,22 @@ function instantFromWall(wall: WallClock, plusDays: number, zone: string): Date 
   return instantFromWallClock({ ...wall, year: y!, month: m!, day: d! }, zone);
 }
 
+const wallMs = (w: WallClock) => Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
+
+/**
+ * How far a local start was moved forward because its wall clock does not
+ * exist (the hour skipped when daylight saving starts); 0 for any other time.
+ * The resolved instant is read with the offset before the change (RFC 5545
+ * §3.3.5, HOME's engine rule), so it lies later than the same wall clock
+ * read with the offset after it by exactly the gap.
+ */
+function gapShift(m: Moment): number {
+  if (m.kind !== 'instant') return 0;
+  const shown = wallClockOf(m.at, m.zone);
+  if (wallMs(shown) === wallMs(m.wall)) return 0;
+  return m.at.getTime() - (wallMs(m.wall) - offsetAt(m.at.getTime(), m.zone));
+}
+
 const utcInstant = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** The rule as HOME keeps it, with UNTIL spelled for this event; null when it cannot be read. */
@@ -170,6 +187,14 @@ function readRule(raw: RawProperty, time: ExternalTime, ctx: Context): string | 
   }
   return isReadableRRule(rule) ? rule : null;
 }
+
+/**
+ * An override's identity: its RECURRENCE-ID as written, a DATE as an ISO date
+ * and a DATE-TIME as the UTC instant its own zone names. Never derived from
+ * the series, so an override reads the same whether or not its series is in
+ * the feed (ADR 0007 §26).
+ */
+const identityOf = (m: Moment): string => (m.kind === 'date' ? m.date : utcInstant(m.at));
 
 /** An exdate or original occurrence in the series' terms: a date (all-day) or a UTC instant. */
 function inSeriesTerms(m: Moment, series: ExternalTime): string {
@@ -225,8 +250,22 @@ function readEvent(raw: RawEvent, ctx: Context): Read {
     let endsAt = start.at;
     if (endProp) {
       const end = readMoment(endProp.value, endProp.params, ctx, zones);
-      if (!end || end.kind !== 'instant' || end.at < start.at) throw new Unreadable();
-      endsAt = end.at;
+      if (!end || end.kind !== 'instant') throw new Unreadable();
+      // A start in the spring-forward gap moves forward by the gap (as the
+      // engine moves an occurrence); the event keeps the length its source
+      // gave it, so it never collapses to nothing (ADR 0007 §24). With both
+      // ends local in one zone, that length is their wall-clock difference
+      // read before the gap is resolved. A start that exists keeps the real
+      // elapsed time to its end, so an event across the change is shorter.
+      const shift = gapShift(start);
+      if (end.zone === start.zone) {
+        const length = wallMs(end.wall) - wallMs(start.wall);
+        if (length < 0) throw new Unreadable();
+        endsAt = shift ? new Date(start.at.getTime() + length) : end.at;
+      } else {
+        endsAt = new Date(end.at.getTime() + shift);
+      }
+      if (endsAt < start.at) throw new Unreadable();
     } else if (duration) {
       endsAt = new Date(
         instantFromWall(start.wall, duration.days, start.zone).getTime() + duration.ms,
@@ -249,13 +288,18 @@ function readEvent(raw: RawEvent, ctx: Context): Read {
   if (!recurrence && (raw.rrule.length || raw.exrule.length)) {
     rrule =
       raw.rrule.length === 1 && !raw.exrule.length ? readRule(raw.rrule[0]!, time, ctx) : null;
-    for (const ex of raw.exdate) {
-      for (const v of ex.value.split(',')) {
-        const m = readMoment(v, ex.params, ctx, zones);
-        if (!m) rrule = null;
-        else exdates.push(inSeriesTerms(m, time));
+    // Counted before any is read: a series with more exdates than an event
+    // may hold is unreadable, and reading each would be unbounded work.
+    const exdateCount = raw.exdate.reduce((n, ex) => n + ex.value.split(',').length, 0);
+    if (exdateCount > MAX_EXDATES) rrule = null;
+    else
+      for (const ex of raw.exdate) {
+        for (const v of ex.value.split(',')) {
+          const m = readMoment(v, ex.params, ctx, zones);
+          if (!m) rrule = null;
+          else exdates.push(inSeriesTerms(m, time));
+        }
       }
-    }
     readable = rrule ? 'rule' : 'unreadable';
   }
 
@@ -453,10 +497,7 @@ export function normaliseFeed(feed: RawFeed, range: FetchRange, homeTimeZone: st
   const out: ExternalEvent[] = [];
   const byOriginal = latest(
     overrides,
-    (r) => {
-      const series = masters.get(r.event.uid);
-      return `${r.event.uid}\u0000${inSeriesTerms(r.recurrence!, series ? series.event.time : r.event.time)}`;
-    },
+    (r) => `${r.event.uid}\u0000${identityOf(r.recurrence!)}`,
     notes,
   );
   const removed = new Set<string>();
@@ -465,15 +506,18 @@ export function normaliseFeed(feed: RawFeed, range: FetchRange, homeTimeZone: st
     const uid = o.event.uid;
     if (removed.has(uid)) continue;
     const series = masters.get(uid);
-    const original = inSeriesTerms(o.recurrence!, series ? series.event.time : o.event.time);
+    const recurrenceId = identityOf(o.recurrence!);
     if (!series) {
+      // Kept as itself; no parent is made up for it (ADR 0007 §26).
       notes.orphanOverride++;
-      if (!o.cancelled) out.push({ ...o.event, recurrenceId: original });
+      if (!o.cancelled) out.push({ ...o.event, recurrenceId });
       continue;
     }
+    // Only the series' exdate is in the series' own terms.
+    const original = inSeriesTerms(o.recurrence!, series.event.time);
     series.event.exdates.push(original);
     if (o.cancelled) series.event.cancelledOccurrences.push(original);
-    if (!o.cancelled) out.push({ ...o.event, recurrenceId: original });
+    if (!o.cancelled) out.push({ ...o.event, recurrenceId });
   }
   for (const [uid, m] of masters) {
     if (removed.has(uid)) continue;

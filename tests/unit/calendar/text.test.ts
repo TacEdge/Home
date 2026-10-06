@@ -67,13 +67,13 @@ describe('invisible and malformed characters', () => {
   });
 
   it('bidi overrides (Trojan Source), zero-width characters and the BOM go', () => {
-    expect(line('‮gnirts‬ ⁦x⁩ a​b ﻿c')).toBe('gnirts x ab c');
+    expect(line('\u202Egnirts\u202C \u2066x\u2069 a\u200Bb \uFEFFc')).toBe('gnirts x ab c');
   });
 
   it('a lone surrogate half becomes U+FFFD; whole emoji stay', () => {
     expect(line('a\uD800b')).toBe('a�b');
     expect(line('a\uDC00')).toBe('a�');
-    expect(line('Swim 🏊‍♀️')).toBe('Swim 🏊‍♀️');
+    expect(line('Swim 🏊\u200D♀️')).toBe('Swim 🏊\u200D♀️');
   });
 
   it('text is NFC-normalised', () => {
@@ -105,7 +105,7 @@ describe('shape and bounds', () => {
   });
 
   it('nothing readable, or not a string, is null', () => {
-    for (const v of ['', '   ', '<b></b>', '​', undefined, null, 42, { val: 'x' }, ['x']])
+    for (const v of ['', '   ', '<b></b>', '\u200B', undefined, null, 42, { val: 'x' }, ['x']])
       expect(plainText(v, 200, 'line')).toBeNull();
   });
 });

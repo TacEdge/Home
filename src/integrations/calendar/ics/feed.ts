@@ -2,17 +2,22 @@ import ical from 'node-ical';
 import { CalendarProviderError } from '@/domain/calendar/provider';
 
 // Reading an ICS feed into raw events (M4 contract §3.1). node-ical is the
-// parser of record for the format: line unfolding, property and parameter
-// syntax, quoting and TEXT unescaping. HOME does not let it interpret time:
-// node-ical resolves zones by guessing (a VTIMEZONE's offsets, the server's
-// own zone for floating times), folds overrides into their series by date,
-// and throws for a whole feed when one event is malformed. So:
-//   - the feed is split into its top-level VEVENTs by line, and each is
-//     parsed on its own, so one unreadable event is skipped and counted and
-//     events with the same UID are never merged;
-//   - every date-bearing property (and RRULE, EXRULE, DURATION) is handed
-//     to node-ical renamed `X-HOME-…`, which it keeps verbatim with its
-//     parameters, and HOME reads the values itself (normalise.ts);
+// parser of record for property and parameter syntax, quoting and TEXT
+// unescaping. HOME does not let it interpret time: node-ical resolves zones
+// by guessing (a VTIMEZONE's offsets, the server's own zone for floating
+// times), folds overrides into their series by date, and throws for a whole
+// feed when one event is malformed. So (ADR 0007 §23, §32):
+//   - the whole feed is RFC 5545-unfolded first, so a property name split
+//     across lines is whole before anything looks at it;
+//   - the feed is split into its top-level VEVENTs, and each is parsed on
+//     its own, so one unreadable event is skipped and counted and events
+//     with the same UID are never merged;
+//   - node-ical is given an allowlist only: the few text properties HOME
+//     reads (UID, SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE), and
+//     every date-bearing or recurrence property renamed `X-HOME-…`, which
+//     it keeps verbatim with its parameters for HOME to read
+//     (normalise.ts). Nothing else (attendees, organiser, alarms, nested
+//     components, unknown properties) ever reaches a node-ical handler;
 //   - VTIMEZONE and every other component are not read: zones are known by
 //     IANA name or the fixed Windows table only (src/lib/time-zones.ts).
 // Nothing here logs, and no error carries feed text.
@@ -59,15 +64,32 @@ const OWN = [
   'DTSTAMP',
   'CREATED',
 ] as const;
-const OWN_LINE = new RegExp(`^(${OWN.join('|')})(?=[;:])`, 'i');
+const OWN_NAMES = new Set<string>(OWN);
+/** Text properties node-ical parses for HOME as they are. */
+const PASSED = new Set(['UID', 'SUMMARY', 'DESCRIPTION', 'LOCATION', 'STATUS', 'SEQUENCE']);
+/** Calendar properties read from outside the events. */
+const CALENDAR_PASSED = new Set(['X-WR-CALNAME', 'X-WR-TIMEZONE']);
 
-const isContinuation = (line: string) => line.startsWith(' ') || line.startsWith('\t');
-const nameOf = (line: string) => line.split(/[;:]/, 1)[0]!.trim().toUpperCase();
+/** RFC 5545 §3.1: a line break followed by one space or tab continues the line before. */
+export function unfold(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n|\r/)) {
+    if ((line.startsWith(' ') || line.startsWith('\t')) && out.length)
+      out[out.length - 1] += line.slice(1);
+    else out.push(line);
+  }
+  return out;
+}
+
+/** A content line's property name, upper-cased (the name never contains `;` or `:`). */
+const nameOf = (line: string) => (line.match(/^[A-Za-z0-9-]+/)?.[0] ?? '').toUpperCase();
 const valueOf = (line: string) =>
   line
     .slice(line.indexOf(':') + 1)
     .trim()
     .toUpperCase();
+/** The line with its name upper-cased (and renamed), the rest as written. */
+const withName = (line: string, name: string) => name + line.slice(nameOf(line).length);
 
 /** The value(s) node-ical stored under a key, as raw properties. */
 function properties(stored: unknown): RawProperty[] {
@@ -93,13 +115,31 @@ function firstValue(stored: unknown): unknown {
   return item;
 }
 
+/**
+ * One VEVENT's unfolded lines as node-ical sees them: the allowlisted text
+ * properties, and HOME's own properties renamed; nested components (alarms)
+ * and every other property dropped before parsing.
+ */
+function isolate(lines: readonly string[]): string[] {
+  const out = ['BEGIN:VEVENT'];
+  let depth = 0;
+  for (const line of lines.slice(1, -1)) {
+    const name = nameOf(line);
+    if (name === 'BEGIN') depth++;
+    else if (name === 'END') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+      if (OWN_NAMES.has(name)) out.push(withName(line, `X-HOME-${name}`));
+      else if (PASSED.has(name)) out.push(withName(line, name));
+    }
+  }
+  out.push('END:VEVENT');
+  return out;
+}
+
 function parseBlock(lines: string[]): Record<string, unknown> | null {
-  const renamed = lines.map((l) =>
-    isContinuation(l) ? l : l.replace(OWN_LINE, (name) => `X-HOME-${name.toUpperCase()}`),
-  );
   try {
     const parsed = ical.sync.parseICS(
-      ['BEGIN:VCALENDAR', ...renamed, 'END:VCALENDAR'].join('\r\n'),
+      ['BEGIN:VCALENDAR', ...isolate(lines), 'END:VCALENDAR'].join('\r\n'),
     );
     const found = Object.values(parsed).filter(
       (c) => c && typeof c === 'object' && (c as { type?: unknown }).type === 'VEVENT',
@@ -138,30 +178,29 @@ function toRawEvent(c: Record<string, unknown>): RawEvent {
  * missing events were deleted.
  */
 export function readFeed(text: string): RawFeed {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n|\r/);
+  const lines = unfold(text.replace(/^\uFEFF/, ''));
   while (lines.length && lines.at(-1)!.trim() === '') lines.pop();
   const firstLine = lines.findIndex((l) => l.trim() !== '');
   if (firstLine === -1) throw new CalendarProviderError('not_a_calendar');
   const isLine = (l: string | undefined, name: string, value: string) =>
-    l !== undefined && !isContinuation(l) && nameOf(l) === name && valueOf(l) === value;
+    l !== undefined && nameOf(l) === name && valueOf(l) === value;
   if (!isLine(lines[firstLine], 'BEGIN', 'VCALENDAR') || !isLine(lines.at(-1), 'END', 'VCALENDAR'))
     throw new CalendarProviderError('not_a_calendar');
 
   const header: string[] = [];
   const events: RawEvent[] = [];
   let unreadable = 0;
-  // Depth 0: inside the VCALENDAR itself. A VEVENT at depth 0 is collected
-  // (with anything nested in it); any other component is passed over.
-  let depth = 0;
+  // A VEVENT directly inside the VCALENDAR is collected with anything
+  // nested in it; any other component is passed over whole.
   let block: string[] | null = null;
+  let depth = 0;
   for (let i = firstLine + 1; i < lines.length - 1; i++) {
     const line = lines[i]!;
-    const begin = !isContinuation(line) && nameOf(line) === 'BEGIN';
-    const end = !isContinuation(line) && nameOf(line) === 'END';
+    const name = nameOf(line);
     if (block) {
       block.push(line);
-      if (begin) depth++;
-      else if (end && --depth === 0) {
+      if (name === 'BEGIN') depth++;
+      else if (name === 'END' && --depth === 0) {
         const parsed = valueOf(line) === 'VEVENT' ? parseBlock(block) : null;
         if (parsed) events.push(toRawEvent(parsed));
         else unreadable++;
@@ -169,25 +208,22 @@ export function readFeed(text: string): RawFeed {
       }
       continue;
     }
-    if (begin) {
-      depth = 1;
-      if (valueOf(line) === 'VEVENT') block = [line];
-      else block = null;
-      if (!block) {
-        // Pass over this component and everything nested in it.
-        let d = 1;
-        while (d > 0 && ++i < lines.length - 1) {
-          const l = lines[i]!;
-          if (isContinuation(l)) continue;
-          if (nameOf(l) === 'BEGIN') d++;
-          else if (nameOf(l) === 'END') d--;
-        }
-        depth = 0;
+    if (name === 'BEGIN') {
+      if (valueOf(line) === 'VEVENT') {
+        block = [line];
+        depth = 1;
+        continue;
+      }
+      // Pass over this component and everything nested in it.
+      let d = 1;
+      while (d > 0 && ++i < lines.length - 1) {
+        const n = nameOf(lines[i]!);
+        if (n === 'BEGIN') d++;
+        else if (n === 'END') d--;
       }
       continue;
     }
-    if (end) continue; // an END with no BEGIN: not the calendar's own property
-    header.push(line);
+    if (CALENDAR_PASSED.has(name)) header.push(withName(line, name));
   }
   if (block) unreadable++; // a VEVENT that never ended
 

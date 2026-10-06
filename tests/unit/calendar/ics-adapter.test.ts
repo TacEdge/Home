@@ -194,7 +194,7 @@ describe('feed syntax', () => {
     ]);
     expect(feed).toMatch(/\r\n /); // folded
     expect(only(await read(feed)).title).toBe(long);
-    expect(only(await read(`﻿${feed.replace(/\r\n/g, '\n')}`)).title).toBe(long);
+    expect(only(await read(`\uFEFF${feed.replace(/\r\n/g, '\n')}`)).title).toBe(long);
     const lower = feed.replace('DTSTART;TZID', 'dtstart;TZID').replace('SUMMARY:', 'summary:');
     expect(only(await read(lower)).time).toMatchObject({
       startsAt: new Date('2026-10-14T20:00:00Z'),
@@ -387,7 +387,7 @@ describe('recurrence (M4 Package 3 cases)', () => {
     expect(occurrences(byUid(r, 'bins@example.test', '2026-10-26'))).toEqual(['2026-10-27']);
   });
 
-  it('a RECURRENCE-ID written as a date on a timed series names the series’ own time that day', async () => {
+  it('a RECURRENCE-ID written as a date keeps a date identity; the series’ exdate is its own time that day', async () => {
     const feed = googleFeed([
       nzEvent({
         uid: 's@example.test',
@@ -403,7 +403,8 @@ describe('recurrence (M4 Package 3 cases)', () => {
       }),
     ]);
     const r = await read(feed);
-    expect(r.events.map((e) => e.recurrenceId)).toEqual([null, '2026-10-21T02:30:00Z']);
+    expect(r.events.map((e) => e.recurrenceId)).toEqual([null, '2026-10-21']);
+    expect(r.events[0]!.exdates).toEqual(['2026-10-21T02:30:00Z']);
   });
 
   it('a malformed or unreadable rule never invents occurrences: the first one only, counted', async () => {
