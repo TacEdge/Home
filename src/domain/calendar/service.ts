@@ -509,12 +509,17 @@ async function keptDefaultPeople(
 }
 
 /** Locks a calendar the actor owns (NotFound if they cannot see it; not_owner if not theirs). */
-async function lockOwned(tx: DbOrTx, actor: UserActor, id: string): Promise<Source> {
+async function lockOwned(
+  tx: DbOrTx,
+  actor: UserActor,
+  id: string,
+  opts: { includeDisconnected?: boolean } = {},
+): Promise<Source> {
   if (!isUuid(id)) throw new NotFoundError('calendar');
   const [row] = await tx
     .select()
     .from(calendarSource)
-    .where(and(eq(calendarSource.id, id), visibleSources(actor, false)))
+    .where(and(eq(calendarSource.id, id), visibleSources(actor, opts.includeDisconnected === true)))
     .for('update')
     .limit(1);
   if (!row) throw new NotFoundError('calendar');
@@ -538,6 +543,12 @@ async function lockEventsOf(tx: DbOrTx, sourceId: string): Promise<string[]> {
  * applies to its events at once, under the reference rules: it cannot
  * become private while household notes point at its events, nor household
  * while its events name private people.
+ *
+ * A disconnected calendar's settings can be changed too, without
+ * reconnecting it (ADR 0007 §42): it stays disconnected, its events stay
+ * archived, nothing is fetched, and its connection (credential, fingerprint,
+ * status) is not touched. Otherwise a person a disconnected household
+ * calendar names could never be made private once its address was gone.
  */
 export async function updateCalendar(
   actor: UserActor,
@@ -549,9 +560,9 @@ export async function updateCalendar(
     assertPerson(actor);
     const parsed = updateCalendarInput.parse(patch);
     const fields = Object.keys(parsed).sort();
-    if (fields.length === 0) return getCalendar(actor, id, {}, deps);
+    if (fields.length === 0) return getCalendar(actor, id, { includeArchived: true }, deps);
     await auditedWrite(actor, deps, async (tx) => {
-      const current = await lockOwned(tx, actor, id);
+      const current = await lockOwned(tx, actor, id, { includeDisconnected: true });
       const visibility = parsed.visibility ?? current.visibility;
       const people = parsed.defaultPersonIds ?? current.defaultPersonIds;
       if (parsed.defaultPersonIds !== undefined || visibility !== current.visibility)
@@ -592,10 +603,15 @@ export async function updateCalendar(
           .update(event)
           .set({ visibility, kind: row.defaultKind ?? 'other', updatedAt: sql`now()` })
           .where(and(eq(event.calendarSourceId, current.id), eq(event.source, 'synced')));
-      const audits: DomainAudit[] = [sourceAudit('calendar_source.update', row, { fields })];
+      const audits: DomainAudit[] = [
+        sourceAudit('calendar_source.update', row, {
+          fields,
+          disconnected: row.archivedAt !== null,
+        }),
+      ];
       return { result: null, audit: audits };
     });
-    return getCalendar(actor, id, {}, deps);
+    return getCalendar(actor, id, { includeArchived: true }, deps);
   });
 }
 

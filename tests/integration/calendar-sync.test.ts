@@ -800,6 +800,128 @@ describe('disconnect and reconnect', () => {
   });
 });
 
+describe('a disconnected calendar’s settings can be changed without reconnecting (ADR 0007 §42)', () => {
+  const connectionOf = async (calendarId: string) =>
+    (
+      await admin.db.execute<Record<string, unknown>>(
+        sql`select c.status, c.credentials_encrypted, c.credentials_key_id, c.address_fingerprint, c.disconnected_at, c.updated_at
+            from calendar_connection c join calendar_source s on s.connection_id = c.id where s.id = ${calendarId}`,
+      )
+    ).rows[0];
+
+  it('recovery: a person a disconnected household calendar names can be made private once the owner lets them go', async () => {
+    const personA = await createPerson(
+      h.sam,
+      { name: 'Person A', role: 'child', visibility: 'household' },
+      deps,
+    );
+    const { calendarId } = await connect(h.sam, { defaultPersonIds: [personA.id] });
+    const p = provider(SEQUENCES.initial);
+    await refresh(calendarId, p);
+    await disconnectCalendar(h.sam, calendarId, deps);
+    const connBefore = await connectionOf(calendarId);
+    const refused = await updatePerson(h.sam, personA.id, { visibility: 'private' }, deps).catch(
+      (e: unknown) => e,
+    );
+    expect((refused as NotPermittedError).code).toBe('referenced_by_household');
+
+    const view = await updateCalendar(h.sam, calendarId, { defaultPersonIds: [] }, deps);
+    expect(view.defaultPersonIds).toEqual([]);
+    // Still disconnected: archived, the connection untouched, its events archived, nothing fetched.
+    expect(view.archivedAt).not.toBeNull();
+    expect(view.connection?.status).toBe('disconnected');
+    expect(await connectionOf(calendarId)).toEqual(connBefore);
+    expect(live(await rowsOf(calendarId))).toHaveLength(0);
+    expect(p.calls).toBe(1);
+
+    const done = await updatePerson(h.sam, personA.id, { visibility: 'private' }, deps);
+    expect(done.visibility).toBe('private');
+    for (const c of await listCalendars(h.alex, { includeArchived: true }, deps))
+      expect(c.defaultPersonIds).not.toContain(personA.id);
+    expect(JSON.stringify(await exportFor(h.alex, {}, deps))).not.toContain(personA.id);
+
+    const [audit] = (
+      await admin.db.execute<{ meta: Record<string, unknown> }>(
+        sql`select meta from audit_log where event = 'calendar_source.update' and subject_id = ${calendarId} order by at desc limit 1`,
+      )
+    ).rows;
+    expect(audit?.meta).toEqual({ fields: ['defaultPersonIds'], disconnected: true });
+  });
+
+  it('only the owner, by hand: the other adult, Kev, the system and a forged sync actor are refused', async () => {
+    const { calendarId } = await connect(h.sam);
+    await disconnectCalendar(h.sam, calendarId, deps);
+    const priv = await connect(h.sam, { visibility: 'private' });
+    await disconnectCalendar(h.sam, priv.calendarId, deps);
+    const codeOf = async (p: Promise<unknown>) =>
+      p.then(
+        () => 'ok',
+        (e: unknown) => (e as NotPermittedError).code ?? (e as Error).name,
+      );
+    expect(await codeOf(updateCalendar(h.alex, calendarId, { name: 'x' }, deps))).toBe('not_owner');
+    expect(await codeOf(updateCalendar(h.alex, priv.calendarId, { name: 'x' }, deps))).toBe(
+      'NotFoundError',
+    );
+    expect(await codeOf(updateCalendar(h.samViaKev, calendarId, { name: 'x' }, deps))).toBe(
+      'kev_cannot_write',
+    );
+    expect(
+      await codeOf(
+        updateCalendar({ kind: 'system', via: 'system' } as never, calendarId, { name: 'x' }, deps),
+      ),
+    ).toBe('not_a_user');
+    expect(
+      await codeOf(
+        updateCalendar({ ...h.sam, via: 'sync' as const }, calendarId, { name: 'x' }, deps),
+      ),
+    ).toBe('sync_actor');
+    expect((await getCalendar(h.sam, calendarId, { includeArchived: true }, deps)).name).toBe(
+      'Family',
+    );
+  });
+
+  it('a disconnected calendar’s visibility change obeys the same rules, and reconnecting afterwards still needs the address', async () => {
+    const kid = await createPerson(
+      h.sam,
+      { name: 'Private kid', role: 'child', visibility: 'private' },
+      deps,
+    );
+    const { calendarId, address } = await connect(h.sam, {
+      visibility: 'private',
+      defaultPersonIds: [kid.id],
+    });
+    await refresh(calendarId, provider(SEQUENCES.initial));
+    await disconnectCalendar(h.sam, calendarId, deps);
+    // Private → household with a private default person: refused, so the id never reaches the other adult.
+    const err = await updateCalendar(h.sam, calendarId, { visibility: 'household' }, deps).catch(
+      (e: unknown) => e,
+    );
+    expect((err as NotPermittedError).code).toBe('references_private');
+    await expect(
+      getCalendar(h.alex, calendarId, { includeArchived: true }, deps),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    // Allowed once the private person is gone; the archived events follow.
+    await updateCalendar(
+      h.sam,
+      calendarId,
+      { visibility: 'household', defaultPersonIds: [], name: 'Shared' },
+      deps,
+    );
+    for (const r of await rowsOf(calendarId)) {
+      expect(r.visibility).toBe('household');
+      expect(r.archivedAt).not.toBeNull();
+    }
+    expect((await getCalendar(h.alex, calendarId, { includeArchived: true }, deps)).name).toBe(
+      'Shared',
+    );
+    // Still disconnected: a refresh is refused, and reconnecting needs the address.
+    await expect(refresh(calendarId, provider(SEQUENCES.initial))).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    expect(await reconnectCalendar(h.sam, calendarId, { address }, deps)).toEqual({ calendarId });
+  });
+});
+
 describe('reconnect proves identity (ADR 0007 §42)', () => {
   it('the wrong address is refused; a live calendar is not reconnected; concurrent reconnects never duplicate', async () => {
     const { calendarId, address } = await connect(h.sam);
