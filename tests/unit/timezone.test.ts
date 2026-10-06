@@ -15,6 +15,13 @@ describe('time zone configuration', () => {
     const offenders = walk('src')
       .filter((f) => /\.(ts|tsx)$/.test(f))
       .filter((f) => readFileSync(f, 'utf8').includes('Pacific/Auckland'));
-    expect(offenders).toEqual(['src/lib/env.ts']);
+    expect(offenders).toEqual(['src/lib/env.ts', 'src/lib/time-zones.ts']);
+  });
+
+  it('the Windows zone table names it only as what one Windows name means, never as a default', () => {
+    const lines = readFileSync('src/lib/time-zones.ts', 'utf8')
+      .split('\n')
+      .filter((l) => l.includes('Pacific/Auckland'));
+    expect(lines).toEqual(["  'New Zealand Standard Time': 'Pacific/Auckland',"]);
   });
 });

@@ -108,6 +108,7 @@ interface CalendarProvider {
 }
 ```
 
+- **M4's interface** is `src/domain/calendar/provider.ts` (ADR 0007 §22): `fetchEvents(conn, cal, range)` returns the normalised events in the range, a count of events it could not read, a feed hash and counts of what it read with care; overrides and cancellations arrive already applied as the series' exdates, and failures are the four source statuses. The sketch above is the long-term shape (cursors and deletions arrive with authenticated providers).
 - **V0.1 (built in M4, ADR 0007):** the `ics` adapter, accepting only **Google Calendar's secret iCal address** (D1). No sign-in integration. Refreshed on use when older than ~15 minutes: the page asks for a refresh without waiting for it, and rendering never writes. iCloud, Outlook and any other real feed need an explicit later decision, even though they serve ICS; the adapter stays provider-neutral and is tested with synthetic feeds of any shape.
 - **Later:** authenticated `google` (Calendar API), `microsoft` (Graph) and `caldav` (iCloud) adapters can replace or sit alongside ICS **without changing `Event`, `EventPerson` or any engine**. A connection stores provider-specific credentials encrypted; the domain only ever sees normalised events.
 - Write-back, when approved in a later release, is an optional provider capability behind the proposal/approval flow.

@@ -216,3 +216,50 @@ describe('calendar secrets are scrubbed by value, whatever they are called (M4 c
     expect(entry).toMatchObject({ code: 'timeout', count: 3, status: 'unreachable', id: 'a1' });
   });
 });
+
+describe('the event (the logger’s message argument) is scrubbed too (M4 Package 2 carry-forward)', () => {
+  const PATH =
+    '/calendar/ical/synthetic.family%40example.test/private-0123456789abcdef0123456789abcdef/basic.ics';
+  const HTTPS = `https://calendar.google.com${PATH}`;
+  const SEALED = `hc1.0123456789abcdef.${'A'.repeat(16)}.${'Bq9-_x'.repeat(10)}.${'C'.repeat(22)}`;
+  const FINGERPRINT = `fp1.${'D'.repeat(43)}`;
+  const lines: string[] = [];
+  const logger = createLogger({ sink: (l) => lines.push(l), minLevel: 'debug' });
+
+  it.each([
+    ['an address', HTTPS, 'refresh failed for [calendar-address]'],
+    ['a webcal address', HTTPS.replace('https', 'webcal'), 'refresh failed for [calendar-address]'],
+    ['a sealed credential', SEALED, 'refresh failed for [credential]'],
+    ['a fingerprint', FINGERPRINT, 'refresh failed for [fingerprint]'],
+  ])(
+    '%s passed as the message itself, at every level and through a child',
+    (_name, secret, want) => {
+      lines.length = 0;
+      for (const log of [logger, logger.child({ part: 'sync' })]) {
+        log.debug(`refresh failed for ${secret}`);
+        log.info(`refresh failed for ${secret}`);
+        log.warn(`refresh failed for ${secret}`);
+        log.error(`refresh failed for ${secret}`);
+      }
+      expect(lines).toHaveLength(8);
+      for (const line of lines) {
+        expect(line).not.toContain('private-0123456789abcdef');
+        expect(line).not.toContain('/calendar/ical/');
+        expect(line).not.toContain('Bq9-_xBq9-_x');
+        expect(line).not.toContain('DDDDDDDDDDDDDDDD');
+        expect(JSON.parse(line).event).toBe(want);
+      }
+    },
+  );
+
+  it('fixed structural event names are written exactly as given', () => {
+    lines.length = 0;
+    for (const name of ['auth.link_request_failed', 'calendar.sync', 'form_action_failed'])
+      logger.warn(name, { code: 'timeout' });
+    expect(lines.map((l) => JSON.parse(l).event)).toEqual([
+      'auth.link_request_failed',
+      'calendar.sync',
+      'form_action_failed',
+    ]);
+  });
+});
