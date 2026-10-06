@@ -146,3 +146,73 @@ describe('calendar credentials never reach a log line (M4 contract §4.1)', () =
     }
   });
 });
+
+describe('calendar secrets are scrubbed by value, whatever they are called (M4 contract §4.1)', () => {
+  const PATH =
+    '/calendar/ical/synthetic.family%40example.test/private-0123456789abcdef0123456789abcdef/basic.ics';
+  const HTTPS = `https://calendar.google.com${PATH}`;
+  const WEBCAL = `webcal://calendar.google.com${PATH}`;
+  const BARE = `calendar.google.com${PATH}`;
+  const SEALED = `hc1.0123456789abcdef.${'A'.repeat(16)}.${'Bq9-_x'.repeat(10)}.${'C'.repeat(22)}`;
+  const FINGERPRINT = `fp1.${'D'.repeat(43)}`;
+  const LEAKS = ['private-0123456789abcdef', '/calendar/ical/', 'Bq9-_xBq9-_x', 'DDDDDDDDDDDDDDDD'];
+  const logged = (fields: Record<string, unknown>) => {
+    const lines: string[] = [];
+    createLogger({ sink: (l) => lines.push(l) }).error('calendar_event', fields);
+    return lines.join('\n');
+  };
+  const clean = (text: string) => {
+    for (const leak of LEAKS) expect(text, leak).not.toContain(leak);
+  };
+
+  it('under generic field names, at any depth, in arrays', () => {
+    const out = logged({
+      location: HTTPS,
+      href: WEBCAL,
+      uri: BARE,
+      feedUri: HTTPS,
+      link: HTTPS,
+      input: HTTPS,
+      value: WEBCAL,
+      sealedValue: SEALED,
+      result: SEALED,
+      ref: FINGERPRINT,
+      nested: { a: [{ b: { c: HTTPS } }, BARE, [SEALED]] },
+    });
+    clean(out);
+  });
+
+  it('inside free text and error messages, keeping the words around them', () => {
+    const out = logged({
+      detail: `refresh failed for ${HTTPS} after 3 tries`,
+      reason: `stored ${SEALED} could not open`,
+      err: new Error(`bad address ${WEBCAL}`),
+      errors: [new TypeError(`fetch ${BARE} (timeout)`)],
+    });
+    clean(out);
+    const entry = JSON.parse(out);
+    expect(entry.detail).toBe('refresh failed for [calendar-address] after 3 tries');
+    expect(entry.reason).toBe('stored [credential] could not open');
+    expect(entry.err).toEqual({ name: 'Error', message: 'bad address [calendar-address]' });
+    expect(entry.errors[0].message).toBe('fetch [calendar-address] (timeout)');
+  });
+
+  it('even as a field name, and through sanitiseMessage', () => {
+    clean(logged({ [HTTPS]: 1 }));
+    clean(sanitiseMessage(`x ${BARE} y ${SEALED}`));
+  });
+
+  it('obvious names are redacted by name too, whatever the value', () => {
+    const entry = JSON.parse(
+      logged({ location: 'x', href: 'x', uri: 'x', link: 'x', feedId: 'x', sealedThing: 'x' }),
+    );
+    expect(Object.values(entry).filter((v) => v === '[redacted]')).toHaveLength(6);
+  });
+
+  it('leaves ordinary structural values alone', () => {
+    const entry = JSON.parse(
+      logged({ code: 'timeout', count: 3, status: 'unreachable', id: 'a1' }),
+    );
+    expect(entry).toMatchObject({ code: 'timeout', count: 3, status: 'unreachable', id: 'a1' });
+  });
+});

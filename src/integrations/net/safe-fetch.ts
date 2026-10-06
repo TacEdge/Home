@@ -1,6 +1,6 @@
 import 'server-only';
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
-import http from 'node:http';
+import http, { type IncomingMessage } from 'node:http';
 import https from 'node:https';
 import type { Socket } from 'node:net';
 import { createGunzip } from 'node:zlib';
@@ -41,7 +41,7 @@ export class SafeFetchError extends Error {
   }
 }
 
-type Lookup = (
+export type Lookup = (
   hostname: string,
   options: { all: true },
   callback: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void,
@@ -110,6 +110,35 @@ export async function safeGet(address: string, opts: SafeFetchOptions = {}): Pro
   }
 }
 
+/**
+ * The lookup a request connects through: every address the name resolves to
+ * must be allowed, or none is used. Node asks in one of two shapes: with
+ * `all: true` (its default, since it tries IPv6 and IPv4 in turn) it expects
+ * the whole list back, otherwise one address and its family. Either way the
+ * list is judged as a whole. Exported for tests.
+ */
+export function guardLookup(policy: FetchPolicy, lookup: Lookup) {
+  return (
+    hostname: string,
+    options: { all?: boolean } | number | undefined,
+    callback: (err: Error | null, address: string | LookupAddress[], family?: number) => void,
+  ) => {
+    const all = typeof options === 'object' && options !== null && options.all === true;
+    lookup(hostname, { all: true }, (err, addresses) => {
+      if (err || !addresses?.length) return callback(err ?? new Error('lookup'), all ? [] : '', 0);
+      if (!addresses.every((a) => policy.allowAddress(a.address)))
+        return callback(new SafeFetchError('forbidden_destination'), all ? [] : '', 0);
+      if (all)
+        return callback(
+          null,
+          addresses.map((a) => ({ address: a.address, family: a.family })),
+        );
+      const first = addresses[0]!;
+      callback(null, first.address, first.family);
+    });
+  };
+}
+
 type Outcome = { kind: 'body'; feed: FetchedFeed } | { kind: 'redirect'; location: string };
 
 function getOnce(
@@ -127,27 +156,21 @@ function getOnce(
       clearTimeout(timer);
       fn();
     };
+    let response: IncomingMessage | undefined;
+    // Closes the connection: a body HOME will not read is never drained, so
+    // nothing keeps downloading after the fetch has settled.
+    const close = () => {
+      response?.destroy();
+      req.destroy();
+    };
     const fail = (code: SafeFetchErrorCode) => {
       finish(() => reject(new SafeFetchError(code)));
-      req.destroy();
+      close();
     };
     const remaining = deadline - Date.now();
     const timer = setTimeout(() => fail('timeout'), Math.max(0, remaining));
 
-    // Every address the name resolves to must be allowed, or none is used.
-    const guardedLookup = (
-      hostname: string,
-      _options: unknown,
-      callback: (err: Error | null, address: string, family: number) => void,
-    ) => {
-      lookup(hostname, { all: true }, (err, addresses) => {
-        if (err || !addresses?.length) return callback(err ?? new Error('lookup'), '', 0);
-        if (!addresses.every((a) => policy.allowAddress(a.address)))
-          return callback(new SafeFetchError('forbidden_destination'), '', 0);
-        const first = addresses[0]!;
-        callback(null, first.address, first.family);
-      });
-    };
+    const guardedLookup = guardLookup(policy, lookup);
 
     const transport = url.protocol === 'https:' ? https : url.protocol === 'http:' ? http : null;
     if (!transport) return fail('unsupported_destination');
@@ -163,29 +186,26 @@ function getOnce(
         lookup: guardedLookup as never,
       },
       (res) => {
+        response = res;
         const status = res.statusCode ?? 0;
         if (status >= 300 && status < 400 && status !== 304) {
           const location = res.headers.location;
-          res.resume();
           if (!location) return fail('bad_response');
-          return finish(() => resolve({ kind: 'redirect', location }));
+          finish(() => resolve({ kind: 'redirect', location }));
+          return close();
         }
         if ([401, 403, 404, 410].includes(status)) {
-          res.resume();
           return fail('address_rejected');
         }
         if (status !== 200) {
-          res.resume();
           return fail('unreachable');
         }
         const declared = Number(res.headers['content-length'] ?? NaN);
         if (Number.isFinite(declared) && declared > limits.maxBytes) {
-          res.resume();
           return fail('too_large');
         }
         const encoding = (res.headers['content-encoding'] ?? 'identity').toLowerCase();
         if (encoding !== 'identity' && encoding !== 'gzip') {
-          res.resume();
           return fail('bad_response');
         }
         const stream = encoding === 'gzip' ? res.pipe(createGunzip()) : res;

@@ -2,7 +2,8 @@ import 'server-only';
 
 // A tiny structured logger (contract §5.8). One JSON object per line; events
 // and IDs, never content. Keys on the redaction list are replaced wherever
-// they appear, at any depth, including inside arrays.
+// they appear, at any depth, including inside arrays; and every string value,
+// error message and key is scrubbed of calendar secrets by its content.
 
 export type Level = 'debug' | 'info' | 'warn' | 'error';
 export type Fields = Record<string, unknown>;
@@ -30,10 +31,49 @@ export const REDACTED_KEYS = [
   'fingerprint',
   'nonce',
   'key',
+  // Where an address tends to travel under another name.
+  'location',
+  'href',
+  'uri',
+  'link',
 ] as const;
 
 /** A field whose name contains one of these is redacted wherever the word sits. */
-export const REDACTED_WORDS = ['credential', 'secret', 'ciphertext', 'password'] as const;
+export const REDACTED_WORDS = [
+  'credential',
+  'secret',
+  'ciphertext',
+  'password',
+  'sealed',
+  'feed',
+] as const;
+
+// Value-based scrubbing (M4 contract §4.1): whatever a field is called, a
+// string that carries a secret calendar address, a sealed credential or an
+// address fingerprint has that part replaced, in free text, error messages
+// and nested values alike. The rest of the string, which is structural
+// (an event name, a code, the words around it), is kept.
+const SECRET_PATTERNS: [RegExp, string][] = [
+  // Any URL (any scheme) whose path goes through Google's calendar export,
+  // or carries a private token; and the same without a scheme.
+  [
+    /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]*?(?:\/calendar\/ical\/|private-)[^\s"'<>]*/gi,
+    '[calendar-address]',
+  ],
+  [/[^\s"'<>]*\/calendar\/ical\/[^\s"'<>]*/gi, '[calendar-address]'],
+  [/private-[A-Za-z0-9]{8,}/g, '[calendar-address]'],
+  // A sealed credential: hc<version>.<key id>.<iv>.<ciphertext>.<tag>.
+  [/\bhc\d+(?:\.[A-Za-z0-9_+/=-]+){4}/g, '[credential]'],
+  // An address fingerprint.
+  [/\bfp\d+\.[A-Za-z0-9_-]{16,}/g, '[fingerprint]'],
+];
+
+/** A string with every secret calendar address, sealed credential and fingerprint replaced. */
+export function scrubSecrets(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of SECRET_PATTERNS) out = out.replace(pattern, replacement);
+  return out;
+}
 
 const redactedSet = new Set<string>(REDACTED_KEYS);
 const shouldRedact = (key: string) => {
@@ -47,12 +87,14 @@ const shouldRedact = (key: string) => {
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 8) return '[truncated]';
+  if (typeof value === 'string') return scrubSecrets(value);
   if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
-  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (value instanceof Error)
+    return { name: scrubSecrets(value.name), message: scrubSecrets(value.message) };
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = shouldRedact(k) ? '[redacted]' : redact(v, depth + 1);
+      out[scrubSecrets(k)] = shouldRedact(k) ? '[redacted]' : redact(v, depth + 1);
     }
     return out;
   }
@@ -65,7 +107,7 @@ export function redact(value: unknown, depth = 0): unknown {
  * Better Auth's log messages, which may interpolate URLs and emails.
  */
 export function sanitiseMessage(message: unknown): string {
-  const text = typeof message === 'string' ? message : String(message ?? '');
+  const text = scrubSecrets(typeof message === 'string' ? message : String(message ?? ''));
   return text
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[url]')

@@ -48,7 +48,10 @@ export function normaliseCalendarAddress(input: string): string {
   } catch {
     throw new CalendarAddressError('not_an_address');
   }
-  if (url.username || url.password || /@/.test(raw.slice(0, raw.indexOf('/', 8) >>> 0)))
+  // Any userinfo, even an empty `@`, in either scheme: the authority is
+  // everything between `://` and the next `/`, read from the raw input.
+  const authority = raw.slice(raw.indexOf('://') + 3).split('/')[0] ?? '';
+  if (url.username || url.password || authority.includes('@'))
     throw new CalendarAddressError('credentials_in_address');
   if (url.hostname !== GOOGLE_CALENDAR_HOST) throw new CalendarAddressError('unsupported_host');
   if (url.port !== '') throw new CalendarAddressError('unsupported_port');

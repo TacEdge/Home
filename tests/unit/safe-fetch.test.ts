@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   FETCH_LIMITS,
   googleCalendarPolicy,
+  guardLookup,
   safeGet,
   SafeFetchError,
   type FetchPolicy,
@@ -281,6 +282,125 @@ describe('errors carry a code only', () => {
       for (const leak of ['private-', 'calendar', '127.0.0.1', 'forbidden.example', 'not found'])
         expect(`${e.message} ${JSON.stringify(e)} ${e.stack}`, leak).not.toContain(leak);
       expect(e.cause).toBeUndefined();
+    },
+  );
+});
+
+describe('a hostname that resolves to allowed addresses (the guarded lookup, not a literal IP)', () => {
+  const PUBLIC = [
+    { address: '2404:6800:4006:80f::200e', family: 6 },
+    { address: '142.250.70.78', family: 4 },
+  ];
+  const resolver =
+    (answer: { address: string; family: number }[]) =>
+    (_h: string, _o: unknown, cb: (e: null, a: { address: string; family: number }[]) => void) =>
+      cb(null, answer);
+
+  it('answers Node in the shape it asks for: the whole list for all, one address otherwise', () => {
+    const guarded = guardLookup(googleCalendarPolicy, resolver(PUBLIC));
+    const got: unknown[] = [];
+    guarded('calendar.google.com', { all: true }, (err, address, family) =>
+      got.push({ err, address, family }),
+    );
+    guarded('calendar.google.com', {}, (err, address, family) =>
+      got.push({ err, address, family }),
+    );
+    guarded('calendar.google.com', 4, (err, address, family) => got.push({ err, address, family }));
+    expect(got).toEqual([
+      { err: null, address: PUBLIC, family: undefined },
+      { err: null, address: PUBLIC[0]!.address, family: 6 },
+      { err: null, address: PUBLIC[0]!.address, family: 6 },
+    ]);
+  });
+
+  it('refuses the whole list, in both shapes, when any answer is not public', () => {
+    const guarded = guardLookup(
+      googleCalendarPolicy,
+      resolver([...PUBLIC, { address: '10.0.0.1', family: 4 }]),
+    );
+    for (const options of [{ all: true }, {}]) {
+      let error: unknown;
+      guarded('calendar.google.com', options, (err) => (error = err));
+      expect((error as SafeFetchError).code).toBe('forbidden_destination');
+    }
+  });
+
+  it('completes a real request through a name: one IPv6 and one IPv4 answer, both allowed', async () => {
+    // Stand-ins for public addresses: a local server on IPv4, and a policy
+    // that treats both loopback addresses as allowed. The name is not an IP
+    // literal, so Node must go through the guarded lookup to connect; given
+    // an IPv6 and an IPv4 answer it tries them in turn and reaches the server
+    // on whichever answers (the IPv4 one here, with or without IPv6 on the host).
+    const dual = http.createServer((_q, r) => r.end(ICS));
+    await new Promise<void>((r) => dual.listen(0, '127.0.0.1', () => r()));
+    const port = (dual.address() as AddressInfo).port;
+    const asked: unknown[] = [];
+    const named: FetchPolicy = {
+      approve: (u) => u.hostname === 'feed.example.test',
+      allowAddress: (a) => a === '::1' || a === '127.0.0.1',
+    };
+    try {
+      for (const answer of [
+        [
+          { address: '::1', family: 6 },
+          { address: '127.0.0.1', family: 4 },
+        ],
+        [{ address: '127.0.0.1', family: 4 }],
+      ]) {
+        const feed = await safeGet(`http://feed.example.test:${port}${SECRET_PATH}`, {
+          policy: named,
+          lookup: (h, o, cb) => {
+            asked.push(h);
+            cb(null, answer);
+          },
+        });
+        expect(feed.text).toBe(ICS);
+      }
+      expect(asked).toEqual(['feed.example.test', 'feed.example.test']);
+    } finally {
+      await new Promise<void>((r) => dual.close(() => r()));
+    }
+  });
+});
+
+describe('a body HOME does not read is closed, never drained', () => {
+  it.each([
+    [302, { location: '/elsewhere' }, 'redirect_refused'],
+    [404, {}, 'address_rejected'],
+    [500, {}, 'unreachable'],
+    [302, {}, 'bad_response'],
+  ])(
+    'a %i answer that keeps streaming is closed as soon as the fetch settles',
+    async (status, headers, code) => {
+      let closedAt = 0;
+      const endless = http.createServer((_q, res) => {
+        res.writeHead(status, headers);
+        const t = setInterval(() => res.write('x'.repeat(1024)), 5);
+        res.on('close', () => {
+          clearInterval(t);
+          closedAt = Date.now();
+        });
+      });
+      await new Promise<void>((r) => endless.listen(0, '127.0.0.1', () => r()));
+      const at = `http://127.0.0.1:${(endless.address() as AddressInfo).port}`;
+      const policy: FetchPolicy = {
+        approve: (u) => u.pathname !== '/elsewhere',
+        allowAddress: (a) => a === '127.0.0.1',
+      };
+      try {
+        const error = await safeGet(`${at}/feed.ics`, { policy }).then(
+          () => null,
+          (e: unknown) => e,
+        );
+        const settledAt = Date.now();
+        expect((error as SafeFetchError).code).toBe(code);
+        await new Promise((r) => setTimeout(r, 250));
+        expect(closedAt, 'the server saw the connection close').toBeGreaterThan(0);
+        expect(closedAt - settledAt).toBeLessThan(200);
+      } finally {
+        endless.closeAllConnections();
+        await new Promise<void>((r) => endless.close(() => r()));
+      }
     },
   );
 });

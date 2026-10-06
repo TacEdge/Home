@@ -51,6 +51,13 @@ describe('refused, with a structural code', () => {
     ['https: without slashes', `https:calendar.google.com${PATH}`, 'not_an_address'],
     ['user and password', `https://user:pass@calendar.google.com${PATH}`, 'credentials_in_address'],
     ['an empty user', `https://@calendar.google.com${PATH}`, 'credentials_in_address'],
+    ['an empty user on webcal', `webcal://@calendar.google.com${PATH}`, 'credentials_in_address'],
+    ['a user on webcal', `webcal://u:p@calendar.google.com${PATH}`, 'credentials_in_address'],
+    [
+      'the host as a webcal user',
+      `webcal://calendar.google.com@evil.example${PATH}`,
+      'credentials_in_address',
+    ],
     [
       'the host as a user',
       `https://calendar.google.com@evil.example${PATH}`,
