@@ -12,7 +12,7 @@ import {
 } from '@/domain/events/service';
 import { FAMILY_EVENTS } from '../fixtures/family';
 import { adminDb, testDb } from './db';
-import { ensureFixtureUsers, type Household } from './fixtures';
+import { ensureFixtureUsers, syntheticCalendarSource, type Household } from './fixtures';
 
 // Event time handling (M2 contract §4.1): instants in UTC plus the zone they
 // were made in; all-day as dates with an exclusive end; the input layer and
@@ -217,9 +217,10 @@ describe('recurrence is stored, never parsed', () => {
 
 describe('synced events are read-only here (M4 owns them)', () => {
   it('can be read like any household event, but not edited, archived or restored', async () => {
+    const sourceId = await syntheticCalendarSource(admin.db, h.alex.userId);
     const r = await admin.db.execute(sql`
-      insert into event (created_via, title, kind, starts_at, ends_at, time_zone, source, calendar_source_id, external_uid)
-      values ('sync', 'From a calendar', 'work', '2026-10-15T20:00:00Z', '2026-10-15T21:00:00Z', 'UTC', 'synced', gen_random_uuid(), 'uid-sync-1')
+      insert into event (created_by, created_via, title, kind, starts_at, ends_at, time_zone, source, calendar_source_id, external_uid)
+      values (${h.alex.userId}, 'sync', 'From a calendar', 'work', '2026-10-15T20:00:00Z', '2026-10-15T21:00:00Z', 'UTC', 'synced', ${sourceId}::uuid, 'uid-sync-1')
       returning id`);
     const id = r.rows[0]?.id as string;
     expect((await getEvent(h.alex, id, {}, deps)).source).toBe('synced');

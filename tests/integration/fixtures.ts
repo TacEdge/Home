@@ -1,6 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Db } from '@/db/create';
 import {
+  calendarConnection,
+  calendarSource,
   capture,
   context,
   conversation,
@@ -62,7 +64,47 @@ export async function clearDomainRows(db: Db): Promise<void> {
   await db.delete(note);
   await db.delete(task);
   await db.delete(event);
+  if (await hasCalendarTables(db)) {
+    await db.delete(calendarSource);
+    await db.delete(calendarConnection);
+  }
   await db.delete(project);
   await db.delete(person);
   await db.delete(capture);
+}
+
+/**
+ * Whether migration 0007's calendar tables exist. The previous-schema check
+ * (scripts/check-previous-schema.mts) runs these suites on main's schema too,
+ * which may predate them.
+ */
+async function hasCalendarTables(db: Db): Promise<boolean> {
+  const r = await db.execute(sql`select to_regclass('public.calendar_source') is not null as ok`);
+  return r.rows[0]?.ok === true;
+}
+
+/**
+ * A synthetic calendar source owned by `ownerUserId`, for tests that need a
+ * synced event (event.calendar_source_id references calendar_source since
+ * migration 0007). The credential and fingerprint have Package 2's shapes and
+ * seal nothing; `n` keeps fingerprints distinct, as one live connection may
+ * hold an address. On a schema before 0007 there is no source to reference,
+ * so it returns an unreferenced id, as synced events were stored then.
+ */
+export async function syntheticCalendarSource(
+  db: Db,
+  ownerUserId: string,
+  n = Math.floor(Math.random() * 1e9),
+): Promise<string> {
+  if (!(await hasCalendarTables(db))) return crypto.randomUUID();
+  const sealed = `hc1.0123456789abcdef.${'A'.repeat(16)}.${'B'.repeat(24)}.${'C'.repeat(22)}`;
+  const fingerprint = `fp1.${String(n).padStart(43, '0')}`;
+  const c = await db.execute(sql`
+    insert into calendar_connection (owner_user_id, provider, credentials_encrypted, credentials_key_id, address_fingerprint)
+    values (${ownerUserId}, 'ics', ${sealed}, '0123456789abcdef', ${fingerprint}) returning id`);
+  const s = await db.execute(sql`
+    insert into calendar_source (created_by, created_via, visibility, connection_id, external_calendar_id, name)
+    values (${ownerUserId}, 'ui', 'household', ${c.rows[0]?.id as string}::uuid, 'primary', 'Work')
+    returning id`);
+  return s.rows[0]?.id as string;
 }

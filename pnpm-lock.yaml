@@ -30,7 +30,7 @@ importers:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
       rrule:
-        specifier: ^2.8.1
+        specifier: 2.8.1
         version: 2.8.1
       server-only:
         specifier: ^0.0.1

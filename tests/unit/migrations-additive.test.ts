@@ -18,15 +18,51 @@ const BETTER_AUTH_TABLES = ['user', 'session', 'account', 'verification', 'rate_
 type Problem = string;
 
 /**
- * Foreign keys the contract planned on columns that already exist (M2
- * contract §4.2): provenance links whose target table arrived later. Each is
- * ON DELETE SET NULL, and no deployed code path sets the column before its
- * table exists, so no live row or write can break; were one to dangle, the
- * migration would fail validation and roll back, never change data.
+ * Foreign keys the contracts planned on columns that already exist: links
+ * whose target table arrived later. Each names the only delete rule it may
+ * have. No deployed code path sets the column before its table exists, so no
+ * live row or write can break; were one to dangle, the migration would fail
+ * validation and roll back, never change data.
  */
-export const APPROVED_EXISTING_COLUMN_FKS: Record<string, string> = {
-  'capture.message_id': 'message, Package 5 (contract §4.2)',
-  'proposal.conversation_id': 'conversation, Package 5 (contract §4.2)',
+export const APPROVED_EXISTING_COLUMN_FKS: Record<
+  string,
+  { reason: string; onDelete: 'set null' | 'restrict' }
+> = {
+  'capture.message_id': { reason: 'message, M2 Package 5 (contract §4.2)', onDelete: 'set null' },
+  'proposal.conversation_id': {
+    reason: 'conversation, M2 Package 5 (contract §4.2)',
+    onDelete: 'set null',
+  },
+  // RESTRICT, not SET NULL: a synced event must keep its source (event_synced_check),
+  // and a source is archived, never deleted (ADR 0007 §5). No synced event
+  // exists before M4 Package 4b, so every existing value is null.
+  'event.calendar_source_id': {
+    reason: 'calendar_source, M4 Package 4a (contract §7, ADR 0007 §33)',
+    onDelete: 'restrict',
+  },
+};
+
+/**
+ * Partial unique indexes approved on an existing table, by name. Each covers
+ * only rows no deployed code can write (synced events and occurrence
+ * overrides, from M4), so it cannot reject an existing row or a deployed
+ * write. They must stay partial.
+ */
+export const APPROVED_EXISTING_TABLE_UNIQUE_INDEXES: Record<string, string> = {
+  event_synced_identity_unique:
+    "synced identity, only where source = 'synced' (M4 Package 4a, ADR 0007 §13, §33)",
+  event_manual_override_unique:
+    'one live change per occurrence, only where recurrence_parent_id is set (M4 Package 8a, ADR 0007 §33)',
+};
+
+/**
+ * CHECKs approved on existing columns of an existing table, by name. Each
+ * holds for every existing row and every write the deployed code can make.
+ */
+export const APPROVED_EXISTING_COLUMN_CHECKS: Record<string, string> = {
+  // Every existing event is manual and made through ui or kev; only M4's
+  // sync path writes source 'synced' with created_via 'sync'.
+  event_sync_provenance_check: "source 'synced' exactly when created_via 'sync' (ADR 0007 §8, §33)",
 };
 
 /** Why a migration is not additive, if it is not. Empty when it is. */
@@ -47,7 +83,9 @@ export function nonAdditive(sqlText: string, existingTables: Set<string>): Probl
     } else if (/^CREATE (UNIQUE )?INDEX/i.test(st)) {
       // A new unique index on an existing table could reject existing rows.
       const on = st.match(/ON "([^"]+)"/i)?.[1] ?? '';
-      if (/^CREATE UNIQUE/i.test(st) && existingTables.has(on) && !created.has(on))
+      const name = st.match(/INDEX "([^"]+)"/i)?.[1] ?? '';
+      const approved = name in APPROVED_EXISTING_TABLE_UNIQUE_INDEXES && / WHERE /i.test(st);
+      if (/^CREATE UNIQUE/i.test(st) && existingTables.has(on) && !created.has(on) && !approved)
         problems.push(`unique index on existing table: ${head}`);
     } else if ((m = st.match(/^ALTER TABLE "([^"]+)" ADD COLUMN "([^"]+)"(.*)$/is))) {
       const [, table = '', column = '', rest = ''] = m;
@@ -57,10 +95,12 @@ export function nonAdditive(sqlText: string, existingTables: Set<string>): Probl
       if (!added.has(table)) added.set(table, new Set());
       added.get(table)?.add(column);
     } else if (
-      (m = st.match(/^ALTER TABLE "([^"]+)" ADD CONSTRAINT "[^"]+" (CHECK|FOREIGN KEY) (.*)$/is))
+      (m = st.match(/^ALTER TABLE "([^"]+)" ADD CONSTRAINT "([^"]+)" (CHECK|FOREIGN KEY) (.*)$/is))
     ) {
-      const [, table = '', kind = '', body = ''] = m;
-      if (existingTables.has(table) && !created.has(table)) {
+      const [, table = '', name = '', kind = '', body = ''] = m;
+      const approvedCheck =
+        kind.toUpperCase() === 'CHECK' && name in APPROVED_EXISTING_COLUMN_CHECKS;
+      if (existingTables.has(table) && !created.has(table) && !approvedCheck) {
         // On an existing table a constraint may only cover columns this
         // migration added, so no existing row or deployed write can break.
         const cols =
@@ -69,10 +109,11 @@ export function nonAdditive(sqlText: string, existingTables: Set<string>): Probl
             : [body.match(/^\("([^"]+)"\)/)?.[1] ?? ''];
         for (const c of cols) {
           if (added.get(table)?.has(c)) continue;
+          const fk = APPROVED_EXISTING_COLUMN_FKS[`${table}.${c}`];
           const planned =
             kind.toUpperCase() === 'FOREIGN KEY' &&
-            `${table}.${c}` in APPROVED_EXISTING_COLUMN_FKS &&
-            /ON DELETE set null/i.test(body);
+            fk !== undefined &&
+            new RegExp(`ON DELETE ${fk.onDelete}\\b`, 'i').test(body);
           if (!planned) problems.push(`constraint on existing column ${table}.${c}: ${head}`);
         }
       }
@@ -119,8 +160,20 @@ describe('the additive-migration guard', () => {
       'ALTER TABLE "capture" ADD CONSTRAINT "f" FOREIGN KEY ("message_id") REFERENCES "public"."message"("id") ON DELETE set null ON UPDATE no action;',
       [],
     ],
+    [
+      'ALTER TABLE "event" ADD CONSTRAINT "f" FOREIGN KEY ("calendar_source_id") REFERENCES "public"."calendar_source"("id") ON DELETE restrict ON UPDATE no action;',
+      [],
+    ],
+    [
+      'CREATE UNIQUE INDEX "event_synced_identity_unique" ON "event" USING btree ("calendar_source_id") WHERE "event"."source" = \'synced\';',
+      [],
+    ],
+    [
+      'ALTER TABLE "event" ADD CONSTRAINT "event_sync_provenance_check" CHECK (("event"."source" = \'synced\') = ("event"."created_via" = \'sync\'));',
+      [],
+    ],
   ])('accepts %s', (text, expected) => {
-    expect(nonAdditive(text, new Set([...existing, 'capture']))).toEqual(expected);
+    expect(nonAdditive(text, new Set([...existing, 'capture', 'event']))).toEqual(expected);
   });
 
   it.each([
@@ -136,10 +189,30 @@ describe('the additive-migration guard', () => {
       'a CHECK on an approved column',
       'ALTER TABLE "capture" ADD CONSTRAINT "c" CHECK ("capture"."message_id" is null);',
     ],
+    [
+      'the source FK with a cascading delete',
+      'ALTER TABLE "event" ADD CONSTRAINT "f" FOREIGN KEY ("calendar_source_id") REFERENCES "public"."calendar_source"("id") ON DELETE cascade;',
+    ],
+    [
+      'the source FK with SET NULL (a synced event must keep its source)',
+      'ALTER TABLE "event" ADD CONSTRAINT "f" FOREIGN KEY ("calendar_source_id") REFERENCES "public"."calendar_source"("id") ON DELETE set null;',
+    ],
+    [
+      'an approved unique index made total (no WHERE)',
+      'CREATE UNIQUE INDEX "event_synced_identity_unique" ON "event" USING btree ("calendar_source_id","external_uid");',
+    ],
+    [
+      'an unapproved partial unique index on an existing table',
+      'CREATE UNIQUE INDEX "event_title_unique" ON "event" USING btree ("title") WHERE "event"."source" = \'synced\';',
+    ],
+    [
+      'an unapproved CHECK on existing columns',
+      'ALTER TABLE "event" ADD CONSTRAINT "event_title_check" CHECK ("event"."title" <> \'\');',
+    ],
     ['a grant in a block', 'DO $$ BEGIN GRANT ALL ON TABLE "x" TO home_app; END $$;'],
     ['a truncate in a block', 'DO $$ BEGIN TRUNCATE "capture"; END $$;'],
   ])('rejects %s', (_l, text) => {
-    expect(nonAdditive(text, new Set([...existing, 'capture']))).not.toEqual([]);
+    expect(nonAdditive(text, new Set([...existing, 'capture', 'event']))).not.toEqual([]);
   });
 
   it.each([
