@@ -24,13 +24,32 @@ const allowed = {
   lib: [],
 };
 
+// One narrow exception (ADR 0007 §42): app may import the calendar
+// composition root, src/integrations/calendar/entry.ts, and nothing else in
+// integrations. It assembles the domain's calendar refresh with the real
+// provider, so domain never imports integrations and app never sees a
+// provider. tests/unit/layer-exceptions.test.ts holds the rule to this.
+const EXCEPTIONS = { app: { integrations: 'calendar/entry' } };
+
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+
 const forbidFor = (layer) =>
   layers
     .filter((other) => other !== layer && !allowed[layer].includes(other))
-    .map((other) => ({
-      group: [`@/${other}`, `@/${other}/*`, `**/src/${other}`, `**/src/${other}/*`],
-      message: `Layer "${layer}" may not import from "${other}" (see SYSTEM-ARCHITECTURE.md §4).`,
-    }));
+    .map((other) => {
+      const message = `Layer "${layer}" may not import from "${other}" (see SYSTEM-ARCHITECTURE.md §4).`;
+      const only = EXCEPTIONS[layer]?.[other];
+      if (!only)
+        return {
+          group: [`@/${other}`, `@/${other}/*`, `**/src/${other}`, `**/src/${other}/*`],
+          message,
+        };
+      // Everything in the layer except exactly the one allowed module.
+      return {
+        regex: `^(@/|.*/src/)${other}(?!/${escape(only)}$)(/.*)?$`,
+        message: `${message} The one exception is @/${other}/${only}.`,
+      };
+    });
 
 // Only the LLM provider adapter (src/kev/providers/*) may import an LLM SDK.
 const llmSdkPaths = [

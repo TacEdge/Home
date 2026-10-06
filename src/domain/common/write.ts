@@ -4,6 +4,7 @@ import type { DbOrTx } from '@/db/create';
 import type { UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
 import type { Visibility } from '@/trust/visibility';
+import { NotPermittedError } from './errors';
 import { assertFamilyWritesOpen } from './guards';
 
 /**
@@ -58,7 +59,7 @@ export function issueSyncActor(owner: { userId: string; email: string }): UserAc
 }
 
 /** Whether an actor is one the sync service issued; a hand-made `via: 'sync'` is not. */
-export function isSyncActor(actor: UserActor): boolean {
+function isSyncActor(actor: UserActor): boolean {
   return actor.via === 'sync' && syncActors.has(actor);
 }
 
@@ -116,6 +117,9 @@ export async function auditedWrite<T>(
   fn: (tx: DbOrTx) => Promise<{ result: T; audit: DomainAudit | DomainAudit[] | null }>,
 ): Promise<T> {
   assertFamilyWritesOpen();
+  // Sync authority is minted, never claimed: an actor saying `via: 'sync'`
+  // writes only if the sync service issued it (M4 contract §3.4).
+  if (actor.via === 'sync' && !isSyncActor(actor)) throw new NotPermittedError('sync_actor');
   const db = deps.db ?? getDb();
   return db.transaction(async (tx) => {
     const { result, audit } = await fn(tx);

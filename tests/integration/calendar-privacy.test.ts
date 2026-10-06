@@ -5,6 +5,7 @@ import {
   listCalendars,
   connectCalendar,
   disconnectCalendar,
+  reconnectCalendar,
   updateCalendar,
 } from '@/domain/calendar/service';
 import { refreshCalendar, refreshStaleCalendars } from '@/domain/calendar/sync';
@@ -265,7 +266,7 @@ describe('the real-data gate in Production', () => {
         await code(connectCalendar(h.sam, { address: address('9a7e0'), name: 'new' }, deps)),
       ).toBe('real_data_closed');
       expect(
-        await code(connectCalendar(h.sam, { address: address('d15c0'), name: 'back' }, deps)),
+        await code(reconnectCalendar(h.sam, gone.calendarId, { address: address('d15c0') }, deps)),
       ).toBe('real_data_closed');
       expect(await code(updateCalendar(h.sam, cal.sam.household, { name: 'x' }, deps))).toBe(
         'real_data_closed',

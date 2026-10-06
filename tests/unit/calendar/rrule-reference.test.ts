@@ -139,6 +139,9 @@ const ANCHOR_RULES = [
   'FREQ=YEARLY;INTERVAL=2;BYMONTH=2;BYMONTHDAY=29',
   'FREQ=YEARLY;BYDAY=20MO',
   'FREQ=YEARLY;BYWEEKNO=53;BYDAY=FR;UNTIL=20400101T000000Z',
+  // Not restarted (a part anchorFor does not carry): expanded from DTSTART.
+  'FREQ=YEARLY;BYEASTER=0',
+  'FREQ=YEARLY;BYEASTER=-2',
 ];
 const OLD_STARTS = [
   '1999-12-30T07:15:00', // a Thursday, in week 52 of 1999
@@ -167,7 +170,7 @@ describe('the agenda bound: expansion near the window equals expansion from the 
       }
   });
 
-  it.each(ANCHOR_RULES)(
+  it.each(ANCHOR_RULES.filter((r) => !r.includes('BYEASTER')))(
     'restarts within three periods of the window, never with COUNT: %s',
     (rule) => {
       const o = RRule.parseString(rule);
@@ -193,5 +196,29 @@ describe('the agenda bound: expansion near the window equals expansion from the 
     // Walking 76 years of days was about 28,000 steps (~120 ms) a read.
     expect(perRead).toBeLessThan(5);
     expect(expandEvent(ev, '2026-10-14', '2026-10-20')).toHaveLength(7);
+  });
+});
+
+describe('rules the restart does not carry are never rewritten (ADR 0007 §42)', () => {
+  it('Easter: the right Sunday in 2026 and 2027, from a series begun decades ago', () => {
+    const ev = event('1990-04-15T09:00:00', 'FREQ=YEARLY;BYEASTER=0');
+    expect(expandEvent(ev, '2026-01-01', '2027-12-31').map((o) => o.date)).toEqual([
+      '2026-04-05',
+      '2027-03-28',
+    ]);
+    expect(expandEvent(ev, '2026-04-05', '2026-04-05').map((o) => o.date)).toEqual(['2026-04-05']);
+  });
+
+  it('a rule with any part outside the carried set falls back to expansion from DTSTART', () => {
+    const o = RRule.parseString('FREQ=YEARLY;BYEASTER=0');
+    expect(anchorFor(o, utc('1990-04-15T09:00:00'), utc('2026-10-14T00:00:00'))).toBeNull();
+    // A supported rule of the same age is restarted.
+    expect(
+      anchorFor(
+        RRule.parseString('FREQ=YEARLY'),
+        utc('1990-04-15T09:00:00'),
+        utc('2026-10-14T00:00:00'),
+      ),
+    ).not.toBeNull();
   });
 });

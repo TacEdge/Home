@@ -1,21 +1,26 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ZodError } from 'zod';
 import { calendarSource, event, eventPerson, note } from '@/db/schema';
 import {
   connectCalendar,
   disconnectCalendar,
+  reconnectCalendar,
   getCalendar,
   listCalendars,
   updateCalendar,
 } from '@/domain/calendar/service';
+import { CalendarUnexpectedError } from '@/domain/calendar/errors';
 import { refreshCalendar } from '@/domain/calendar/sync';
+import { auditedWrite } from '@/domain/common/write';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
 import { getEvent, listEventPeople, setEventPerson, updateEvent } from '@/domain/events/service';
 import { createNote, listNotes } from '@/domain/notes/service';
-import { createPerson } from '@/domain/people/service';
+import { archivePerson, createPerson, updatePerson } from '@/domain/people/service';
+import { exportFor } from '@/domain/export/service';
 import { fakeProvider, type FakeStep } from '@/integrations/calendar/fake';
 import { listAudit } from '@/trust/audit';
-import { SYNTHETIC_ADDRESS, googleFeed, nzEvent } from '../fixtures/calendars/google';
+import { SYNTHETIC_ADDRESS, googleFeed, nzEvent, vevent } from '../fixtures/calendars/google';
 import { SEQUENCES, TODAY } from '../fixtures/calendars/sequences';
 import { adminDb, testDb } from './db';
 import { clearDomainRows, ensureFixtureUsers, type Household } from './fixtures';
@@ -90,8 +95,7 @@ const DENTIST = 'dentist-91a@example.test';
 
 describe('first connect and refresh', () => {
   it('1. mirrors the feed as the owner’s synced events, via sync, with the source’s visibility', async () => {
-    const { calendarId, reconnected } = await connect(h.sam, { defaultKind: 'activity' });
-    expect(reconnected).toBe(false);
+    const { calendarId } = await connect(h.sam, { defaultKind: 'activity' });
     const out = await refresh(calendarId, provider(SEQUENCES.initial));
     expect(out).toEqual({
       status: 'ok',
@@ -303,6 +307,31 @@ describe('the scenarios', () => {
     expect((await getCalendar(h.sam, calendarId, {}, deps)).lastSkippedCount).toBe(1);
   });
 
+  it('a malformed UID (a lone surrogate, a control character) never reaches the database, and refreshing again still works', async () => {
+    const { calendarId } = await connect();
+    const base = (
+      await provider(SEQUENCES.initial).fetchEvents(
+        { kind: 'ics', address: SYNTHETIC_ADDRESS },
+        { id: 'default', name: null },
+        { from: '2026-09-14', to: '2027-11-18' },
+      )
+    ).events;
+    const odd = [
+      { ...base[0]!, uid: 'odd-\uD800-uid', recurrenceId: null },
+      { ...base[0]!, uid: 'bell-\u0007-uid', recurrenceId: null },
+    ];
+    const p = provider([{ events: [...base, ...odd] }, { events: [...base, ...odd] }]);
+    expect(await refresh(calendarId, p)).toMatchObject({
+      status: 'partial',
+      counts: { added: 5, skipped: 2 },
+    });
+    p.advance();
+    expect(await refresh(calendarId, p)).toMatchObject({ status: 'partial' });
+    const rows = await rowsOf(calendarId);
+    expect(rows).toHaveLength(5);
+    expect(rows.some((r) => /odd-|bell-/.test(r.externalUid ?? ''))).toBe(false);
+  });
+
   it('23. the same UID in two different sources stays two events', async () => {
     const a = await connect();
     const b = await connect();
@@ -311,6 +340,101 @@ describe('the scenarios', () => {
     const [inA] = byUid(await rowsOf(a.calendarId), DENTIST);
     const [inB] = byUid(await rowsOf(b.calendarId), DENTIST);
     expect(inA && inB && inA.id !== inB.id).toBe(true);
+  });
+});
+
+describe('a partial feed never proves a removal (ADR 0007 §42)', () => {
+  const dentist = (summary = 'Dentist') =>
+    nzEvent({ uid: DENTIST, start: '20261022T100000', end: '20261022T110000', summary });
+  const brokenDentist = vevent({
+    UID: DENTIST,
+    DTSTART: ';VALUE=DATE:20261332',
+    SUMMARY: 'Dentist',
+  });
+  const noUid = vevent({ DTSTART: ';VALUE=DATE:20261332', SUMMARY: 'No UID at all' });
+  const swim = (summary = 'Swimming') =>
+    nzEvent({ uid: SWIM, start: '20261014T153000', end: '20261014T163000', summary });
+  const football = nzEvent({
+    uid: 'football-p@example.test',
+    start: '20261017T090000',
+    end: '20261017T100000',
+    summary: 'Football',
+  });
+
+  it('an existing event that becomes unreadable stays live, keeps its people, and is updated in place when readable again; the rest of the feed still applies', async () => {
+    const { calendarId } = await connect();
+    const p = provider([
+      googleFeed([dentist(), swim(), football]),
+      googleFeed([brokenDentist, swim('Swimming (pool B)')]),
+      googleFeed([dentist('Dentist (moved room)'), swim('Swimming (pool B)')]),
+    ]);
+    await refresh(calendarId, p);
+    const [before] = byUid(await rowsOf(calendarId), DENTIST);
+    const kid = await createPerson(
+      h.sam,
+      { name: 'Partial kid', role: 'child', visibility: 'household' },
+      deps,
+    );
+    await setEventPerson(h.sam, { eventId: before!.id, personId: kid.id, role: 'attending' }, deps);
+    p.advance();
+    const partial = await refresh(calendarId, p);
+    expect(partial).toMatchObject({
+      status: 'partial',
+      counts: { skipped: 1, changed: 1, archived: 1 },
+    });
+    const rows = await rowsOf(calendarId);
+    expect(byUid(rows, DENTIST)[0]?.archivedAt).toBeNull(); // skipped, not removed
+    expect(byUid(rows, SWIM)[0]?.title).toBe('Swimming (pool B)'); // the valid rest applied
+    // Only the skipped UID is protected: Football, genuinely gone, is archived.
+    expect(byUid(rows, 'football-p@example.test')[0]?.archivedAt).toBeInstanceOf(Date);
+    expect(await listEventPeople(h.sam, before!.id, {}, deps)).toHaveLength(1);
+    p.advance();
+    await refresh(calendarId, p);
+    const [after] = byUid(await rowsOf(calendarId), DENTIST);
+    expect(after?.id).toBe(before!.id);
+    expect(after?.title).toBe('Dentist (moved room)');
+    expect(await listEventPeople(h.sam, before!.id, {}, deps)).toHaveLength(1);
+  });
+
+  it('a skipped event whose UID cannot be read means nothing is archived on that refresh', async () => {
+    const { calendarId } = await connect();
+    const p = provider([
+      googleFeed([dentist(), swim(), football]),
+      googleFeed([noUid, swim('Swimming (late)')]),
+    ]);
+    await refresh(calendarId, p);
+    p.advance();
+    expect(await refresh(calendarId, p)).toMatchObject({
+      status: 'partial',
+      counts: { archived: 0, changed: 1, skipped: 1 },
+    });
+    expect(live(await rowsOf(calendarId))).toHaveLength(3);
+  });
+
+  it('any provider: a fake provider’s skipped UIDs protect the same way, and an unidentified skip blocks removals', async () => {
+    const { calendarId } = await connect();
+    const events = (
+      await provider(SEQUENCES.initial).fetchEvents(
+        { kind: 'ics', address: SYNTHETIC_ADDRESS },
+        { id: 'default', name: null },
+        { from: '2026-09-14', to: '2027-11-18' },
+      )
+    ).events;
+    const withoutDentist = events.filter((e) => e.uid !== DENTIST);
+    const p = provider([
+      { events },
+      { events: withoutDentist, skippedUids: [DENTIST] },
+      { events: withoutDentist, skipped: 1 },
+      { events: withoutDentist },
+    ]);
+    await refresh(calendarId, p);
+    for (let i = 0; i < 2; i++) {
+      p.advance();
+      expect(countsOf(await refresh(calendarId, p))).toMatchObject({ archived: 0 });
+      expect(byUid(await rowsOf(calendarId), DENTIST)[0]?.archivedAt).toBeNull();
+    }
+    p.advance();
+    expect(countsOf(await refresh(calendarId, p))).toMatchObject({ archived: 1 });
   });
 });
 
@@ -522,17 +646,36 @@ describe('disconnect and reconnect', () => {
     expect((await listCalendars(h.sam, {}, deps)).map((c) => c.id)).not.toContain(calendarId);
     await expect(refresh(calendarId, p)).rejects.toBeInstanceOf(NotFoundError);
 
-    // 15: reconnect the same address (another spelling): the same rows return.
-    const again = await connectCalendar(
+    // 15: connecting the same address is not reconnecting: refused, nothing changes.
+    const refused = await connectCalendar(
       h.sam,
-      {
-        address: address.replace('https://', 'webcal://'),
-        name: 'Ignored on reconnect',
-        visibility: 'household',
-      },
+      { address, name: 'New name', visibility: 'private' },
+      deps,
+    ).catch((e: unknown) => e);
+    expect((refused as NotPermittedError).code).toBe('calendar_can_reconnect');
+    expect(
+      (await getCalendar(h.sam, calendarId, { includeArchived: true }, deps)).archivedAt,
+    ).not.toBeNull();
+    // Reconnecting takes the address only (another spelling): the same rows return.
+    const settings = await reconnectCalendar(
+      h.sam,
+      calendarId,
+      { address, name: 'x' } as never,
+      deps,
+    ).catch((e: unknown) => e);
+    expect(settings).toBeInstanceOf(ZodError);
+    const again = await reconnectCalendar(
+      h.sam,
+      calendarId,
+      { address: address.replace('https://', 'webcal://') },
       deps,
     );
-    expect(again).toEqual({ calendarId, reconnected: true });
+    expect(again).toEqual({ calendarId });
+    const view = await getCalendar(h.sam, calendarId, {}, deps);
+    expect({ name: view.name, visibility: view.visibility }).toEqual({
+      name: 'Family',
+      visibility: 'household',
+    });
     const connections = (
       await admin.db.execute(
         sql`select id from calendar_connection where address_fingerprint = ${connBefore!.address_fingerprint}`,
@@ -563,9 +706,23 @@ describe('disconnect and reconnect', () => {
   it('the other adult connecting an address you disconnected gets a new connection, never yours', async () => {
     const mine = await connect(h.sam);
     await disconnectCalendar(h.sam, mine.calendarId, deps);
+    // Alex cannot reconnect Sam's calendar, even with the right address.
+    const err = await reconnectCalendar(
+      h.alex,
+      mine.calendarId,
+      { address: mine.address },
+      deps,
+    ).catch((e: unknown) => e);
+    expect((err as NotPermittedError).code).toBe('not_owner');
     const theirs = await connect(h.alex, {}, mine.address);
-    expect(theirs.reconnected).toBe(false);
     expect(theirs.calendarId).not.toBe(mine.calendarId);
+    // Sam's calendar stays disconnected and Sam's own.
+    const [row] = (
+      await admin.db.execute<{ status: string; owner: string }>(
+        sql`select c.status, c.owner_user_id as owner from calendar_connection c join calendar_source s on s.connection_id = c.id where s.id = ${mine.calendarId}`,
+      )
+    ).rows;
+    expect(row).toEqual({ status: 'disconnected', owner: h.sam.userId });
   });
 
   it('21. rotating HOME_CREDENTIALS_KEY never changes the fingerprint: a calendar disconnected before the rotation is still recognised after it', async () => {
@@ -601,8 +758,8 @@ describe('disconnect and reconnect', () => {
       expect(await refresh(live.calendarId, provider(SEQUENCES.unchanged))).toMatchObject({
         status: 'ok',
       });
-      const back = await connect(h.sam, {}, gone.address);
-      expect(back).toMatchObject({ calendarId: gone.calendarId, reconnected: true });
+      const back = await reconnectCalendar(h.sam, gone.calendarId, { address: gone.address }, deps);
+      expect(back).toEqual({ calendarId: gone.calendarId });
       const err = await connect(h.alex, {}, live.address).catch((e: unknown) => e);
       expect((err as NotPermittedError).code).toBe('calendar_already_connected');
     } finally {
@@ -643,6 +800,149 @@ describe('disconnect and reconnect', () => {
   });
 });
 
+describe('reconnect proves identity (ADR 0007 §42)', () => {
+  it('the wrong address is refused; a live calendar is not reconnected; concurrent reconnects never duplicate', async () => {
+    const { calendarId, address } = await connect(h.sam);
+    const live = await reconnectCalendar(h.sam, calendarId, { address }, deps).catch(
+      (e: unknown) => e,
+    );
+    expect((live as NotPermittedError).code).toBe('calendar_already_connected');
+    await disconnectCalendar(h.sam, calendarId, deps);
+    const wrong = await reconnectCalendar(
+      h.sam,
+      calendarId,
+      { address: nextAddress() },
+      deps,
+    ).catch((e: unknown) => e);
+    expect((wrong as NotPermittedError).code).toBe('calendar_address_mismatch');
+    const both = await Promise.all(
+      [1, 2].map(() =>
+        reconnectCalendar(h.sam, calendarId, { address }, deps).then(
+          () => 'ok',
+          (e: unknown) => (e as NotPermittedError).code,
+        ),
+      ),
+    );
+    expect(both.sort()).toEqual(['calendar_already_connected', 'ok']);
+    const rows = (
+      await admin.db.execute(
+        sql`select c.id from calendar_connection c where c.owner_user_id = ${h.sam.userId} and c.status = 'active' and c.id = (select connection_id from calendar_source where id = ${calendarId})`,
+      )
+    ).rows;
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('default people are references (ADR 0007 §42)', () => {
+  it('a person a household calendar names cannot be made private until the calendar lets them go', async () => {
+    const kid = await createPerson(
+      h.sam,
+      { name: 'Default kid', role: 'child', visibility: 'household' },
+      deps,
+    );
+    const { calendarId } = await connect(h.sam, { defaultPersonIds: [kid.id] });
+    const refused = await updatePerson(h.sam, kid.id, { visibility: 'private' }, deps).catch(
+      (e: unknown) => e,
+    );
+    expect((refused as NotPermittedError).code).toBe('referenced_by_household');
+    // Disconnected (archived) calendars still count: they can come back.
+    await disconnectCalendar(h.sam, calendarId, deps);
+    expect(
+      (
+        (await updatePerson(h.sam, kid.id, { visibility: 'private' }, deps).catch(
+          (e: unknown) => e,
+        )) as NotPermittedError
+      ).code,
+    ).toBe('referenced_by_household');
+  });
+
+  it('after the calendar drops them, the change goes ahead; a private calendar never blocks it', async () => {
+    const kid = await createPerson(
+      h.sam,
+      { name: 'Freed kid', role: 'child', visibility: 'household' },
+      deps,
+    );
+    const hh = await connect(h.sam, { defaultPersonIds: [kid.id] });
+    const priv = await connect(h.sam, { visibility: 'private', defaultPersonIds: [kid.id] });
+    await updateCalendar(h.sam, hh.calendarId, { defaultPersonIds: [] }, deps);
+    const done = await updatePerson(h.sam, kid.id, { visibility: 'private' }, deps);
+    expect(done.visibility).toBe('private');
+    expect((await getCalendar(h.sam, priv.calendarId, {}, deps)).defaultPersonIds).toEqual([
+      kid.id,
+    ]);
+    // And the other adult never sees the id, in a read or the export.
+    for (const c of await listCalendars(h.alex, { includeArchived: true }, deps))
+      expect(c.defaultPersonIds).not.toContain(kid.id);
+    const exported = JSON.stringify(await exportFor(h.alex, {}, deps));
+    expect(exported).not.toContain(kid.id);
+  });
+
+  it('reconnecting checks the default people again and drops any that can no longer be named', async () => {
+    const kid = await createPerson(
+      h.sam,
+      { name: 'Archived kid', role: 'child', visibility: 'household' },
+      deps,
+    );
+    const keep = await createPerson(
+      h.sam,
+      { name: 'Kept kid', role: 'child', visibility: 'household' },
+      deps,
+    );
+    const { calendarId, address } = await connect(h.sam, { defaultPersonIds: [kid.id, keep.id] });
+    await disconnectCalendar(h.sam, calendarId, deps);
+    await archivePerson(h.sam, kid.id, deps);
+    await reconnectCalendar(h.sam, calendarId, { address }, deps);
+    expect((await getCalendar(h.sam, calendarId, {}, deps)).defaultPersonIds).toEqual([keep.id]);
+    const [row] = (
+      await admin.db.execute<{ meta: Record<string, unknown> }>(
+        sql`select meta from audit_log where event = 'calendar_source.restore' and subject_id = ${calendarId} order by at desc limit 1`,
+      )
+    ).rows;
+    expect(row?.meta).toEqual({ defaultPeopleDropped: 1 });
+  });
+});
+
+describe('errors crossing the calendar boundary are structural (ADR 0007 §42)', () => {
+  it('a persistence failure carrying a sealed credential and fingerprint surfaces as a code only', async () => {
+    // A real failure inside the connect transaction: the insert of the
+    // connection (whose parameters are the sealed credential and the
+    // fingerprint) is refused by a temporary constraint.
+    await admin.db.execute(
+      sql`alter table calendar_connection add constraint zz_probe_refuse check (status <> 'active') not valid`,
+    );
+    const address = nextAddress();
+    let err: unknown;
+    try {
+      err = await connectCalendar(h.sam, { address, name: 'Doomed' }, deps).catch(
+        (e: unknown) => e,
+      );
+    } finally {
+      await admin.db.execute(sql`alter table calendar_connection drop constraint zz_probe_refuse`);
+    }
+    expect(err).toBeInstanceOf(CalendarUnexpectedError);
+    expect(err).toMatchObject({ operation: 'connectCalendar', sqlState: '23514' });
+    expect((err as Error).cause).toBeUndefined();
+    const text = [
+      String(err),
+      (err as Error).stack ?? '',
+      JSON.stringify(err),
+      JSON.stringify(
+        Object.getOwnPropertyNames(err as object).map((k) => (err as Record<string, unknown>)[k]),
+      ),
+    ].join('\n');
+    for (const secret of ['hc1.', 'fp2.', address, 'private-', 'Failed query', 'params'])
+      expect(text, secret).not.toContain(secret);
+  });
+
+  it('a hand-made sync actor cannot write through auditedWrite', async () => {
+    const forged = { ...h.sam, via: 'sync' as const };
+    const err = await auditedWrite(forged, deps, async () => ({ result: 1, audit: null })).catch(
+      (e: unknown) => e,
+    );
+    expect((err as NotPermittedError).code).toBe('sync_actor');
+  });
+});
+
 describe('who may connect and refresh', () => {
   it('Kev, the system and a hand-made sync actor cannot connect, change, disconnect or refresh', async () => {
     const { calendarId } = await connect(h.sam);
@@ -653,6 +953,7 @@ describe('who may connect and refresh', () => {
         connectCalendar(actor, { address: nextAddress(), name: 'x' }, deps),
         updateCalendar(actor, calendarId, { name: 'x' }, deps),
         disconnectCalendar(actor, calendarId, deps),
+        reconnectCalendar(actor, calendarId, { address: nextAddress() }, deps),
         refreshCalendar(actor, calendarId, provider(SEQUENCES.initial), { today: TODAY }, deps),
       ]) {
         const err = await op.then(

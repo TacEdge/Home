@@ -17,6 +17,7 @@ import { visibleTo } from '@/trust/visibility';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertFamilyWritesOpen } from '../common/guards';
 import { auditedWrite, issueSyncActor, type DomainAudit, type Deps } from '../common/write';
+import { calendarBoundary } from './errors';
 import { calendarKeys } from './keys';
 import {
   assertMirrored,
@@ -94,126 +95,134 @@ export async function refreshCalendar(
   opts: Opts = {},
   deps: Deps = {},
 ): Promise<RefreshOutcome> {
-  assertPerson(actor);
-  assertFamilyWritesOpen();
-  const db = deps.db ?? getDb();
-  if (!/^[0-9a-f-]{36}$/i.test(calendarId)) throw new NotFoundError('calendar');
-  // Who may cause a refresh: anyone who can see the calendar (a private one
-  // is its owner's alone). The writes are always the owner's.
-  const [visible] = await db
-    .select({ id: calendarSource.id, ownerUserId: calendarSource.createdBy })
-    .from(calendarSource)
-    .where(
-      and(
-        eq(calendarSource.id, calendarId),
-        visibleTo(actor, calendarSource),
-        isNull(calendarSource.archivedAt),
-      ),
-    )
-    .limit(1);
-  if (!visible?.ownerUserId) throw new NotFoundError('calendar');
-  const [owner] = await db
-    .select({ email: user.email })
-    .from(user)
-    .where(eq(user.id, visible.ownerUserId))
-    .limit(1);
-  if (!owner) throw new NotFoundError('calendar');
-  const syncActor = issueSyncActor({ userId: visible.ownerUserId, email: owner.email });
-  const keys = calendarKeys();
-  const today = opts.today ?? isoDateInZone(new Date(), env.HOME_TIMEZONE);
-
-  return auditedWrite<RefreshOutcome>(syncActor, deps, async (tx) => {
-    const lock = await tx.execute<{ ok: boolean }>(
-      sql`select pg_try_advisory_xact_lock(hashtextextended(${lockKey(calendarId)}, 0)) as ok`,
-    );
-    if (lock.rows[0]?.ok !== true) return { result: { status: 'busy' }, audit: null };
-
-    const [source] = await tx
-      .select()
+  return calendarBoundary('refreshCalendar', async () => {
+    assertPerson(actor);
+    assertFamilyWritesOpen();
+    const db = deps.db ?? getDb();
+    if (!/^[0-9a-f-]{36}$/i.test(calendarId)) throw new NotFoundError('calendar');
+    // Who may cause a refresh: anyone who can see the calendar (a private one
+    // is its owner's alone). The writes are always the owner's.
+    const [visible] = await db
+      .select({ id: calendarSource.id, ownerUserId: calendarSource.createdBy })
       .from(calendarSource)
-      .where(and(eq(calendarSource.id, calendarId), isNull(calendarSource.archivedAt)))
-      .for('update')
+      .where(
+        and(
+          eq(calendarSource.id, calendarId),
+          visibleTo(actor, calendarSource),
+          isNull(calendarSource.archivedAt),
+        ),
+      )
       .limit(1);
-    if (!source || source.createdBy !== visible.ownerUserId) throw new NotFoundError('calendar');
-    const [conn] = await tx
-      .select({
-        id: calendarConnection.id,
-        ownerUserId: calendarConnection.ownerUserId,
-        status: calendarConnection.status,
-        sealed: calendarConnection.credentialsEncrypted,
-      })
-      .from(calendarConnection)
-      .where(eq(calendarConnection.id, source.connectionId))
-      .for('update')
+    if (!visible?.ownerUserId) throw new NotFoundError('calendar');
+    const [owner] = await db
+      .select({ email: user.email })
+      .from(user)
+      .where(eq(user.id, visible.ownerUserId))
       .limit(1);
-    if (!conn || conn.status !== 'active' || !conn.sealed)
-      throw new NotPermittedError('calendar_disconnected');
-    if (conn.ownerUserId !== source.createdBy) throw new NotFoundError('calendar');
+    if (!owner) throw new NotFoundError('calendar');
+    const syncActor = issueSyncActor({ userId: visible.ownerUserId, email: owner.email });
+    const keys = calendarKeys();
+    const today = opts.today ?? isoDateInZone(new Date(), env.HOME_TIMEZONE);
 
-    // Key rotation (ADR 0007 §34, DEPLOY.md §D): a credential still sealed
-    // with the previous key is resealed with the current one, bound to the
-    // same row and owner, before anything else happens.
-    if (sealedWithPreviousKey(keys.credentials, conn.sealed)) {
-      const binding = { connectionId: conn.id, ownerUserId: conn.ownerUserId };
-      const resealed = sealCredential(
-        keys.credentials,
-        openSealed(keys.credentials, conn.sealed, binding),
-        binding,
+    return auditedWrite<RefreshOutcome>(syncActor, deps, async (tx) => {
+      const lock = await tx.execute<{ ok: boolean }>(
+        sql`select pg_try_advisory_xact_lock(hashtextextended(${lockKey(calendarId)}, 0)) as ok`,
       );
+      if (lock.rows[0]?.ok !== true) return { result: { status: 'busy' }, audit: null };
+
+      const [source] = await tx
+        .select()
+        .from(calendarSource)
+        .where(and(eq(calendarSource.id, calendarId), isNull(calendarSource.archivedAt)))
+        .for('update')
+        .limit(1);
+      if (!source || source.createdBy !== visible.ownerUserId) throw new NotFoundError('calendar');
+      const [conn] = await tx
+        .select({
+          id: calendarConnection.id,
+          ownerUserId: calendarConnection.ownerUserId,
+          status: calendarConnection.status,
+          sealed: calendarConnection.credentialsEncrypted,
+        })
+        .from(calendarConnection)
+        .where(eq(calendarConnection.id, source.connectionId))
+        .for('update')
+        .limit(1);
+      if (!conn || conn.status !== 'active' || !conn.sealed)
+        throw new NotPermittedError('calendar_disconnected');
+      if (conn.ownerUserId !== source.createdBy) throw new NotFoundError('calendar');
+
+      // Key rotation (ADR 0007 §34, DEPLOY.md §D): a credential still sealed
+      // with the previous key is resealed with the current one, bound to the
+      // same row and owner, before anything else happens.
+      if (sealedWithPreviousKey(keys.credentials, conn.sealed)) {
+        const binding = { connectionId: conn.id, ownerUserId: conn.ownerUserId };
+        const resealed = sealCredential(
+          keys.credentials,
+          openSealed(keys.credentials, conn.sealed, binding),
+          binding,
+        );
+        await tx
+          .update(calendarConnection)
+          .set({
+            credentialsEncrypted: resealed,
+            credentialsKeyId: keys.credentials.current.id,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(calendarConnection.id, conn.id));
+        conn.sealed = resealed;
+      }
+
+      let result: FetchResult;
+      try {
+        result = await fetchWith(
+          provider,
+          keys.credentials,
+          conn,
+          source.externalCalendarId,
+          today,
+        );
+      } catch (e) {
+        if (!(e instanceof CalendarProviderError)) throw e;
+        return recordFailure(tx, source, conn.id, e.code);
+      }
+
+      const status: SyncStatus = 'ok';
+      const unchanged =
+        source.feedHash === result.feedHash &&
+        (source.lastSyncStatus === 'ok' || source.lastSyncStatus === 'partial');
+      const counts = unchanged
+        ? { ...zero(), skipped: result.skipped }
+        : await apply(tx, result, {
+            source: {
+              id: source.id,
+              ownerUserId: conn.ownerUserId,
+              visibility: source.visibility as MirrorSource['visibility'],
+              defaultKind: source.defaultKind as EventKind | null,
+            },
+            connectionOwner: conn.ownerUserId,
+          });
+      const final: SyncStatus = counts.skipped > 0 ? 'partial' : status;
+      await tx
+        .update(calendarSource)
+        .set({
+          feedHash: result.feedHash,
+          lastAttemptAt: sql`now()`,
+          lastSyncedAt: sql`now()`,
+          lastSyncStatus: final,
+          lastSyncErrorCode: null,
+          lastSkippedCount: counts.skipped,
+        })
+        .where(eq(calendarSource.id, source.id));
       await tx
         .update(calendarConnection)
-        .set({
-          credentialsEncrypted: resealed,
-          credentialsKeyId: keys.credentials.current.id,
-          updatedAt: sql`now()`,
-        })
+        .set({ lastErrorCode: null, updatedAt: sql`now()` })
         .where(eq(calendarConnection.id, conn.id));
-      conn.sealed = resealed;
-    }
-
-    let result: FetchResult;
-    try {
-      result = await fetchWith(provider, keys.credentials, conn, source.externalCalendarId, today);
-    } catch (e) {
-      if (!(e instanceof CalendarProviderError)) throw e;
-      return recordFailure(tx, source, conn.id, e.code);
-    }
-
-    const status: SyncStatus = 'ok';
-    const unchanged =
-      source.feedHash === result.feedHash &&
-      (source.lastSyncStatus === 'ok' || source.lastSyncStatus === 'partial');
-    const counts = unchanged
-      ? { ...zero(), skipped: result.skipped }
-      : await apply(tx, result, {
-          source: {
-            id: source.id,
-            ownerUserId: conn.ownerUserId,
-            visibility: source.visibility as MirrorSource['visibility'],
-            defaultKind: source.defaultKind as EventKind | null,
-          },
-          connectionOwner: conn.ownerUserId,
-        });
-    const final: SyncStatus = counts.skipped > 0 ? 'partial' : status;
-    await tx
-      .update(calendarSource)
-      .set({
-        feedHash: result.feedHash,
-        lastAttemptAt: sql`now()`,
-        lastSyncedAt: sql`now()`,
-        lastSyncStatus: final,
-        lastSyncErrorCode: null,
-        lastSkippedCount: counts.skipped,
-      })
-      .where(eq(calendarSource.id, source.id));
-    await tx
-      .update(calendarConnection)
-      .set({ lastErrorCode: null, updatedAt: sql`now()` })
-      .where(eq(calendarConnection.id, conn.id));
-    return {
-      result: { status: final, unchanged, counts },
-      audit: syncAudit(source, final, unchanged, counts),
-    };
+      return {
+        result: { status: final, unchanged, counts },
+        audit: syncAudit(source, final, unchanged, counts),
+      };
+    });
   });
 }
 
@@ -328,12 +337,19 @@ async function apply(
   );
 
   // Whatever any provider returns, only events that can be identities are
-  // written, each identity once (ADR 0007 §35); the rest are counted.
+  // written, each identity once (ADR 0007 §35); the rest are counted. A UID
+  // that cannot be an identity is unidentified, so removals cannot be proved.
   const seen = new Set<string>();
   const usable: ExternalEvent[] = [];
+  let unidentified = result.skippedUnidentified;
   for (const e of result.events) {
     const key = identityKey(e.uid, e.recurrenceId);
-    if (!uidFits(e.uid) || seen.has(key)) {
+    if (!uidFits(e.uid)) {
+      counts.skipped++;
+      unidentified++;
+      continue;
+    }
+    if (seen.has(key)) {
       counts.skipped++;
       continue;
     }
@@ -391,10 +407,19 @@ async function apply(
   }
 
   // Missing from a successful feed: archived, never deleted (ADR 0007 §13).
-  const missing = existing
-    .filter((r) => r.archivedAt === null)
-    .filter((r) => !seen.has(identityKey(r.externalUid ?? '', r.recurrenceOriginal)))
-    .map((r) => r.id);
+  // Only a provable absence counts (ADR 0007 §42): an event skipped this
+  // time is not a removed one. A skipped event known by its UID protects
+  // that UID's events; a skipped event whose UID could not be read means
+  // nothing can be proved absent, so nothing is archived on this refresh.
+  const protectedUids = new Set(result.skippedUids);
+  const missing =
+    unidentified > 0
+      ? []
+      : existing
+          .filter((r) => r.archivedAt === null)
+          .filter((r) => !protectedUids.has(r.externalUid ?? ''))
+          .filter((r) => !seen.has(identityKey(r.externalUid ?? '', r.recurrenceOriginal)))
+          .map((r) => r.id);
   if (missing.length) {
     await tx
       .update(event)
@@ -426,32 +451,35 @@ export async function refreshStaleCalendars(
 ): Promise<
   { calendarId: string; outcome: RefreshOutcome | { status: 'refused'; code: string } }[]
 > {
-  assertPerson(actor);
-  assertFamilyWritesOpen();
-  const db = deps.db ?? getDb();
-  const now = opts.now ?? new Date();
-  const rows = await db
-    .select({ id: calendarSource.id, lastAttemptAt: calendarSource.lastAttemptAt })
-    .from(calendarSource)
-    .where(and(visibleTo(actor, calendarSource), isNull(calendarSource.archivedAt)));
-  const stale = rows.filter(
-    (r) => r.lastAttemptAt === null || now.getTime() - r.lastAttemptAt.getTime() >= STALE_AFTER_MS,
-  );
-  const out: {
-    calendarId: string;
-    outcome: RefreshOutcome | { status: 'refused'; code: string };
-  }[] = [];
-  for (const r of stale) {
-    try {
-      out.push({
-        calendarId: r.id,
-        outcome: await refreshCalendar(actor, r.id, provider, opts, deps),
-      });
-    } catch (e) {
-      if (e instanceof NotPermittedError && e.code !== 'real_data_closed')
-        out.push({ calendarId: r.id, outcome: { status: 'refused', code: e.code } });
-      else throw e;
+  return calendarBoundary('refreshStaleCalendars', async () => {
+    assertPerson(actor);
+    assertFamilyWritesOpen();
+    const db = deps.db ?? getDb();
+    const now = opts.now ?? new Date();
+    const rows = await db
+      .select({ id: calendarSource.id, lastAttemptAt: calendarSource.lastAttemptAt })
+      .from(calendarSource)
+      .where(and(visibleTo(actor, calendarSource), isNull(calendarSource.archivedAt)));
+    const stale = rows.filter(
+      (r) =>
+        r.lastAttemptAt === null || now.getTime() - r.lastAttemptAt.getTime() >= STALE_AFTER_MS,
+    );
+    const out: {
+      calendarId: string;
+      outcome: RefreshOutcome | { status: 'refused'; code: string };
+    }[] = [];
+    for (const r of stale) {
+      try {
+        out.push({
+          calendarId: r.id,
+          outcome: await refreshCalendar(actor, r.id, provider, opts, deps),
+        });
+      } catch (e) {
+        if (e instanceof NotPermittedError && e.code !== 'real_data_closed')
+          out.push({ calendarId: r.id, outcome: { status: 'refused', code: e.code } });
+        else throw e;
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }

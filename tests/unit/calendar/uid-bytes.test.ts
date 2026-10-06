@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_EXTERNAL_UID_BYTES,
+  MAX_SKIPPED_UIDS,
   importWindow,
   uidFits,
   type ExternalEvent,
@@ -8,7 +9,7 @@ import {
 import { readFeed } from '@/integrations/calendar/ics/feed';
 import { normaliseFeed } from '@/integrations/calendar/ics/normalise';
 import { fakeProvider } from '@/integrations/calendar/fake';
-import { SYNTHETIC_ADDRESS, googleFeed, nzEvent } from '../../fixtures/calendars/google';
+import { SYNTHETIC_ADDRESS, googleFeed, nzEvent, vevent } from '../../fixtures/calendars/google';
 import { TODAY } from '../../fixtures/calendars/sequences';
 
 // The external UID is bounded in UTF-8 bytes, not characters (ADR 0007 §35):
@@ -96,5 +97,88 @@ describe('the UID byte limit', () => {
     );
     expect(r.events.map((e) => e.title)).toEqual(['Fine']);
     expect(r.skipped).toBe(2);
+  });
+});
+
+describe('well-formed UIDs (ADR 0007 §42)', () => {
+  it('refuses lone surrogates and control characters, whatever the length', () => {
+    expect(uidFits('ok-uid@example.test')).toBe(true);
+    expect(uidFits('lone-\uD800-high')).toBe(false);
+    expect(uidFits('lone-\uDC00-low')).toBe(false);
+    expect(uidFits('pair-\uD83D\uDE00-ok')).toBe(true);
+    for (const c of ['\u0000', '\u0009', '\u000A', '\u001F', '\u007F', '\u0085'])
+      expect(uidFits(`ctl${c}x`), JSON.stringify(c)).toBe(false);
+  });
+
+  it('a fake provider’s malformed UIDs are skipped as unidentified, never stored or repaired', async () => {
+    const base = {
+      recurrenceId: null,
+      status: 'confirmed' as const,
+      time: { allDay: true as const, startDate: '2026-10-20', endDate: '2026-10-21' },
+      rrule: null,
+      recurrence: 'none' as const,
+      exdates: [],
+      cancelledOccurrences: [],
+      title: 'x',
+      description: null,
+      location: null,
+      sequence: null,
+      updatedAt: null,
+    };
+    const p = fakeProvider(
+      [
+        {
+          events: [
+            { ...base, uid: 'odd-\uD800' },
+            { ...base, uid: 'bell\u0007' },
+            { ...base, uid: 'fine' },
+          ],
+        },
+      ],
+      { homeTimeZone: ZONE },
+    );
+    const r = await p.fetchEvents(
+      { kind: 'ics', address: SYNTHETIC_ADDRESS },
+      { id: 'default', name: null },
+      RANGE,
+    );
+    expect(r.events.map((e) => e.uid)).toEqual(['fine']);
+    expect(r).toMatchObject({ skipped: 2, skippedUnidentified: 2, skippedUids: [] });
+  });
+});
+
+describe('skipped identities (ADR 0007 §42)', () => {
+  const broken = (uid?: string) =>
+    vevent({ ...(uid ? { UID: uid } : {}), DTSTART: ';VALUE=DATE:20261332', SUMMARY: 'Broken' });
+
+  it('reports the UID of a skipped event when it can be read, and counts one that cannot', () => {
+    const r = normaliseFeed(
+      readFeed(
+        googleFeed([
+          broken('a@example.test'),
+          broken('a@example.test'),
+          broken(),
+          event('ok', 'Ok'),
+        ]),
+      ),
+      RANGE,
+      ZONE,
+    );
+    expect(r.events.map((e) => e.uid)).toEqual(['ok']);
+    expect(r).toMatchObject({
+      skipped: 3,
+      skippedUids: ['a@example.test'],
+      skippedUnidentified: 1,
+    });
+  });
+
+  it('is bounded: beyond MAX_SKIPPED_UIDS a skipped UID counts as unidentified', () => {
+    const many = Array.from({ length: MAX_SKIPPED_UIDS + 5 }, (_, i) =>
+      broken(`b-${i}@example.test`),
+    );
+    const r = normaliseFeed(readFeed(googleFeed(many)), RANGE, ZONE);
+    expect(r.skippedUids).toHaveLength(MAX_SKIPPED_UIDS);
+    expect(r.skippedUnidentified).toBe(5);
+    expect(r.skipped).toBe(MAX_SKIPPED_UIDS + 5);
   });
 });

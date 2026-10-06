@@ -567,6 +567,8 @@ function writeCalls(own: Adult): Record<string, Call> {
       calendars.connectCalendar(a, { address: CANARY_CALENDAR_ADDRESS, name: 'x' }, d),
     'calendars.updateCalendar': (a) => calendars.updateCalendar(a, id, { name: 'x' }, d),
     'calendars.disconnectCalendar': (a) => calendars.disconnectCalendar(a, id, d),
+    'calendars.reconnectCalendar': (a) =>
+      calendars.reconnectCalendar(a, id, { address: CANARY_CALENDAR_ADDRESS }, d),
     'calendarSync.refreshCalendar': (a) => calendarSync.refreshCalendar(a, id, NO_PROVIDER, {}, d),
     'calendarSync.refreshStaleCalendars': (a) =>
       calendarSync.refreshStaleCalendars(a, NO_PROVIDER, {}, d),

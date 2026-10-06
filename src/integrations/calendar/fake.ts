@@ -1,5 +1,6 @@
 import {
   CalendarProviderError,
+  SkippedTally,
   emptyNotes,
   type CalendarProvider,
   type ExternalCalendar,
@@ -26,7 +27,10 @@ export type FakeStep =
   | {
       events: ExternalEvent[];
       calendarName?: string | null;
+      /** Skipped events with nothing known about them. */
       skipped?: number;
+      /** Skipped events known by their UID (ADR 0007 §42). */
+      skippedUids?: string[];
       notes?: Partial<FetchNotes>;
     }
   | { fail: ProviderErrorCode };
@@ -103,13 +107,10 @@ export function fakeProvider(
         }
       }
       if (!('events' in s)) throw new CalendarProviderError('not_a_calendar');
-      return finish(
-        calendarOf(s),
-        s.events,
-        s.skipped ?? 0,
-        { ...emptyNotes(), ...s.notes },
-        range,
-      );
+      const tally = new SkippedTally();
+      tally.addUnknown(s.skipped ?? 0);
+      for (const uid of s.skippedUids ?? []) tally.add(uid);
+      return finish(calendarOf(s), s.events, tally, { ...emptyNotes(), ...s.notes }, range);
     },
     advance() {
       step = Math.min(step + 1, steps.length - 1);

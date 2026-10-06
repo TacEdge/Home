@@ -372,12 +372,36 @@ function searchNoFurtherThan(rr: RRule, end: Date): RRule {
  * only on the rule and the window. tests/unit/calendar/rrule-reference.test.ts
  * compares it with plain expansion from DTSTART.
  */
+/** Rule parts anchorFor carries over exactly; a rule with any other part is never restarted. */
+const ANCHORABLE = new Set([
+  'freq',
+  'interval',
+  'wkst',
+  'dtstart',
+  'until',
+  'count',
+  'bysetpos',
+  'bymonth',
+  'bymonthday',
+  'byyearday',
+  'byweekno',
+  'byweekday',
+  'byhour',
+  'byminute',
+  'bysecond',
+]);
+
 export function anchorFor(
   options: Partial<Options>,
   dtstart: Date,
   windowStart: Date,
 ): Partial<Options> | null {
   if (options.count != null) return null;
+  // Only a rule made entirely of parts the restart writes out is restarted;
+  // any other part (BYEASTER, say) would be silently dropped, so such a rule
+  // is expanded from DTSTART as before (ADR 0007 §42).
+  for (const [key, value] of Object.entries(options))
+    if (value !== undefined && value !== null && !ANCHORABLE.has(key)) return null;
   const freq = options.freq;
   const interval = options.interval && options.interval > 0 ? options.interval : 1;
   if (

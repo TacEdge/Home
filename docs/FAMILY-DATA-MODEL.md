@@ -112,7 +112,7 @@ Migration `0007` (M4 Package 4a, ADR 0007 §33).
 | `last_sync_status` | `ok` \| `partial` \| `unreachable` \| `address_rejected` \| `not_a_calendar` \| `too_large` (M4 contract §3.8) |
 | `last_sync_error_code`, `last_skipped_count` | a structural code; a count ≥ 0 |
 
-One source per provider calendar in a connection (unique `(connection_id, external_calendar_id)`); indexes on `created_by` and `(visibility, created_by)` as other visible records. Exported (export version 2, `calendars`) to every adult who can see it, without `connection_id` or `feed_hash` (ADR 0007 §38); the connection never is. Synced events are written only by the sync service, as the connection's owner `via sync`, with the source's visibility and usual kind; a person's services never write their provider-owned fields (ADR 0007 §36–37).
+One source per provider calendar in a connection (unique `(connection_id, external_calendar_id)`); indexes on `created_by` and `(visibility, created_by)` as other visible records. Its `default_person_ids` are references under the reference rules: a person a household calendar names cannot be made private while it does (ADR 0007 §42). Exported (export version 2, `calendars`) to every adult who can see it, without `connection_id` or `feed_hash` (ADR 0007 §38); the connection never is. Synced events are written only by the sync service, as the connection's owner `via sync`, with the source's visibility and usual kind; a person's services never write their provider-owned fields (ADR 0007 §36–37).
 
 ### Event
 Anything that happens at a time.

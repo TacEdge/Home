@@ -1,12 +1,12 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
 import { calendarConnection, calendarSource, event, eventPerson, note, person } from '@/db/schema';
 import { CalendarAddressError, normaliseCalendarAddress } from '@/lib/calendar-address';
 import type { UserActor } from '@/trust/actor';
-import { addressFingerprint, sealCredential } from '@/trust/credentials';
+import { addressFingerprint, sameFingerprint, sealCredential } from '@/trust/credentials';
 import { visibleTo } from '@/trust/visibility';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite, assertFamilyWritesOpen } from '../common/guards';
@@ -14,10 +14,13 @@ import { checkReferences } from '../common/references';
 import { auditedWrite, type DomainAudit, type Deps } from '../common/write';
 import {
   connectCalendarInput,
+  reconnectCalendarInput,
   updateCalendarInput,
   type ConnectCalendarInput,
+  type ReconnectCalendarInput,
   type UpdateCalendarInput,
 } from './inputs';
+import { calendarBoundary } from './errors';
 import { calendarKeys } from './keys';
 
 // Calendar connections and their sources (M4 contract §3.2, §4.1, §4.4, §4.6;
@@ -258,148 +261,251 @@ const isUniqueViolation = (e: unknown): boolean =>
       ? isUniqueViolation((e as { cause?: unknown }).cause)
       : false;
 
-export type ConnectResult = { calendarId: string; reconnected: boolean };
+export type ConnectResult = { calendarId: string };
 
 /**
- * Connect a Google calendar by its secret address, or reconnect one of your
- * own disconnected ones (M4 contract §4.4). Returns the calendar's id; its
- * events arrive on its first refresh (sync.ts).
+ * Connect a Google calendar by its secret address (M4 contract §4.4).
+ * Returns the calendar's id; its events arrive on its first refresh
+ * (sync.ts). An address that is one of your own disconnected calendars is
+ * refused (`calendar_can_reconnect`) and changes nothing: that is
+ * reconnectCalendar's job.
  */
 export async function connectCalendar(
   actor: UserActor,
   input: ConnectCalendarInput,
   deps: Deps = {},
 ): Promise<ConnectResult> {
-  assertPerson(actor);
-  // The gate first: in Production nothing about the address is even read
-  // while family data is closed (ADR 0006 §2).
-  assertFamilyWritesOpen();
-  const data = connectCalendarInput.parse(input);
-  let normalised: string;
-  try {
-    normalised = normaliseCalendarAddress(data.address);
-  } catch (e) {
-    if (e instanceof CalendarAddressError) throw new NotPermittedError('address_not_accepted');
-    throw e;
-  }
-  const keys = calendarKeys();
-  const fingerprint = addressFingerprint(keys.fingerprint, normalised);
+  return calendarBoundary('connectCalendar', async () => {
+    assertPerson(actor);
+    // The gate first: in Production nothing about the address is even read
+    // while family data is closed (ADR 0006 §2).
+    assertFamilyWritesOpen();
+    const data = connectCalendarInput.parse(input);
+    let normalised: string;
+    try {
+      normalised = normaliseCalendarAddress(data.address);
+    } catch (e) {
+      if (e instanceof CalendarAddressError) throw new NotPermittedError('address_not_accepted');
+      throw e;
+    }
+    const keys = calendarKeys();
+    const fingerprint = addressFingerprint(keys.fingerprint, normalised);
 
-  try {
-    return await auditedWrite<ConnectResult>(actor, deps, async (tx) => {
-      const live = await tx
-        .select({ id: calendarConnection.id })
-        .from(calendarConnection)
-        .where(
-          and(
-            eq(calendarConnection.addressFingerprint, fingerprint),
-            eq(calendarConnection.status, 'active'),
-          ),
-        )
-        .limit(1);
-      if (live[0]) throw new NotPermittedError('calendar_already_connected');
+    try {
+      return await auditedWrite<ConnectResult>(actor, deps, async (tx) => {
+        const live = await tx
+          .select({ id: calendarConnection.id })
+          .from(calendarConnection)
+          .where(
+            and(
+              eq(calendarConnection.addressFingerprint, fingerprint),
+              eq(calendarConnection.status, 'active'),
+            ),
+          )
+          .limit(1);
+        if (live[0]) throw new NotPermittedError('calendar_already_connected');
 
-      // Your own disconnected connection to the same address: reuse it.
-      const [mine] = await tx
-        .select({ id: calendarConnection.id })
-        .from(calendarConnection)
-        .where(
-          and(
-            eq(calendarConnection.ownerUserId, actor.userId),
-            eq(calendarConnection.addressFingerprint, fingerprint),
-            eq(calendarConnection.status, 'disconnected'),
-          ),
-        )
-        .orderBy(desc(calendarConnection.disconnectedAt), asc(calendarConnection.id))
-        .limit(1)
-        .for('update');
+        // Your own disconnected calendar with this address: connecting is not
+        // reconnecting. Nothing changes; reconnectCalendar restores it with its
+        // own settings (ADR 0007 §42).
+        const [mine] = await tx
+          .select({ id: calendarConnection.id })
+          .from(calendarConnection)
+          .where(
+            and(
+              eq(calendarConnection.ownerUserId, actor.userId),
+              eq(calendarConnection.addressFingerprint, fingerprint),
+              eq(calendarConnection.status, 'disconnected'),
+            ),
+          )
+          .limit(1);
+        if (mine) throw new NotPermittedError('calendar_can_reconnect');
 
-      const connectionId = mine?.id ?? randomUUID();
-      const sealed = sealCredential(keys.credentials, normalised, {
-        connectionId,
-        ownerUserId: actor.userId,
-      });
-      const keyId = keys.credentials.current.id;
+        const connectionId = randomUUID();
+        const sealed = sealCredential(keys.credentials, normalised, {
+          connectionId,
+          ownerUserId: actor.userId,
+        });
+        const keyId = keys.credentials.current.id;
 
-      if (mine) {
-        await tx
-          .update(calendarConnection)
-          .set({
-            status: 'active',
-            credentialsEncrypted: sealed,
-            credentialsKeyId: keyId,
-            disconnectedAt: null,
-            lastErrorCode: null,
-            updatedAt: sql`now()`,
-          })
-          .where(eq(calendarConnection.id, connectionId));
-        // Its source returns with its own settings; the next refresh restores
-        // its events by identity (an empty feed hash forces a full apply).
+        await checkDefaultPeople(tx, actor, data.visibility, data.defaultPersonIds);
+        await tx.insert(calendarConnection).values({
+          id: connectionId,
+          ownerUserId: actor.userId,
+          provider: 'ics',
+          credentialsEncrypted: sealed,
+          credentialsKeyId: keyId,
+          addressFingerprint: fingerprint,
+          status: 'active',
+        });
         const [source] = await tx
-          .update(calendarSource)
-          .set({ archivedAt: null, feedHash: null, updatedAt: sql`now()` })
-          .where(eq(calendarSource.connectionId, connectionId))
+          .insert(calendarSource)
+          .values({
+            connectionId,
+            externalCalendarId: 'default',
+            name: data.name,
+            visibility: data.visibility,
+            defaultKind: data.defaultKind,
+            defaultPersonIds: data.defaultPersonIds,
+            createdBy: actor.userId,
+            createdVia: 'ui',
+          })
           .returning({
             id: calendarSource.id,
             visibility: calendarSource.visibility,
             createdBy: calendarSource.createdBy,
           });
-        if (!source) throw new Error('reconnect: the connection has no source');
+        if (!source) throw new Error('connect: source insert returned no row');
         return {
-          result: { calendarId: source.id, reconnected: true },
+          result: { calendarId: source.id },
           audit: [
-            connectionAudit('calendar.reconnect', connectionId, actor.userId, { provider: 'ics' }),
-            sourceAudit('calendar_source.restore', source),
+            connectionAudit('calendar.connect', connectionId, actor.userId, { provider: 'ics' }),
+            sourceAudit('calendar_source.create', source, {
+              visibility: source.visibility,
+              defaultKind: data.defaultKind,
+              defaultPeople: data.defaultPersonIds.length,
+            }),
           ],
         };
-      }
-
-      await checkDefaultPeople(tx, actor, data.visibility, data.defaultPersonIds);
-      await tx.insert(calendarConnection).values({
-        id: connectionId,
-        ownerUserId: actor.userId,
-        provider: 'ics',
-        credentialsEncrypted: sealed,
-        credentialsKeyId: keyId,
-        addressFingerprint: fingerprint,
-        status: 'active',
       });
-      const [source] = await tx
-        .insert(calendarSource)
-        .values({
-          connectionId,
-          externalCalendarId: 'default',
-          name: data.name,
-          visibility: data.visibility,
-          defaultKind: data.defaultKind,
-          defaultPersonIds: data.defaultPersonIds,
-          createdBy: actor.userId,
-          createdVia: 'ui',
-        })
-        .returning({
-          id: calendarSource.id,
-          visibility: calendarSource.visibility,
-          createdBy: calendarSource.createdBy,
+    } catch (e) {
+      // Two people connecting the same address at once: the live-fingerprint
+      // index lets one through and refuses the other here.
+      if (isUniqueViolation(e)) throw new NotPermittedError('calendar_already_connected');
+      throw e;
+    }
+  });
+}
+
+/**
+ * Reconnect one of your own disconnected calendars (ADR 0007 §5, §42). The
+ * address proves identity: its fingerprint must be the one that calendar's
+ * connection kept. Nothing else is accepted. The same connection and
+ * calendar return with their own settings (default people are checked
+ * again, and any that can no longer be named are dropped); the next
+ * refresh restores the events by identity, with their people and notes.
+ */
+export async function reconnectCalendar(
+  actor: UserActor,
+  calendarId: string,
+  input: ReconnectCalendarInput,
+  deps: Deps = {},
+): Promise<ConnectResult> {
+  return calendarBoundary('reconnectCalendar', async () => {
+    assertPerson(actor);
+    assertFamilyWritesOpen();
+    const data = reconnectCalendarInput.parse(input);
+    let normalised: string;
+    try {
+      normalised = normaliseCalendarAddress(data.address);
+    } catch (e) {
+      if (e instanceof CalendarAddressError) throw new NotPermittedError('address_not_accepted');
+      throw e;
+    }
+    const keys = calendarKeys();
+    const fingerprint = addressFingerprint(keys.fingerprint, normalised);
+    if (!isUuid(calendarId)) throw new NotFoundError('calendar');
+
+    try {
+      return await auditedWrite<ConnectResult>(actor, deps, async (tx) => {
+        const [source] = await tx
+          .select()
+          .from(calendarSource)
+          .where(and(eq(calendarSource.id, calendarId), visibleSources(actor, true)))
+          .for('update')
+          .limit(1);
+        if (!source) throw new NotFoundError('calendar');
+        if (source.createdBy !== actor.userId) throw new NotPermittedError('not_owner');
+        const [conn] = await tx
+          .select({
+            id: calendarConnection.id,
+            ownerUserId: calendarConnection.ownerUserId,
+            status: calendarConnection.status,
+            fingerprint: calendarConnection.addressFingerprint,
+          })
+          .from(calendarConnection)
+          .where(eq(calendarConnection.id, source.connectionId))
+          .for('update')
+          .limit(1);
+        if (!conn || conn.ownerUserId !== actor.userId) throw new NotPermittedError('not_owner');
+        if (conn.status !== 'disconnected' || source.archivedAt === null)
+          throw new NotPermittedError('calendar_already_connected');
+        if (!conn.fingerprint || !sameFingerprint(conn.fingerprint, fingerprint))
+          throw new NotPermittedError('calendar_address_mismatch');
+
+        // The default people, checked again: any that is gone, hidden from the
+        // owner, or private while the calendar is household is dropped.
+        const people = await keptDefaultPeople(
+          tx,
+          actor,
+          source.visibility,
+          source.defaultPersonIds,
+        );
+        const sealed = sealCredential(keys.credentials, normalised, {
+          connectionId: conn.id,
+          ownerUserId: actor.userId,
         });
-      if (!source) throw new Error('connect: source insert returned no row');
-      return {
-        result: { calendarId: source.id, reconnected: false },
-        audit: [
-          connectionAudit('calendar.connect', connectionId, actor.userId, { provider: 'ics' }),
-          sourceAudit('calendar_source.create', source, {
-            visibility: source.visibility,
-            defaultKind: data.defaultKind,
-            defaultPeople: data.defaultPersonIds.length,
-          }),
-        ],
-      };
-    });
-  } catch (e) {
-    // Two people connecting the same address at once: the live-fingerprint
-    // index lets one through and refuses the other here.
-    if (isUniqueViolation(e)) throw new NotPermittedError('calendar_already_connected');
-    throw e;
-  }
+        await tx
+          .update(calendarConnection)
+          .set({
+            status: 'active',
+            credentialsEncrypted: sealed,
+            credentialsKeyId: keys.credentials.current.id,
+            disconnectedAt: null,
+            lastErrorCode: null,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(calendarConnection.id, conn.id));
+        const [restored] = await tx
+          .update(calendarSource)
+          .set({
+            archivedAt: null,
+            feedHash: null,
+            defaultPersonIds: people,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(calendarSource.id, source.id))
+          .returning({
+            id: calendarSource.id,
+            visibility: calendarSource.visibility,
+            createdBy: calendarSource.createdBy,
+          });
+        if (!restored) throw new NotFoundError('calendar');
+        return {
+          result: { calendarId: restored.id },
+          audit: [
+            connectionAudit('calendar.reconnect', conn.id, actor.userId, { provider: 'ics' }),
+            sourceAudit('calendar_source.restore', restored, {
+              defaultPeopleDropped: source.defaultPersonIds.length - people.length,
+            }),
+          ],
+        };
+      });
+    } catch (e) {
+      // Someone connected this address as a new calendar meanwhile.
+      if (isUniqueViolation(e)) throw new NotPermittedError('calendar_already_connected');
+      throw e;
+    }
+  });
+}
+
+/** The default people a calendar may still name: visible to its owner, live, and household if it is. */
+async function keptDefaultPeople(
+  tx: DbOrTx,
+  actor: UserActor,
+  visibility: string,
+  ids: readonly string[],
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const rows = await tx
+    .select({ id: person.id, visibility: person.visibility })
+    .from(person)
+    .where(and(inArray(person.id, [...ids]), visibleTo(actor, person), isNull(person.archivedAt)))
+    .for('share');
+  const ok = new Set(
+    rows.filter((r) => visibility !== 'household' || r.visibility === 'household').map((r) => r.id),
+  );
+  return ids.filter((id) => ok.has(id));
 }
 
 /** Locks a calendar the actor owns (NotFound if they cannot see it; not_owner if not theirs). */
@@ -439,56 +545,58 @@ export async function updateCalendar(
   patch: UpdateCalendarInput,
   deps: Deps = {},
 ): Promise<CalendarView> {
-  assertPerson(actor);
-  const parsed = updateCalendarInput.parse(patch);
-  const fields = Object.keys(parsed).sort();
-  if (fields.length === 0) return getCalendar(actor, id, {}, deps);
-  await auditedWrite(actor, deps, async (tx) => {
-    const current = await lockOwned(tx, actor, id);
-    const visibility = parsed.visibility ?? current.visibility;
-    const people = parsed.defaultPersonIds ?? current.defaultPersonIds;
-    if (parsed.defaultPersonIds !== undefined || visibility !== current.visibility)
-      await checkDefaultPeople(tx, actor, visibility, people);
-    const events = await lockEventsOf(tx, current.id);
-    if (visibility !== current.visibility && events.length) {
-      if (visibility === 'private') {
-        const [n] = await tx
-          .select({ n: sql<number>`count(*)::int` })
-          .from(note)
-          .where(
-            and(
-              eq(note.subjectType, 'event'),
-              inArray(note.subjectId, events),
-              eq(note.visibility, 'household'),
-            ),
-          );
-        if ((n?.n ?? 0) > 0) throw new NotPermittedError('referenced_by_household');
-      } else {
-        const [n] = await tx
-          .select({ n: sql<number>`count(*)::int` })
-          .from(eventPerson)
-          .innerJoin(person, eq(person.id, eventPerson.personId))
-          .where(and(inArray(eventPerson.eventId, events), eq(person.visibility, 'private')));
-        if ((n?.n ?? 0) > 0) throw new NotPermittedError('references_private');
+  return calendarBoundary('updateCalendar', async () => {
+    assertPerson(actor);
+    const parsed = updateCalendarInput.parse(patch);
+    const fields = Object.keys(parsed).sort();
+    if (fields.length === 0) return getCalendar(actor, id, {}, deps);
+    await auditedWrite(actor, deps, async (tx) => {
+      const current = await lockOwned(tx, actor, id);
+      const visibility = parsed.visibility ?? current.visibility;
+      const people = parsed.defaultPersonIds ?? current.defaultPersonIds;
+      if (parsed.defaultPersonIds !== undefined || visibility !== current.visibility)
+        await checkDefaultPeople(tx, actor, visibility, people);
+      const events = await lockEventsOf(tx, current.id);
+      if (visibility !== current.visibility && events.length) {
+        if (visibility === 'private') {
+          const [n] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(note)
+            .where(
+              and(
+                eq(note.subjectType, 'event'),
+                inArray(note.subjectId, events),
+                eq(note.visibility, 'household'),
+              ),
+            );
+          if ((n?.n ?? 0) > 0) throw new NotPermittedError('referenced_by_household');
+        } else {
+          const [n] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(eventPerson)
+            .innerJoin(person, eq(person.id, eventPerson.personId))
+            .where(and(inArray(eventPerson.eventId, events), eq(person.visibility, 'private')));
+          if ((n?.n ?? 0) > 0) throw new NotPermittedError('references_private');
+        }
       }
-    }
-    const [row] = await tx
-      .update(calendarSource)
-      .set({ ...parsed, updatedAt: sql`now()` })
-      .where(eq(calendarSource.id, current.id))
-      .returning();
-    if (!row) throw new NotFoundError('calendar');
-    // The events follow their calendar's visibility and usual kind now, not
-    // at the next refresh (the sync writes the same values).
-    if (events.length && (visibility !== current.visibility || parsed.defaultKind !== undefined))
-      await tx
-        .update(event)
-        .set({ visibility, kind: row.defaultKind ?? 'other', updatedAt: sql`now()` })
-        .where(and(eq(event.calendarSourceId, current.id), eq(event.source, 'synced')));
-    const audits: DomainAudit[] = [sourceAudit('calendar_source.update', row, { fields })];
-    return { result: null, audit: audits };
+      const [row] = await tx
+        .update(calendarSource)
+        .set({ ...parsed, updatedAt: sql`now()` })
+        .where(eq(calendarSource.id, current.id))
+        .returning();
+      if (!row) throw new NotFoundError('calendar');
+      // The events follow their calendar's visibility and usual kind now, not
+      // at the next refresh (the sync writes the same values).
+      if (events.length && (visibility !== current.visibility || parsed.defaultKind !== undefined))
+        await tx
+          .update(event)
+          .set({ visibility, kind: row.defaultKind ?? 'other', updatedAt: sql`now()` })
+          .where(and(eq(event.calendarSourceId, current.id), eq(event.source, 'synced')));
+      const audits: DomainAudit[] = [sourceAudit('calendar_source.update', row, { fields })];
+      return { result: null, audit: audits };
+    });
+    return getCalendar(actor, id, {}, deps);
   });
-  return getCalendar(actor, id, {}, deps);
 }
 
 /**
@@ -503,50 +611,52 @@ export async function disconnectCalendar(
   id: string,
   deps: Deps = {},
 ): Promise<void> {
-  assertPerson(actor);
-  await auditedWrite(actor, deps, async (tx) => {
-    const current = await lockOwned(tx, actor, id);
-    const [conn] = await tx
-      .update(calendarConnection)
-      .set({
-        status: 'disconnected',
-        credentialsEncrypted: null,
-        credentialsKeyId: null,
-        disconnectedAt: sql`now()`,
-        updatedAt: sql`now()`,
-      })
-      .where(
-        and(
-          eq(calendarConnection.id, current.connectionId),
-          eq(calendarConnection.ownerUserId, actor.userId),
-          eq(calendarConnection.status, 'active'),
-        ),
-      )
-      .returning({ id: calendarConnection.id });
-    if (!conn) throw new NotPermittedError('calendar_disconnected');
-    const [source] = await tx
-      .update(calendarSource)
-      .set({ archivedAt: sql`now()`, feedHash: null, updatedAt: sql`now()` })
-      .where(eq(calendarSource.id, current.id))
-      .returning();
-    if (!source) throw new NotFoundError('calendar');
-    const archived = await tx
-      .update(event)
-      .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(
-        and(
-          eq(event.calendarSourceId, current.id),
-          eq(event.source, 'synced'),
-          isNull(event.archivedAt),
-        ),
-      )
-      .returning({ id: event.id });
-    return {
-      result: null,
-      audit: [
-        connectionAudit('calendar.disconnect', conn.id, actor.userId, { provider: 'ics' }),
-        sourceAudit('calendar_source.archive', source, { events: archived.length }),
-      ],
-    };
+  return calendarBoundary('disconnectCalendar', async () => {
+    assertPerson(actor);
+    await auditedWrite(actor, deps, async (tx) => {
+      const current = await lockOwned(tx, actor, id);
+      const [conn] = await tx
+        .update(calendarConnection)
+        .set({
+          status: 'disconnected',
+          credentialsEncrypted: null,
+          credentialsKeyId: null,
+          disconnectedAt: sql`now()`,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(calendarConnection.id, current.connectionId),
+            eq(calendarConnection.ownerUserId, actor.userId),
+            eq(calendarConnection.status, 'active'),
+          ),
+        )
+        .returning({ id: calendarConnection.id });
+      if (!conn) throw new NotPermittedError('calendar_disconnected');
+      const [source] = await tx
+        .update(calendarSource)
+        .set({ archivedAt: sql`now()`, feedHash: null, updatedAt: sql`now()` })
+        .where(eq(calendarSource.id, current.id))
+        .returning();
+      if (!source) throw new NotFoundError('calendar');
+      const archived = await tx
+        .update(event)
+        .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(event.calendarSourceId, current.id),
+            eq(event.source, 'synced'),
+            isNull(event.archivedAt),
+          ),
+        )
+        .returning({ id: event.id });
+      return {
+        result: null,
+        audit: [
+          connectionAudit('calendar.disconnect', conn.id, actor.userId, { provider: 'ics' }),
+          sourceAudit('calendar_source.archive', source, { events: archived.length }),
+        ],
+      };
+    });
   });
 }

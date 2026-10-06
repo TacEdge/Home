@@ -32,6 +32,8 @@ export type NotPermittedCode =
   | 'sync_actor' // the sync actor writes only synced events, through the sync service (M4 §3.4)
   | 'address_not_accepted' // only Google's secret iCal address is accepted (M4 §4.2)
   | 'calendar_already_connected' // that exact address is already a live connection (M4 §4.4)
+  | 'calendar_can_reconnect' // that address is one of your own disconnected calendars: reconnect it instead (ADR 0007 §42)
+  | 'calendar_address_mismatch' // reconnecting needs the same address the calendar was connected with
   | 'calendar_keys_unavailable' // HOME_CREDENTIALS_KEY or HOME_FINGERPRINT_KEY is missing or invalid (M4 §4.1)
   | 'calendar_credential_unreadable' // the stored credential no longer opens with HOME's keys
   | 'calendar_disconnected' // a disconnected calendar is not refreshed

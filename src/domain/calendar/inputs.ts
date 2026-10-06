@@ -27,6 +27,14 @@ export const connectCalendarInput = z
   .strict();
 export type ConnectCalendarInput = z.input<typeof connectCalendarInput>;
 
+/**
+ * Reconnecting proves identity with the address and nothing else: the
+ * calendar returns with its own settings, changed afterwards on its page
+ * (ADR 0007 §42). Strict, so settings sent here are refused, not ignored.
+ */
+export const reconnectCalendarInput = z.object({ address: z.string().min(1).max(2048) }).strict();
+export type ReconnectCalendarInput = z.input<typeof reconnectCalendarInput>;
+
 export const updateCalendarInput = z
   .object({
     name: calendarName,
