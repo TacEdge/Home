@@ -9,6 +9,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth';
 import { calendarSource } from './calendar';
@@ -77,14 +78,14 @@ export const event = pgTable(
     }),
     externalUid: text('external_uid'),
     externalEtag: text('external_etag'),
-    // recurrence_parent_id and recurrence_original (migration 0007, with
-    // their checks event_recurrence_original_check and
-    // event_recurrence_parent_check, and the indexes
-    // event_synced_identity_unique, event_manual_override_unique and
-    // event_recurrence_parent_id_idx) are defined here by the application PR
-    // that first uses them, after 0007 has run in production: the deployed
-    // event services insert and return every column defined here
-    // (migration-first, MIGRATIONS.md; tests/unit/deferred-columns.test.ts).
+    // Migration 0007. SET NULL: an override outlives its series' removal as
+    // an orphan, keeping its own identity and annotations.
+    recurrenceParentId: uuid('recurrence_parent_id').references((): AnyPgColumn => event.id, {
+      onDelete: 'set null',
+    }),
+    // The occurrence an override replaces: an ISO date (all-day series) or a
+    // UTC instant (timed), as the provider layer writes it.
+    recurrenceOriginal: text('recurrence_original'),
   },
   (t) => [
     check('event_created_via_check', oneOf(t.createdVia, CREATED_VIA)),
@@ -115,6 +116,33 @@ export const event = pgTable(
       'event_sync_provenance_check',
       sql`(${t.source} = 'synced') = (${t.createdVia} = 'sync')`,
     ),
+    check(
+      'event_recurrence_original_check',
+      sql`${t.recurrenceOriginal} is null
+       or ${t.recurrenceOriginal} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?$'`,
+    ),
+    // A parent only with the occurrence it replaces; an original without a
+    // parent is an override whose series is not (or no longer) there.
+    check(
+      'event_recurrence_parent_check',
+      sql`${t.recurrenceParentId} is null or ${t.recurrenceOriginal} is not null`,
+    ),
+    // Synced identity: one row per source, uid and occurrence; a series or
+    // single event (no original) counts as the empty occurrence, so it is
+    // unique too (a NULL would never collide).
+    uniqueIndex('event_synced_identity_unique')
+      .on(t.calendarSourceId, t.externalUid, sql`coalesce(${t.recurrenceOriginal}, '')`)
+      .where(sql`${t.source} = 'synced'`),
+    // A manual series has at most one live change per occurrence; "back to
+    // the series" archives it, so an archived one never blocks a new one.
+    uniqueIndex('event_manual_override_unique')
+      .on(t.recurrenceParentId, t.recurrenceOriginal)
+      .where(
+        sql`${t.source} = 'manual' and ${t.recurrenceParentId} is not null and ${t.archivedAt} is null`,
+      ),
+    index('event_recurrence_parent_id_idx')
+      .on(t.recurrenceParentId)
+      .where(sql`${t.recurrenceParentId} is not null`),
     index('event_origin_capture_id_idx').on(t.originCaptureId),
     index('event_created_by_idx').on(t.createdBy),
     index('event_visibility_created_by_idx').on(t.visibility, t.createdBy),

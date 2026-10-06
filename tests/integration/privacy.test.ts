@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as calendars from '@/domain/calendar/service';
+import * as calendarSync from '@/domain/calendar/sync';
 import * as captures from '@/domain/captures/service';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
 import * as context from '@/domain/context/service';
@@ -409,7 +411,11 @@ describe('audit metadata carries no user-written content', () => {
 type Call = (a: UserActor) => Promise<unknown>;
 const KEV_MAY = new Set(['captures.captureVerbatim', 'proposals.createProposal']);
 const READS = /^(get|list|respondedKeys|monthToDate|stalenessOf)/;
-const INTERNAL = new Set(['captures.lockForProposal', 'captures.settleCapture']);
+const INTERNAL = new Set([
+  'captures.lockForProposal',
+  'captures.settleCapture',
+  'calendars.assertPerson', // the calendar services' own actor check, not a write
+]);
 const MODULES = {
   people,
   events,
@@ -422,6 +428,19 @@ const MODULES = {
   conversations,
   kevUsage,
   insights,
+  // M4 Package 4b: connecting, changing, disconnecting and refreshing calendars.
+  calendars,
+  calendarSync,
+};
+
+/** A synthetic secret address: the gate, Kev and system refusals come before it is read. */
+const CANARY_CALENDAR_ADDRESS =
+  'https://calendar.google.com/calendar/ical/canary%40example.test/private-cafecafecafecafecafecafecafecafe/basic.ics';
+/** Never reached: every refusal here comes before any fetch. */
+const NO_PROVIDER = {
+  kind: 'ics' as const,
+  listCalendars: () => Promise.reject(new Error('the provider must not be reached')),
+  fetchEvents: () => Promise.reject(new Error('the provider must not be reached')),
 };
 
 function writeCalls(own: Adult): Record<string, Call> {
@@ -544,6 +563,15 @@ function writeCalls(own: Adult): Record<string, Call> {
     'kevUsage.recordUsage': (a) =>
       kevUsage.recordUsage(a, { tier: 'fast', model: 'm', costUsdMicros: 1 }, d),
     'insights.respond': (a) => insights.respond(a, `k-${id}`, 'dismissed', d),
+    'calendars.connectCalendar': (a) =>
+      calendars.connectCalendar(a, { address: CANARY_CALENDAR_ADDRESS, name: 'x' }, d),
+    'calendars.updateCalendar': (a) => calendars.updateCalendar(a, id, { name: 'x' }, d),
+    'calendars.disconnectCalendar': (a) => calendars.disconnectCalendar(a, id, d),
+    'calendars.reconnectCalendar': (a) =>
+      calendars.reconnectCalendar(a, id, { address: CANARY_CALENDAR_ADDRESS }, d),
+    'calendarSync.refreshCalendar': (a) => calendarSync.refreshCalendar(a, id, NO_PROVIDER, {}, d),
+    'calendarSync.refreshStaleCalendars': (a) =>
+      calendarSync.refreshStaleCalendars(a, NO_PROVIDER, {}, d),
   };
 }
 

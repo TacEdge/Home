@@ -9,6 +9,8 @@ import {
   type FetchNotes,
   type FetchRange,
   type FetchResult,
+  SkippedTally,
+  uidFits,
 } from '@/domain/calendar/provider';
 import { isReadableRRule, occursWithin } from '@/domain/engines/recurrence';
 import {
@@ -54,7 +56,6 @@ export const MAX_FEED_STEPS = 300_000;
 /** As the event schema allows (src/domain/events/schema.ts). */
 const MAX_EXDATES = 500;
 const MAX_RRULE = 1000;
-const MAX_UID = 1000;
 
 type Moment =
   { kind: 'date'; date: IsoDate } | { kind: 'instant'; at: Date; zone: string; wall: WallClock };
@@ -217,11 +218,14 @@ type Read = {
   unknownZone: boolean;
 };
 
+/** A raw event's UID as written (trimmed), or '' when it has none HOME can read. */
+const uidOf = (raw: RawEvent): string =>
+  typeof raw.uid === 'string' || typeof raw.uid === 'number' ? String(raw.uid).trim() : '';
+
 function readEvent(raw: RawEvent, ctx: Context): Read {
-  const uid =
-    typeof raw.uid === 'string' || typeof raw.uid === 'number' ? String(raw.uid).trim() : '';
-  if (uid === '' || uid.length > MAX_UID || /[\u0000-\u001f\u007f]/.test(uid))
-    throw new Unreadable();
+  const uid = uidOf(raw);
+  // Bounded in UTF-8 bytes, well-formed, never truncated (ADR 0007 §35, §42).
+  if (!uidFits(uid)) throw new Unreadable();
   if (raw.dtstart.length !== 1 || raw.dtend.length > 1 || raw.duration.length > 1)
     throw new Unreadable();
   if (raw.dtend.length && raw.duration.length) throw new Unreadable();
@@ -438,13 +442,17 @@ function inWindow(
 export function finish(
   calendar: ExternalCalendar,
   events: ExternalEvent[],
-  skipped: number,
+  skipped: SkippedTally,
   notes: FetchNotes,
   range: FetchRange,
 ): FetchResult {
   const budget = { steps: MAX_FEED_STEPS };
   const groups = new Map<string, ExternalEvent[]>();
-  const copies = events.map((e) => ({
+  // Any provider's events, not only a parsed feed's: a UID that cannot be an
+  // identity is skipped and counted here too, as unidentified (ADR 0007 §35).
+  const fitting = events.filter((e) => uidFits(e.uid));
+  for (let i = fitting.length; i < events.length; i++) skipped.add(null);
+  const copies = fitting.map((e) => ({
     ...e,
     exdates: [...e.exdates],
     cancelledOccurrences: [...e.cancelledOccurrences],
@@ -459,7 +467,14 @@ export function finish(
   }
   if (kept.length > IMPORT_LIMITS.maxEvents) throw new CalendarProviderError('too_large');
   kept.sort((a, b) => cmp(a.uid, b.uid) || cmp(a.recurrenceId ?? '', b.recurrenceId ?? ''));
-  const result = { calendar, events: kept, skipped, notes };
+  const result = {
+    calendar,
+    events: kept,
+    skipped: skipped.count,
+    skippedUids: skipped.sortedUids(),
+    skippedUnidentified: skipped.unidentified,
+    notes,
+  };
   // The hash of the feed as HOME reads it. Google writes a fresh DTSTAMP on
   // every event each time it serves the feed, so the raw bytes never repeat;
   // this hash changes exactly when something HOME keeps changes.
@@ -472,7 +487,9 @@ export function normaliseFeed(feed: RawFeed, range: FetchRange, homeTimeZone: st
   const declared = typeof feed.calendarZone === 'string' ? ianaZone(feed.calendarZone) : null;
   const ctx: Context = { floatingZone: declared ?? homeTimeZone, notes: emptyNotes() };
   const notes = ctx.notes;
-  let skipped = feed.unreadable;
+  // A VEVENT that could not even be isolated has no readable UID.
+  const skipped = new SkippedTally();
+  skipped.addUnknown(feed.unreadable);
 
   const reads: Read[] = [];
   for (const raw of feed.events) {
@@ -484,7 +501,8 @@ export function normaliseFeed(feed: RawFeed, range: FetchRange, homeTimeZone: st
       reads.push(r);
     } catch (e) {
       if (!(e instanceof Unreadable)) throw e;
-      skipped++;
+      // Skipped, but known by its UID when that can be read: not a removal.
+      skipped.add(uidOf(raw) || null);
     }
   }
 

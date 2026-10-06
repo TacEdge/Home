@@ -87,7 +87,7 @@ Built in **M4**, migration `0007` (M4 Package 4a, ADR 0007 §33). Owner-only: th
 | `provider` | `ics` in M4, accepting only Google Calendar's secret iCal address (ADR 0007 §3). Later, each by explicit decision: other ICS feeds, `google`, `microsoft`, `caldav` (`CHECK`) |
 | `credentials_encrypted` | ICS: the secret address, sealed with AES-256-GCM and bound to this row (Package 2's `hc1.<key id>.<iv>.<ciphertext>.<tag>`, ≤ 8192 characters; a `CHECK` refuses any other shape, so a plain address cannot be stored); later: OAuth tokens. Cleared on disconnect. Never sent to the client, logs, audit, export or an LLM |
 | `credentials_key_id` | which key sealed it (16 hex), for rotation; cleared with the credential |
-| `address_fingerprint` | keyed HMAC of the normalised address (`fp1.…`): recognises the same address (duplicate refusal, reconnect) without storing it in plain text; kept after disconnect; required for `ics`; never exported |
+| `address_fingerprint` | keyed HMAC of the normalised address under `HOME_FINGERPRINT_KEY`, a stable key never rotated with the credentials key (`fp2.…`, ADR 0007 §34): recognises the same address (duplicate refusal, reconnect) without storing it in plain text; kept after disconnect; required for `ics`; never exported |
 | `status` | `active` (default) \| `disconnected` |
 | `last_error_code` | a structural code (`^[a-z][a-z_]{0,39}$`), never provider text |
 | `created_at`, `updated_at`, `disconnected_at` | timestamps |
@@ -112,7 +112,7 @@ Migration `0007` (M4 Package 4a, ADR 0007 §33).
 | `last_sync_status` | `ok` \| `partial` \| `unreachable` \| `address_rejected` \| `not_a_calendar` \| `too_large` (M4 contract §3.8) |
 | `last_sync_error_code`, `last_skipped_count` | a structural code; a count ≥ 0 |
 
-One source per provider calendar in a connection (unique `(connection_id, external_calendar_id)`); indexes on `created_by` and `(visibility, created_by)` as other visible records. Exported from Package 4b, with its service; excluded until then (the table is empty).
+One source per provider calendar in a connection (unique `(connection_id, external_calendar_id)`); indexes on `created_by` and `(visibility, created_by)` as other visible records. Its `default_person_ids` are references under the reference rules: a person a household calendar names cannot be made private while it does (ADR 0007 §42). Exported (export version 2, `calendars`) to every adult who can see it, without `connection_id` or `feed_hash` (ADR 0007 §38); the connection never is. Synced events are written only by the sync service, as the connection's owner `via sync`, with the source's visibility and usual kind; a person's services never write their provider-owned fields (ADR 0007 §36–37).
 
 ### Event
 Anything that happens at a time.

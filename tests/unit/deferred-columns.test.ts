@@ -14,11 +14,9 @@ import * as schema from '@/db/schema';
 // definitions and empties this list. Running `pnpm db:generate` meanwhile
 // would emit DROP statements for them; the additive-migration guard refuses
 // such a migration.
-// Migration 0007 (M4 Package 4a): the occurrence-override columns, defined
-// by the Package 4b application PR once 0007 has run in production.
-const DEFERRED: Record<string, string[]> = {
-  event: ['recurrence_parent_id', 'recurrence_original'],
-};
+// Empty: migration 0007's occurrence-override columns were defined by M4
+// Package 4b once 0007 had run in Production and Preview.
+const DEFERRED: Record<string, string[]> = {};
 
 const dir = 'src/db/migrations';
 const journal = JSON.parse(readFileSync(join(dir, 'meta/_journal.json'), 'utf8')) as {

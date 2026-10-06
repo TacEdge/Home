@@ -26,4 +26,5 @@ export const testEnv: Record<string, string> = {
   // A synthetic credential key for tests only: 32 fixed bytes, base64. Never
   // used anywhere else; real environments generate their own (DEPLOY.md).
   HOME_CREDENTIALS_KEY: Buffer.from('home-test-credentials-key-32byte').toString('base64'),
+  HOME_FINGERPRINT_KEY: Buffer.from('home-test-fingerprint-key-32byte').toString('base64'),
 };

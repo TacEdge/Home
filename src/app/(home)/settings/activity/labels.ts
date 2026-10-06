@@ -18,6 +18,7 @@ const THING: Record<string, string> = {
   kev_usage: 'Kev',
   insight_response: 'An insight',
   export: 'Export',
+  calendar_source: 'A calendar',
 };
 
 const EXACT: Record<string, string> = {
@@ -49,6 +50,14 @@ const EXACT: Record<string, string> = {
   'message.add': 'A message in a conversation with Kev',
   'kev_usage.record': 'Kev ran',
   'insight_response.respond': 'An insight answered',
+  'calendar.connect': 'A calendar connected',
+  'calendar.reconnect': 'A calendar connected again',
+  'calendar.disconnect': 'A calendar disconnected',
+  'calendar.sync': 'A calendar refreshed',
+  'calendar_source.create': 'A calendar added',
+  'calendar_source.archive': 'A calendar put away (disconnected)',
+  'calendar_source.restore': 'A calendar back (connected again)',
+  'calendar_source.update': 'A calendar’s settings changed',
 };
 
 const ACTION: Record<string, string> = {

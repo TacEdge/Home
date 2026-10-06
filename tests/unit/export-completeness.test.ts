@@ -8,7 +8,7 @@ import {
   EXPORT_TYPES,
   EXPORTED_COLUMNS,
   SECRET_COLUMNS,
-  exportV1,
+  exportSchema,
   type ExportType,
 } from '@/domain/export/spec';
 
@@ -73,21 +73,21 @@ describe('export completeness', () => {
     }
   });
 
-  it('the version-1 schema refuses unknown fields, so a file says exactly what it holds', () => {
+  it('the current schema (version 2) refuses unknown fields, so a file says exactly what it holds', () => {
     const empty = Object.fromEntries(types.map((t) => [t, []]));
     const base = {
       format: 'home-export',
-      version: 1,
+      version: 2,
       exportedAt: '2026-10-14T18:03:00.000Z',
       timeZone: 'Pacific/Auckland',
       exportedBy: { personId: null },
       includesSensitive: false,
       records: empty,
     };
-    expect(exportV1.safeParse(base).success).toBe(true);
-    expect(exportV1.safeParse({ ...base, version: 2 }).success).toBe(false);
+    expect(exportSchema.safeParse(base).success).toBe(true);
+    expect(exportSchema.safeParse({ ...base, version: 1 }).success).toBe(false);
     expect(
-      exportV1.safeParse({ ...base, records: { ...empty, people: [{ id: 'x', secret: 1 }] } })
+      exportSchema.safeParse({ ...base, records: { ...empty, people: [{ id: 'x', secret: 1 }] } })
         .success,
     ).toBe(false);
   });
@@ -112,5 +112,27 @@ describe('export completeness', () => {
       /credential|fingerprint|secret|token|key/i.test(c),
     );
     expect(credentialish.sort()).toEqual([...SECRET_COLUMNS.calendar_connection].sort());
+  });
+
+  // The tripwire (ADR 0007 §38): an exclusion is a permanent decision with a
+  // reason, never "until a later package". calendar_source waited for its
+  // service in Package 4a; it is exported now and may not slip back.
+  it('no table is excluded "for now": every exclusion is permanent', () => {
+    for (const [table, reason] of Object.entries(EXCLUDED_TABLES))
+      expect(reason, table).not.toMatch(/until|pending|for now|later|joins the export|package/i);
+    for (const [table, cols] of Object.entries(EXCLUDED_COLUMNS))
+      for (const [c, reason] of Object.entries(cols))
+        expect(reason, `${table}.${c}`).not.toMatch(/until|pending|for now|later|package/i);
+  });
+
+  it('calendars are exported; the connection and its secrets never are', () => {
+    expect(exportedTables.get('calendar_source')).toBe('calendars');
+    expect('calendar_source' in EXCLUDED_TABLES).toBe(false);
+    expect(exportedTables.has('calendar_connection')).toBe(false);
+    for (const c of ['connectionId', 'feedHash'])
+      expect(EXPORTED_COLUMNS.calendars, c).not.toContain(c);
+    expect(EXPORTED_COLUMNS.events).toEqual(
+      expect.arrayContaining(['recurrenceParentId', 'recurrenceOriginal']),
+    );
   });
 });

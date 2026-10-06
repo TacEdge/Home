@@ -1,10 +1,10 @@
 // node scripts/check-export.mts <file> — validates a HOME export against
-// version 1 of the format (src/domain/export/spec.ts) for the DEPLOY.md §E
+// the current version of the format (src/domain/export/spec.ts) for the DEPLOY.md §E
 // export check. Prints only the format, version and counts per record type:
 // never any record content, since the file may hold real household data.
 
 import { readFileSync } from 'node:fs';
-import { exportV1 } from '../src/domain/export/spec.ts';
+import { exportSchema } from '../src/domain/export/spec.ts';
 
 const file = process.argv[2];
 if (!file) {
@@ -18,7 +18,7 @@ try {
   console.error('check-export: not readable JSON');
   process.exit(1);
 }
-const result = exportV1.safeParse(parsed);
+const result = exportSchema.safeParse(parsed);
 if (!result.success) {
   // Paths and issue codes only, never values.
   for (const i of result.error.issues.slice(0, 20))

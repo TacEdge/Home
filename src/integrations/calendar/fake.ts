@@ -1,5 +1,6 @@
 import {
   CalendarProviderError,
+  SkippedTally,
   emptyNotes,
   type CalendarProvider,
   type ExternalCalendar,
@@ -26,7 +27,10 @@ export type FakeStep =
   | {
       events: ExternalEvent[];
       calendarName?: string | null;
+      /** Skipped events with nothing known about them. */
       skipped?: number;
+      /** Skipped events known by their UID (ADR 0007 §42). */
+      skippedUids?: string[];
       notes?: Partial<FetchNotes>;
     }
   | { fail: ProviderErrorCode };
@@ -38,6 +42,11 @@ export type FakeProvider = CalendarProvider & {
   readonly step: number;
   /** How many times the provider was asked, for refresh-once tests. */
   readonly calls: number;
+  /**
+   * Holds every fetch until `release()`, for concurrent-refresh tests:
+   * `reached` resolves once a fetch is waiting at the hold.
+   */
+  hold(): { reached: Promise<void>; release: () => void };
 };
 
 export function fakeProvider(
@@ -47,6 +56,7 @@ export function fakeProvider(
   if (steps.length === 0) throw new Error('fakeProvider: at least one step');
   let step = 0;
   let calls = 0;
+  let held: { gate: Promise<void>; arrive: () => void } | null = null;
 
   function current(address: string): FakeStep {
     calls++;
@@ -81,6 +91,10 @@ export function fakeProvider(
       return [calendarOf(current(conn.address))];
     },
     async fetchEvents(conn, calendar, range) {
+      if (held) {
+        held.arrive();
+        await held.gate;
+      }
       const s = current(conn.address);
       if (calendar.id !== 'default') throw new CalendarProviderError('not_a_calendar');
       if ('ics' in s) {
@@ -93,13 +107,10 @@ export function fakeProvider(
         }
       }
       if (!('events' in s)) throw new CalendarProviderError('not_a_calendar');
-      return finish(
-        calendarOf(s),
-        s.events,
-        s.skipped ?? 0,
-        { ...emptyNotes(), ...s.notes },
-        range,
-      );
+      const tally = new SkippedTally();
+      tally.addUnknown(s.skipped ?? 0);
+      for (const uid of s.skippedUids ?? []) tally.add(uid);
+      return finish(calendarOf(s), s.events, tally, { ...emptyNotes(), ...s.notes }, range);
     },
     advance() {
       step = Math.min(step + 1, steps.length - 1);
@@ -114,6 +125,20 @@ export function fakeProvider(
     },
     get calls() {
       return calls;
+    },
+    hold() {
+      let release!: () => void;
+      let arrive!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const reached = new Promise<void>((r) => (arrive = r));
+      held = { gate, arrive };
+      return {
+        reached,
+        release: () => {
+          held = null;
+          release();
+        },
+      };
     },
   };
 }

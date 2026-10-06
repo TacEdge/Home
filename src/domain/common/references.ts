@@ -2,7 +2,7 @@ import 'server-only';
 import { and, count, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import type { DbOrTx } from '@/db/create';
-import { context, event, eventPerson, note, task } from '@/db/schema';
+import { calendarSource, context, event, eventPerson, note, task } from '@/db/schema';
 import type { UserActor } from '@/trust/actor';
 import { visibleTo } from '@/trust/visibility';
 import { NotFoundError, NotPermittedError } from './errors';
@@ -46,7 +46,14 @@ export async function checkReferences(
   }
 }
 
-type Incoming = { table: PgTable; column: PgColumn; visibility?: SQL; extra?: SQL };
+/** Rows of `table` that point at the record: by `column`, or by `matches` for an array of ids. */
+type Incoming = {
+  table: PgTable;
+  column?: PgColumn;
+  matches?: (id: string) => SQL;
+  visibility?: SQL;
+  extra?: SQL;
+};
 
 /** Household records that point at a record of this kind. Archived ones count: they can be restored. */
 function incomingFor(entity: 'person' | 'project' | 'event'): Incoming[] {
@@ -80,6 +87,14 @@ function incomingFor(entity: 'person' | 'project' | 'event'): Incoming[] {
     { table: task, column: task.aboutPersonId, visibility: household(task) },
     noteAbout('person'),
     contextAbout('person'),
+    // A household calendar's usual people (M4, ADR 0007 §42): an array of
+    // person ids, as visible as the calendar. Archived calendars count: a
+    // disconnected calendar can be connected again.
+    {
+      table: calendarSource,
+      matches: (id) => sql`${id}::uuid = any(${calendarSource.defaultPersonIds})`,
+      visibility: household(calendarSource),
+    },
     // An annotation is as visible as its event.
     {
       table: eventPerson,
@@ -99,7 +114,9 @@ export async function assertNotReferencedByHousehold(
     const [r] = await tx
       .select({ n: count() })
       .from(inc.table)
-      .where(and(eq(inc.column, id), inc.visibility, inc.extra) as SQL);
+      .where(
+        and(inc.matches ? inc.matches(id) : eq(inc.column!, id), inc.visibility, inc.extra) as SQL,
+      );
     if ((r?.n ?? 0) > 0) throw new NotPermittedError('referenced_by_household');
   }
 }

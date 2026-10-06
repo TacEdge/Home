@@ -2,6 +2,7 @@ import 'server-only';
 import { env } from '@/lib/env';
 import type { UserActor } from '@/trust/actor';
 import { listAudit, type AuditCursor, type AuditRow } from '@/trust/audit';
+import { listCalendarsForExport } from '../calendar/service';
 import { listCaptures } from '../captures/service';
 import { NotPermittedError } from '../common/errors';
 import { auditRead, type Deps } from '../common/write';
@@ -101,6 +102,7 @@ export async function exportFor(
 
   const raw: Record<ExportType, Row[]> = {
     people,
+    calendars: await listCalendarsForExport(actor, deps),
     events,
     eventPeople,
     projects: await listProjects(actor, all, deps),

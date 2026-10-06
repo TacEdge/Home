@@ -20,6 +20,7 @@ cp .env.example .env.local                # fill in values; never commit this fi
 #   DATABASE_URL_MIGRATE  migration/admin credential (postgres://home:home@localhost:5432/home)
 #   BETTER_AUTH_SECRET and AUDIT_HASH_SECRET: `openssl rand -base64 48`
 #   HOME_CREDENTIALS_KEY (calendars, optional): `openssl rand -base64 32`
+#   HOME_FINGERPRINT_KEY (calendars, optional): another `openssl rand -base64 32`, never the credentials key
 #   HOME_ALLOWED_EMAILS: the household's addresses (or the fixture ones for a sandbox)
 #   HOME_MAIL_TRANSPORT=test              # magic links are written to a mailbox file
 pnpm db:migrate                           # applies src/db/migrations with DATABASE_URL_MIGRATE

@@ -88,6 +88,20 @@ export type FetchResult = {
   events: ExternalEvent[];
   /** Events that could not be read at all, so were left out. */
   skipped: number;
+  /**
+   * Which skipped events are known by identity (ADR 0007 §42): the UIDs of
+   * skipped events whose UID could itself be read and is a valid identity,
+   * sorted, without repeats, at most MAX_SKIPPED_UIDS. A skipped event is
+   * not a removed one, so the sync never archives these UIDs' events on
+   * this refresh.
+   */
+  skippedUids: string[];
+  /**
+   * Skipped events whose UID could not be read safely, plus any beyond
+   * MAX_SKIPPED_UIDS. While this is above zero the feed cannot prove that
+   * anything was removed, so the sync archives nothing on this refresh.
+   */
+  skippedUnidentified: number;
   /** A hash of the whole feed as received, so an unchanged feed can be recognised. */
   feedHash: string;
   notes: FetchNotes;
@@ -129,6 +143,61 @@ export const IMPORT_LIMITS = Object.freeze({
   /** Events (series, single events and overrides) with an occurrence in the window. */
   maxEvents: 5000,
 });
+
+/**
+ * The longest external UID HOME stores, in UTF-8 bytes (ADR 0007 §35). The
+ * synced-identity index (migration 0007) holds the UID itself, and an index
+ * entry over about 2,700 bytes cannot be written: a 1,000-character UID of
+ * three-byte characters would fail the whole refresh. A UID over this is
+ * never truncated (that would merge identities): its event is skipped and
+ * counted. Real Google UIDs are short ASCII.
+ */
+export const MAX_EXTERNAL_UID_BYTES = 512;
+
+/**
+ * Whether a provider's UID can be an identity in HOME: non-empty, a
+ * well-formed Unicode string (no lone surrogate, which the database would
+ * store as a different character, so the identity would never match again),
+ * no control characters, and within the byte limit. A UID that fails is
+ * never repaired or truncated into another identity: its event is skipped.
+ */
+export function uidFits(uid: string): boolean {
+  return (
+    uid.length > 0 &&
+    uid.isWellFormed() &&
+    !/[\u0000-\u001f\u007f-\u009f]/.test(uid) &&
+    Buffer.byteLength(uid, 'utf8') <= MAX_EXTERNAL_UID_BYTES
+  );
+}
+
+/** The most skipped UIDs a refresh carries; beyond it they count as unidentified. */
+export const MAX_SKIPPED_UIDS = 200;
+
+/** A running tally of skipped events, by identity where it is known (bounded). */
+export class SkippedTally {
+  count = 0;
+  unidentified = 0;
+  private readonly uids = new Set<string>();
+
+  /** One skipped event, with its UID if it could be read. */
+  add(uid: string | null): void {
+    this.count++;
+    if (uid === null || !uidFits(uid)) this.unidentified++;
+    else if (this.uids.has(uid)) return;
+    else if (this.uids.size >= MAX_SKIPPED_UIDS) this.unidentified++;
+    else this.uids.add(uid);
+  }
+
+  /** Skipped events with nothing known about them (a provider's own count). */
+  addUnknown(n: number): void {
+    this.count += n;
+    this.unidentified += n;
+  }
+
+  sortedUids(): string[] {
+    return [...this.uids].sort();
+  }
+}
 
 /** The import window around `today` (a date in the home time zone). */
 export function importWindow(today: IsoDate): FetchRange {

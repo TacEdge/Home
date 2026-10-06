@@ -7,13 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '@/db/create';
 import { captureVerbatim, listCaptures } from '@/domain/captures/service';
 import { createContext, listContext } from '@/domain/context/service';
-import {
-  createEvent,
-  listEventPeople,
-  listEvents,
-  setEventPerson,
-  updateEvent,
-} from '@/domain/events/service';
+import { createEvent, listEventPeople, listEvents, updateEvent } from '@/domain/events/service';
 import { createNote, listNotes } from '@/domain/notes/service';
 import { createPerson, listPeople } from '@/domain/people/service';
 import { createProject, listProjects } from '@/domain/projects/service';
@@ -2807,7 +2801,7 @@ describe('0007 upgrades the production schema (0000–0006) in place', () => {
     return out;
   }
 
-  it('applies on top of 0006 with M3 data the current app wrote, changing nothing that was there, and the app keeps working', async () => {
+  it('applies on top of 0006 with M3 data, changing nothing that was there, and the app keeps working', async () => {
     const name = 'home_upgrade_0007_test';
     const adminUrl = onDatabase(TEST_DATABASE_URL, name);
     const appUrl = onDatabase(TEST_APP_DATABASE_URL, name);
@@ -2824,33 +2818,22 @@ describe('0007 upgrades the production schema (0000–0006) in place', () => {
         sql`insert into "user" (id, name, email) values ('u-up7', 'Sam', 'sam@example.test')`,
       );
       const milo = await createPerson(sam, { name: 'Milo', role: 'child' }, deps);
-      const swim = await createEvent(
-        sam,
-        {
-          title: 'Swimming',
-          kind: 'activity',
-          time: {
-            allDay: false,
-            startsAt: '2026-10-14T02:30:00Z',
-            endsAt: '2026-10-14T03:30:00Z',
-            timeZone: 'Pacific/Auckland',
-          },
-          rrule: 'FREQ=WEEKLY;BYDAY=WE',
-          exdates: ['2026-10-21'],
-        },
-        deps,
-      );
-      await setEventPerson(sam, { eventId: swim.id, personId: milo.id, role: 'attending' }, deps);
-      await createEvent(
-        sam,
-        {
-          title: 'School holidays',
-          kind: 'school',
-          time: { allDay: true, startDate: '2026-10-20', endDate: '2026-10-24' },
-          visibility: 'private',
-        },
-        deps,
-      );
+      // Events and their people as the deployed M3 app wrote them, in 0006's
+      // columns: since M4 Package 4b defines 0007's event columns, today's
+      // event services name them and no longer run on 0006 (migration-first).
+      const [swim] = (
+        await upApp.db.execute<{ id: string }>(sql`
+          insert into event (created_by, created_via, visibility, title, kind, all_day, starts_at, ends_at, time_zone, rrule, exdates)
+          values ('u-up7', 'ui', 'household', 'Swimming', 'activity', false, '2026-10-14T02:30:00Z', '2026-10-14T03:30:00Z',
+                  'Pacific/Auckland', 'FREQ=WEEKLY;BYDAY=WE', array['2026-10-21'])
+          returning id`)
+      ).rows as [{ id: string }];
+      await upApp.db.execute(sql`
+        insert into event_person (event_id, person_id, role, created_by, created_via)
+        values (${swim.id}::uuid, ${milo.id}::uuid, 'attending', 'u-up7', 'ui')`);
+      await upApp.db.execute(sql`
+        insert into event (created_by, created_via, visibility, title, kind, all_day, start_date, end_date)
+        values ('u-up7', 'ui', 'private', 'School holidays', 'school', true, '2026-10-20', '2026-10-24')`);
       const fence = await createProject(sam, { title: 'Back fence' }, deps);
       await createTask(sam, { title: 'Paint the fence', projectId: fence.id }, deps);
       await createNote(sam, { body: 'Charcoal', subject: { type: 'event', id: swim.id } }, deps);
@@ -2897,8 +2880,9 @@ describe('0007 upgrades the production schema (0000–0006) in place', () => {
       expect(extra.rows[0]?.n).toBe(0);
       expect(before.event?.rows).toHaveLength(2);
 
-      // The deployed M3 app keeps working on the upgraded schema: reads, the
-      // recurrence and people it wrote, and new writes.
+      // The app keeps working on the upgraded schema (today's services, which
+      // define 0007's columns): reads, the recurrence and people M3 wrote,
+      // and new writes.
       const events = await listEvents(sam, {}, deps);
       expect(events.map((e) => e.title).sort()).toEqual(['School holidays', 'Swimming']);
       expect((await listEventPeople(sam, swim.id, {}, deps)).map((x) => x.personId)).toEqual([

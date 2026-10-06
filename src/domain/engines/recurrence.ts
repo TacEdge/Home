@@ -354,6 +354,116 @@ function searchNoFurtherThan(rr: RRule, end: Date): RRule {
   return rr;
 }
 
+/**
+ * The agenda bound (ADR 0007 §28, §39). A rule is walked from its DTSTART, so
+ * a long-running series (an imported calendar's daily stand-up since 2009)
+ * costs every expansion years of steps before the first date asked for.
+ * Instead, expansion restarts the rule at the start of one of its own
+ * periods (a day, week, month or year, counted in its INTERVAL from DTSTART,
+ * weeks starting on its WKST) two periods before the window, with every
+ * part the rule took from DTSTART (its weekdays, month days, months and time
+ * of day) written out, so the occurrences from that point on are exactly the
+ * same. Two periods of margin are defensive: rrule 2.8 keeps a period's
+ * dates inside it (week 1 of a year that begins in December yields only its
+ * January days), so the window's own period would match too, but a later
+ * library that yielded across a boundary would still be covered. Never with COUNT, whose
+ * occurrences are numbered from DTSTART (and which MAX_COUNT already
+ * bounds), and never for a window near DTSTART. Pure; the result depends
+ * only on the rule and the window. tests/unit/calendar/rrule-reference.test.ts
+ * compares it with plain expansion from DTSTART.
+ */
+/** Rule parts anchorFor carries over exactly; a rule with any other part is never restarted. */
+const ANCHORABLE = new Set([
+  'freq',
+  'interval',
+  'wkst',
+  'dtstart',
+  'until',
+  'count',
+  'bysetpos',
+  'bymonth',
+  'bymonthday',
+  'byyearday',
+  'byweekno',
+  'byweekday',
+  'byhour',
+  'byminute',
+  'bysecond',
+]);
+
+export function anchorFor(
+  options: Partial<Options>,
+  dtstart: Date,
+  windowStart: Date,
+): Partial<Options> | null {
+  if (options.count != null) return null;
+  // Only a rule made entirely of parts the restart writes out is restarted;
+  // any other part (BYEASTER, say) would be silently dropped, so such a rule
+  // is expanded from DTSTART as before (ADR 0007 §42).
+  for (const [key, value] of Object.entries(options))
+    if (value !== undefined && value !== null && !ANCHORABLE.has(key)) return null;
+  const freq = options.freq;
+  const interval = options.interval && options.interval > 0 ? options.interval : 1;
+  if (
+    freq !== RRule.DAILY &&
+    freq !== RRule.WEEKLY &&
+    freq !== RRule.MONTHLY &&
+    freq !== RRule.YEARLY
+  )
+    return null;
+  const full = new RRule({ ...options, dtstart }).options;
+  const sy = dtstart.getUTCFullYear();
+  const sm = dtstart.getUTCMonth();
+  const day = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
+  const DAY = 86_400_000;
+  let anchor: Date;
+  if (freq === RRule.DAILY || freq === RRule.WEEKLY) {
+    // rrule's weekdays: 0 = Monday. A week starts on WKST.
+    const weekStart = (d: Date) => {
+      const wd = (d.getUTCDay() + 6) % 7;
+      const back = freq === RRule.WEEKLY ? (wd - full.wkst + 7) % 7 : 0;
+      return day(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back);
+    };
+    const first = weekStart(dtstart);
+    const target = weekStart(windowStart);
+    const unit = freq === RRule.WEEKLY ? 7 : 1;
+    const periods = Math.floor((target.getTime() - first.getTime()) / DAY / unit / interval);
+    const k = periods - 2;
+    if (k <= 0) return null;
+    anchor = new Date(first.getTime() + k * interval * unit * DAY);
+  } else if (freq === RRule.MONTHLY) {
+    const months = (windowStart.getUTCFullYear() - sy) * 12 + (windowStart.getUTCMonth() - sm);
+    const k = Math.floor(months / interval) - 2;
+    if (k <= 0) return null;
+    anchor = day(sy, sm + k * interval, 1);
+  } else {
+    const k = Math.floor((windowStart.getUTCFullYear() - sy) / interval) - 2;
+    if (k <= 0) return null;
+    anchor = day(sy + k * interval, 0, 1);
+  }
+  const some = <T>(xs: readonly T[] | null | undefined) => (xs && xs.length ? [...xs] : undefined);
+  const weekdays = [
+    ...(full.byweekday ?? []),
+    ...(full.bynweekday ?? []).map(([wd, n]) => new Weekday(wd!, n)),
+  ];
+  return {
+    freq,
+    interval,
+    wkst: full.wkst,
+    dtstart: anchor,
+    until: options.until ?? null,
+    bysetpos: some(full.bysetpos),
+    bymonth: some(full.bymonth),
+    bymonthday: some([...(full.bymonthday ?? []), ...(full.bynmonthday ?? [])]),
+    byyearday: some(full.byyearday),
+    byweekno: some(full.byweekno),
+    byweekday: weekdays.length ? weekdays : undefined,
+    byhour: some(full.byhour),
+    byminute: some(full.byminute),
+    bysecond: some(full.bysecond),
+  };
+}
+
 /** What expansion needs about one event, shared by expandEvent and occursWithin. */
 function prepare(event: RecurringEvent) {
   const start: EventStart = event.allDay
@@ -398,12 +508,14 @@ function prepare(event: RecurringEvent) {
    * only stops the rrule library searching beyond the query, which for a
    * rule that never yields (30 February, every day) would run to year 9999.
    */
-  const ruleTo = (end: Date): RRule | null => {
+  const ruleTo = (end: Date, from?: Date): RRule | null => {
     if (!rule) return null;
     const options: Partial<Options> = { ...rule, dtstart: fakeUtc(startWall) };
     options.until = ruleUntil && ruleUntil < end ? ruleUntil : end;
     if (rule.count != null) options.count = Math.min(rule.count, MAX_COUNT);
-    return searchNoFurtherThan(new RRule(options), end);
+    // Expansion (not the import's step count) starts near the window.
+    const near = from ? anchorFor(options, options.dtstart!, from) : null;
+    return searchNoFurtherThan(new RRule(near ?? options), end);
   };
   const windowOf = (from: IsoDate, to: IsoDate) => ({
     start: fakeUtc({ ...parseIsoDate(from < first ? first : from), hour: 0, minute: 0, second: 0 }),
@@ -432,7 +544,7 @@ export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): 
   if (to < p.first) return [];
   const w = p.windowOf(from, to);
   return p
-    .ruleTo(w.end)!
+    .ruleTo(w.end, w.start)!
     .between(w.start, w.end, true)
     .map((d) => p.occurrenceOn(wallOfFake(d)))
     .filter(kept);

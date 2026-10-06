@@ -4,6 +4,7 @@ import type { DbOrTx } from '@/db/create';
 import type { UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
 import type { Visibility } from '@/trust/visibility';
+import { NotPermittedError } from './errors';
 import { assertFamilyWritesOpen } from './guards';
 
 /**
@@ -35,6 +36,31 @@ export function issueExecution(e: Execution): Execution {
 /** The execution in `deps`, if the executor issued it; a hand-made object is ignored. */
 export function executionOf(deps: Deps): Execution | null {
   return deps.execution && issued.has(deps.execution) ? deps.execution : null;
+}
+
+const syncActors = new WeakSet<object>();
+
+/**
+ * The calendar sync actor (M4 contract §3.4, ADR 0007 §8): the calendar
+ * owner's user actor with `via: 'sync'`. For the sync service only
+ * (tests/unit/execution-guard.test.ts enforces it); never from a request.
+ * Its writes are the owner's, audited as from a calendar.
+ */
+export function issueSyncActor(owner: { userId: string; email: string }): UserActor {
+  const actor: UserActor = Object.freeze({
+    kind: 'user',
+    userId: owner.userId,
+    email: owner.email,
+    via: 'sync',
+    channel: 'web',
+  });
+  syncActors.add(actor);
+  return actor;
+}
+
+/** Whether an actor is one the sync service issued; a hand-made `via: 'sync'` is not. */
+function isSyncActor(actor: UserActor): boolean {
+  return actor.via === 'sync' && syncActors.has(actor);
 }
 
 /** `created_via` and `origin_capture_id` for a record a service creates. */
@@ -91,6 +117,9 @@ export async function auditedWrite<T>(
   fn: (tx: DbOrTx) => Promise<{ result: T; audit: DomainAudit | DomainAudit[] | null }>,
 ): Promise<T> {
   assertFamilyWritesOpen();
+  // Sync authority is minted, never claimed: an actor saying `via: 'sync'`
+  // writes only if the sync service issued it (M4 contract §3.4).
+  if (actor.via === 'sync' && !isSyncActor(actor)) throw new NotPermittedError('sync_actor');
   const db = deps.db ?? getDb();
   return db.transaction(async (tx) => {
     const { result, audit } = await fn(tx);

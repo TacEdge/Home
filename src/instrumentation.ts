@@ -14,11 +14,12 @@ export async function register(): Promise<void> {
   // The calendar credential key's state, never its value (M4 contract §4.1).
   // A missing or malformed key refuses calendar credentials; it never stops
   // HOME booting.
-  const { credentialKeysFrom } = await import('@/trust/credentials');
+  const { credentialKeysFrom, fingerprintKeyFrom } = await import('@/trust/credentials');
   const keys = credentialKeysFrom(env);
   console.log(
     `[home] calendar credentials key: ${keys.status}${keys.status === 'invalid' ? ` (${keys.variable})` : ''}`,
   );
+  console.log(`[home] calendar fingerprint key: ${fingerprintKeyFrom(env).status}`);
   const [{ getDb }, { assertRuntimeRole }] = await Promise.all([
     import('@/db/client'),
     import('@/db/role-check'),
