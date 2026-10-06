@@ -136,12 +136,25 @@ export function toRRule(r: Recurrence, start: EventStart): string | null {
   return parts.join(';');
 }
 
+/**
+ * Whether a stored or imported rule can be read at all. A rule that cannot
+ * is never expanded: the event is its first occurrence only (M4 contract
+ * §3.5), so HOME never invents occurrences from a rule it does not understand.
+ */
+export function isReadableRRule(rrule: string): boolean {
+  return parseRule(rrule) !== null;
+}
+
 function parseRule(rrule: string): Partial<Options> | null {
   try {
     const body = rrule.trim().replace(/^RRULE:/i, '');
     if (!/^[A-Z0-9=;,:+\-]+$/i.test(body)) return null;
     const o = RRule.parseString(body);
-    return o.freq === undefined ? null : o;
+    if (o.freq === undefined) return null;
+    // Some rules parse but cannot be built (an unknown weekday code, for
+    // one): building it once here means expansion never throws on them.
+    new RRule({ ...o, dtstart: new Date(0) });
+    return o;
   } catch {
     return null;
   }
@@ -291,17 +304,58 @@ function readExdates(exdates: readonly string[] | null) {
   return { dates, instants };
 }
 
+/** The local wall clock a rule's UNTIL stops at, written as if it were UTC. */
+function untilWall(rrule: string, until: Date, start: EventStart): Date {
+  // An UNTIL with a time of day is an instant (RFC 5545: UTC with a zoned
+  // DTSTART), so it stops at that moment's wall clock in the event's zone,
+  // which for HOME's own rules (the last second of the chosen day) is the
+  // same thing. A date-only UNTIL, or any UNTIL on an all-day event, keeps
+  // the whole of its last day.
+  if (!start.allDay && /UNTIL=\d{8}T\d{6}Z/i.test(rrule))
+    return fakeUtc(wallClockOf(until, start.timeZone));
+  const lastDay = untilDate(until, start);
+  return fakeUtc({ ...parseIsoDate(lastDay), hour: 23, minute: 59, second: 59 });
+}
+
+/** Days in one step of each frequency, at least (RRule.YEARLY … DAILY). */
+const DAYS_PER_STEP: Record<number, number> = {
+  [RRule.YEARLY]: 365,
+  [RRule.MONTHLY]: 28,
+  [RRule.WEEKLY]: 7,
+  [RRule.DAILY]: 1,
+};
+
 /**
- * Every occurrence of an event whose start date (in the event's own zone,
- * or its date for all-day events) falls within `from`…`to`, inclusive, in
- * order, skipping exdates. A one-off event is its single occurrence. A
- * stored rule that cannot be read yields just the first occurrence, never a
- * guess. Duration: an all-day occurrence keeps the event's number of days;
- * a timed one keeps its elapsed length, so a 1-hour event is 1 hour long on
- * a DST night too.
+ * Stops the rrule library searching past `end`. Its UNTIL is checked only
+ * when a date passes the rule's filters, so a rule that never yields (the
+ * 30th of February, every day) is searched step by step to the year 9999,
+ * seconds of work. The library's one per-step way out is its check that
+ * `options.interval === 0`; it reads `options.interval` once on entry and
+ * then twice a step (that check, then to advance), so the property is made to
+ * answer 0 at the check once the steps needed to pass `end`, with a margin,
+ * are spent. Every date up to `end` is still produced as before. Tied to
+ * rrule 2.8's iteration; tests/unit/calendar/review-fixes.test.ts fails
+ * if an upgrade changes it (the hostile rules would take seconds again, or
+ * occurrences would go missing).
  */
-export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): Occurrence[] {
-  if (to < from) return [];
+function searchNoFurtherThan(rr: RRule, end: Date): RRule {
+  const o = rr.options;
+  const interval = o.interval;
+  const perStep = DAYS_PER_STEP[o.freq];
+  if (!perStep || interval < 1) return rr; // HOME expands nothing finer than daily
+  const days = Math.max(0, (end.getTime() - o.dtstart.getTime()) / 86_400_000);
+  const maxSteps = Math.ceil(days / perStep / interval) + 2;
+  let reads = 0;
+  Object.defineProperty(o, 'interval', {
+    configurable: true,
+    enumerable: true,
+    get: () => (++reads % 2 === 0 && reads / 2 > maxSteps ? 0 : interval),
+  });
+  return rr;
+}
+
+/** What expansion needs about one event, shared by expandEvent and occursWithin. */
+function prepare(event: RecurringEvent) {
   const start: EventStart = event.allDay
     ? { allDay: true, startDate: event.startDate }
     : { allDay: false, startsAt: event.startsAt, timeZone: event.timeZone };
@@ -328,43 +382,100 @@ export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): 
       timeZone: event.timeZone,
     };
   };
-  const kept = (o: Occurrence) =>
-    o.date >= from &&
-    o.date <= to &&
-    !ex.dates.has(o.date) &&
-    !(o.allDay === false && ex.instants.has(o.startsAt.getTime()));
+  const excluded = (o: Occurrence) =>
+    ex.dates.has(o.date) || (o.allDay === false && ex.instants.has(o.startsAt.getTime()));
 
   const startWall: WallClock = event.allDay
     ? { ...parseIsoDate(event.startDate), hour: 0, minute: 0, second: 0 }
     : wallClockOf(event.startsAt, event.timeZone);
 
   const rule = event.rrule ? parseRule(event.rrule) : null;
-  if (!rule) {
-    const only = occurrenceOn(startWall);
+  const ruleUntil = rule?.until && event.rrule ? untilWall(event.rrule, rule.until, start) : null;
+  /**
+   * The rule, never evaluated past `end`. Floating expansion: DTSTART and
+   * UNTIL are local wall clocks written as if they were UTC; occurrences come
+   * back the same way. The rule's own UNTIL and COUNT still apply; the cap
+   * only stops the rrule library searching beyond the query, which for a
+   * rule that never yields (30 February, every day) would run to year 9999.
+   */
+  const ruleTo = (end: Date): RRule | null => {
+    if (!rule) return null;
+    const options: Partial<Options> = { ...rule, dtstart: fakeUtc(startWall) };
+    options.until = ruleUntil && ruleUntil < end ? ruleUntil : end;
+    if (rule.count != null) options.count = Math.min(rule.count, MAX_COUNT);
+    return searchNoFurtherThan(new RRule(options), end);
+  };
+  const windowOf = (from: IsoDate, to: IsoDate) => ({
+    start: fakeUtc({ ...parseIsoDate(from < first ? first : from), hour: 0, minute: 0, second: 0 }),
+    end: fakeUtc({ ...parseIsoDate(to), hour: 23, minute: 59, second: 59 }),
+  });
+  return { first, occurrenceOn, excluded, startWall, recurs: rule !== null, ruleTo, windowOf };
+}
+
+/**
+ * Every occurrence of an event whose start date (in the event's own zone,
+ * or its date for all-day events) falls within `from`…`to`, inclusive, in
+ * order, skipping exdates. A one-off event is its single occurrence. A
+ * stored rule that cannot be read yields just the first occurrence, never a
+ * guess. Duration: an all-day occurrence keeps the event's number of days;
+ * a timed one keeps its elapsed length, so a 1-hour event is 1 hour long on
+ * a DST night too.
+ */
+export function expandEvent(event: RecurringEvent, from: IsoDate, to: IsoDate): Occurrence[] {
+  if (to < from) return [];
+  const p = prepare(event);
+  const kept = (o: Occurrence) => o.date >= from && o.date <= to && !p.excluded(o);
+  if (!p.recurs) {
+    const only = p.occurrenceOn(p.startWall);
     return kept(only) ? [only] : [];
   }
-  if (to < first) return [];
-
-  // Floating expansion: DTSTART and UNTIL are local wall clocks written as
-  // if they were UTC; occurrences come back the same way.
-  const options: Partial<Options> = { ...rule, dtstart: fakeUtc(startWall) };
-  if (rule.until) {
-    const lastDay = untilDate(rule.until, start);
-    options.until = fakeUtc({ ...parseIsoDate(lastDay), hour: 23, minute: 59, second: 59 });
-  }
-  if (rule.count != null) options.count = Math.min(rule.count, MAX_COUNT);
-  const rr = new RRule(options);
-  const windowStart = fakeUtc({
-    ...parseIsoDate(from < first ? first : from),
-    hour: 0,
-    minute: 0,
-    second: 0,
-  });
-  const windowEnd = fakeUtc({ ...parseIsoDate(to), hour: 23, minute: 59, second: 59 });
-  return rr
-    .between(windowStart, windowEnd, true)
-    .map((d) => occurrenceOn(wallOfFake(d)))
+  if (to < p.first) return [];
+  const w = p.windowOf(from, to);
+  return p
+    .ruleTo(w.end)!
+    .between(w.start, w.end, true)
+    .map((d) => p.occurrenceOn(wallOfFake(d)))
     .filter(kept);
+}
+
+/** The result of occursWithin: whether it does, and how much work finding out took. */
+export type OccursWithin = { occurs: boolean; steps: number; exhausted: boolean };
+
+/**
+ * Whether an event has any occurrence starting within `from`…`to` (as
+ * expandEvent counts them), stopping at the first, and walking at most
+ * `maxSteps` occurrences of its rule from the beginning. A rule that needs
+ * more steps than that to reach the window is reported `exhausted`, so a
+ * caller can refuse it rather than spend unbounded time (M4: an imported
+ * rule is outside HOME's control). Exdates count as steps walked.
+ */
+export function occursWithin(
+  event: RecurringEvent,
+  from: IsoDate,
+  to: IsoDate,
+  maxSteps: number,
+): OccursWithin {
+  if (to < from) return { occurs: false, steps: 0, exhausted: false };
+  const p = prepare(event);
+  const inRange = (o: Occurrence) => o.date >= from && o.date <= to && !p.excluded(o);
+  if (!p.recurs)
+    return { occurs: inRange(p.occurrenceOn(p.startWall)), steps: 1, exhausted: false };
+  if (to < p.first) return { occurs: false, steps: 0, exhausted: false };
+  const w = p.windowOf(from, to);
+  let steps = 0;
+  let occurs = false;
+  let exhausted = false;
+  p.ruleTo(w.end)!.all((d) => {
+    if (++steps > maxSteps) {
+      exhausted = true;
+      return false;
+    }
+    if (d > w.end) return false;
+    if (d < w.start) return true;
+    occurs = inRange(p.occurrenceOn(wallOfFake(d)));
+    return !occurs;
+  });
+  return { occurs, steps: Math.min(steps, maxSteps), exhausted };
 }
 
 /** The exdates with one more occurrence skipped, by its date: for "skip this one". */

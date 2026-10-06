@@ -133,7 +133,9 @@ export function createLogger(opts: { sink?: Sink; minLevel?: Level; base?: Field
     const entry = {
       ts: new Date().toISOString(),
       level,
-      event,
+      // The event is meant to be a fixed name, but it is scrubbed like every
+      // other string, so a secret passed as the message itself cannot leak.
+      event: scrubSecrets(typeof event === 'string' ? event : String(event)),
       ...(redact({ ...base, ...fields }) as Fields),
     };
     sink(JSON.stringify(entry), level);
