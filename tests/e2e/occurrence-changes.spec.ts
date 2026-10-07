@@ -54,7 +54,7 @@ async function series(opts: {
      insert into event (title, kind, all_day, starts_at, ends_at, time_zone, rrule, created_by, created_via, visibility, source)
      select $1, 'activity', false, (d.day || ' 16:00')::timestamp at time zone $3,
             (d.day || ' 16:00')::timestamp at time zone $3 + interval '1 hour',
-            $3, 'FREQ=WEEKLY', $2, 'ui', $4, 'manual' from d
+            $3, 'FREQ=WEEKLY;BYDAY=' || upper(left(to_char(d.day, 'Dy'), 2)), $2, 'ui', $4, 'manual' from d
      returning id`,
     [opts.title, opts.by, NZ, opts.visibility ?? 'household'],
   );
@@ -475,6 +475,7 @@ test('an archived series puts its changes away with it; restoring brings them ba
   await page.getByLabel('From', { exact: true }).fill('18:00');
   await page.getByLabel('To', { exact: true }).fill('19:00');
   await page.getByRole('button', { name: 'Change this one' }).click();
+  await expect(page.getByText('One time of Choir practice, changed from the usual.')).toBeVisible();
   const [change] = await liveChangesOf(ids.choir);
   await page.goto(`/events/${ids.choir}`);
   await page.locator('summary', { hasText: 'Archive' }).click();
