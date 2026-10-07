@@ -32,6 +32,17 @@ test.beforeAll(() => {
   writeFeed(TOKEN, SEQUENCES.added[0]!);
   writeFeed(TOKEN2, SEQUENCES.initial[0]!);
 });
+// Each test starts from a readable feed, whatever an earlier one left behind.
+test.beforeEach(() => {
+  failFeed(TOKEN, null);
+  holdFeed(TOKEN, false);
+});
+// The person a test adds is put away afterwards, so the People specs see the family as seeded.
+test.afterAll(async () => {
+  await q(
+    `update person set archived_at = now() where name = 'Coach Rehearsal' and archived_at is null`,
+  );
+});
 
 test('Settings lists Calendars; the list starts calm and says HOME only reads', async ({
   page,
@@ -138,7 +149,7 @@ test('failure reads in household words and keeps what HOME had; a partial refres
     )
   )[0]!.n;
   for (const [code, words] of [
-    ['unreachable', 'Couldn’t update just now.'],
+    ['unreachable', 'Couldn’t update just now'],
     ['address_rejected', 'The Google Calendar address needs attention'],
     ['bad_response', 'HOME couldn’t read this calendar'],
     ['too_large', 'more history than HOME can read at once'],
