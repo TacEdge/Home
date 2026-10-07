@@ -1,9 +1,14 @@
 import 'server-only';
 import { listCalendars } from '@/domain/calendar/service';
 import { agenda, type AgendaDay, type AgendaEventInput } from '@/domain/engines/agenda';
-import { overriddenOriginals, recurringWithOverrides } from '@/domain/events/occurrences';
+import {
+  hiddenOccurrenceChanges,
+  isOccurrenceChange,
+  overriddenOriginals,
+  recurringWithOverrides,
+} from '@/domain/events/occurrences';
 import { listEventPeople, listEvents } from '@/domain/events/service';
-import { effectivePeople } from '@/domain/events/who';
+import { effectivePeople, occurrenceChangePeople } from '@/domain/events/who';
 import { listPeople, type Person } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
 import { listTasks } from '@/domain/tasks/service';
@@ -18,7 +23,10 @@ import type { UserActor } from '@/trust/actor';
 // of them does date work of its own. Synced events (M4 Package 6) come
 // through the same read: a series is expanded with its live overrides'
 // originals skipped (occurrences.ts), and an event with no people of its own
-// shows its calendar's usual people (who.ts). Nothing here knows a provider.
+// shows its calendar's usual people (who.ts). A changed occurrence of a
+// manual series (Package 8a) replaces its original the same way, shows its
+// series' people when it has none of its own, and is not shown at all
+// while its series is archived. Nothing here knows a provider.
 
 export type LoadedAgenda = {
   today: IsoDate;
@@ -57,21 +65,39 @@ export async function loadAgenda(
   const visible = new Set(people.map((p) => p.id));
   const defaults = new Map(calendars.map((c) => [c.id, c.defaultPersonIds]));
   const overridden = overriddenOriginals(events);
-  const withPeople: AgendaEventInput[] = await Promise.all(
-    events.map(async (e) => ({
-      ...recurringWithOverrides(e, overridden),
-      id: e.id,
-      title: e.title,
-      people: effectivePeople(
-        (await listEventPeople(actor, e.id)).map((a) => ({
-          personId: a.personId,
-          role: a.role as 'attending' | 'responsible',
-        })),
-        e.calendarSourceId ? defaults.get(e.calendarSourceId) : undefined,
-        visible,
-      ).people,
-    })),
+  const hidden = hiddenOccurrenceChanges(events);
+  const shown = events.filter((e) => !hidden.has(e.id));
+  const annotations = new Map(
+    await Promise.all(
+      shown.map(
+        async (e) =>
+          [
+            e.id,
+            (await listEventPeople(actor, e.id)).map((a) => ({
+              personId: a.personId,
+              role: a.role as 'attending' | 'responsible',
+            })),
+          ] as const,
+      ),
+    ),
   );
+  const withPeople: AgendaEventInput[] = shown.map((e) => ({
+    ...recurringWithOverrides(e, overridden),
+    id: e.id,
+    title: e.title,
+    people: (isOccurrenceChange(e)
+      ? occurrenceChangePeople(
+          annotations.get(e.id) ?? [],
+          annotations.get(e.recurrenceParentId!) ?? [],
+          visible,
+        )
+      : effectivePeople(
+          annotations.get(e.id) ?? [],
+          e.calendarSourceId ? defaults.get(e.calendarSourceId) : undefined,
+          visible,
+        )
+    ).people,
+  }));
   return {
     today: todayInHomeZone(),
     from,

@@ -31,6 +31,8 @@ const EXACT: Record<string, string> = {
   'person.unlink_self': 'Unlinked from a person',
   'event.skip': 'One time of an event skipped',
   'event.put_back': 'A skipped time of an event put back',
+  'event.occurrence_change': 'One time of an event changed',
+  'event.occurrence_return': 'A changed time of an event put back to the usual',
   'event_person.set': 'Someone added to an event',
   'event_person.remove': 'Someone taken off an event',
   'context.confirm': 'Something to know confirmed as still true',

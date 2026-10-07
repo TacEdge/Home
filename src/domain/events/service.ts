@@ -1,6 +1,7 @@
 import 'server-only';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
+import type { DbOrTx } from '@/db/create';
 import { event, eventPerson, person } from '@/db/schema';
 import type { UserActor } from '@/trust/actor';
 import { visibleTo } from '@/trust/visibility';
@@ -12,10 +13,18 @@ import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import { assertFamilyWritesOpen } from '../common/guards';
 import { skipOccurrence } from '../engines/recurrence';
 import { isValidIsoDate, type IsoDate } from '@/lib/dates';
-import { isOccurrence } from './occurrences';
+import {
+  isOccurrence,
+  isOccurrenceChange,
+  isSkippedOccurrence,
+  occurrenceOf,
+  skippedChanges,
+} from './occurrences';
 import {
   createEventInput,
   eventPersonInput,
+  occurrenceChangeInput,
+  type OccurrenceChangeInput,
   timeColumns,
   updateEventInput,
   type CreateEventInput,
@@ -32,13 +41,24 @@ import {
 //
 // EventPerson annotations have no visibility of their own: they are as
 // visible as their event, and their audit rows are about the event.
+//
+// One occurrence of a repeating manual event can be changed on its own
+// (M4 contract §3.7, ADR 0007 §46): an override row pointing at its series,
+// written only by changeEventOccurrence and put back by
+// returnOccurrenceToSeries. It belongs to its series: the series' owner and
+// visibility, always; the series' people unless it has its own. The series
+// row itself is never changed by it.
 
 export type Event = typeof event.$inferSelect;
 export type EventPerson = typeof eventPerson.$inferSelect;
 type ReadOpts = { includeArchived?: boolean };
 
 const R = records(event, 'event');
-const audit = (name: string, row: Event, meta?: Record<string, string | boolean | string[]>) => ({
+const audit = (
+  name: string,
+  row: Event,
+  meta?: Record<string, string | boolean | string[] | null>,
+) => ({
   event: name,
   subjectType: 'event',
   subjectId: row.id,
@@ -48,6 +68,27 @@ const audit = (name: string, row: Event, meta?: Record<string, string | boolean 
 
 function refuseSynced(row: Event): void {
   if (row.source !== 'manual') throw new NotPermittedError('synced_event');
+}
+
+/** An occurrence change is changed through changeEventOccurrence, never as an event of its own. */
+function refuseOccurrenceChange(row: Event): void {
+  if (isOccurrenceChange(row)) throw new NotPermittedError('occurrence_change');
+}
+
+/** A series' manual occurrence changes, live or archived, locked in id order. */
+async function lockChanges(tx: DbOrTx, seriesId: string, live: boolean): Promise<Event[]> {
+  return tx
+    .select()
+    .from(event)
+    .where(
+      and(
+        eq(event.recurrenceParentId, seriesId),
+        eq(event.source, 'manual'),
+        live ? isNull(event.archivedAt) : undefined,
+      ),
+    )
+    .orderBy(asc(event.id))
+    .for('update');
 }
 
 export async function createEvent(
@@ -119,17 +160,52 @@ export async function updateEvent(
   return auditedWrite(actor, deps, async (tx) => {
     const current = await R.lock(tx, actor, id, 'exclude');
     refuseSynced(current);
+    refuseOccurrenceChange(current);
     const next = data.visibility ?? current.visibility;
+    // A series' occurrence changes, archived ones too, share its visibility
+    // (and owner), so they are checked and moved with it: one changed
+    // Wednesday can never stay household on a series made private.
+    const changes = await lockChanges(tx, current.id, false);
+    // Skipping a changed occurrence by an exdates patch is refused, before
+    // anything is written: an occurrence is never skipped and changed (§46).
+    if (data.exdates !== undefined) {
+      const prospective = { ...current, ...data, ...(time ? timeColumns(time) : {}) } as Event;
+      if (skippedChanges(prospective, data.exdates, changes).length > 0)
+        throw new NotPermittedError('occurrence_already_changed');
+    }
     if (next !== current.visibility) {
       if (current.createdBy !== actor.userId) throw new NotPermittedError('not_creator');
-      if (next === 'private') await assertNotReferencedByHousehold(tx, 'event', current.id);
-      else await checkAnnotatedPeople(tx, actor, current.id);
+      for (const target of [current, ...changes]) {
+        if (next === 'private') await assertNotReferencedByHousehold(tx, 'event', target.id);
+        else await checkAnnotatedPeople(tx, actor, target.id);
+      }
     }
     const row = await R.update(tx, actor, current.id, 'exclude', {
       ...data,
       ...(time ? timeColumns(time) : {}),
     });
-    return { result: row, audit: audit('event.update', row, { fields }) };
+    const audits = [audit('event.update', row, { fields })];
+    for (const c of changes) {
+      // A whole-series edit keeps each change whose original occurrence the
+      // rule still reaches; one it no longer reaches is archived with this
+      // edit (contract §3.7), never re-keyed onto another occurrence.
+      const unreached = c.archivedAt === null && occurrenceOf(row, c.recurrenceOriginal!) === null;
+      if (!unreached && c.visibility === row.visibility) continue;
+      const [moved] = await tx
+        .update(event)
+        .set({
+          visibility: row.visibility,
+          ...(unreached ? { archivedAt: sql`now()` } : {}),
+          updatedAt: sql`now()`,
+        })
+        .where(eq(event.id, c.id))
+        .returning();
+      if (c.visibility !== row.visibility)
+        audits.push(audit('event.update', moved!, { fields: ['visibility'], seriesId: row.id }));
+      if (unreached)
+        audits.push(audit('event.archive', moved!, { seriesId: row.id, reason: 'series_changed' }));
+    }
+    return { result: row, audit: audits };
   });
 }
 
@@ -161,9 +237,30 @@ export async function archiveEvent(actor: UserActor, id: string, deps: Deps = {}
   });
 }
 
+/**
+ * Restores an archived event. An occurrence change comes back only into a
+ * live series whose rule still reaches its occurrence, and never beside
+ * another live change of the same occurrence (refused calmly here, not left
+ * to the unique index). The series is locked before the change, as in
+ * changeEventOccurrence, so the two cannot cross.
+ */
 export async function restoreEvent(actor: UserActor, id: string, deps: Deps = {}): Promise<Event> {
   assertCanWrite(actor);
   return auditedWrite(actor, deps, async (tx) => {
+    const seen = await R.get(tx, actor, id, 'include');
+    if (isOccurrenceChange(seen)) {
+      const series = seen.recurrenceParentId
+        ? await R.lock(tx, actor, seen.recurrenceParentId, 'include')
+        : null;
+      if (!series || series.archivedAt !== null) throw new NotPermittedError('series_archived');
+      const occurrence = occurrenceOf(series, seen.recurrenceOriginal!);
+      if (occurrence === null) throw new NotPermittedError('not_an_occurrence');
+      // Skipped since it went back: put it back first (§46).
+      if (isSkippedOccurrence(series, occurrence))
+        throw new NotPermittedError('occurrence_skipped');
+      const live = await liveChange(tx, series.id, seen.recurrenceOriginal!);
+      if (live && live.id !== seen.id) throw new NotPermittedError('occurrence_already_changed');
+    }
     const current = await R.lock(tx, actor, id, 'include');
     refuseSynced(current);
     if (current.archivedAt === null) throw new NotPermittedError('not_archived');
@@ -172,9 +269,155 @@ export async function restoreEvent(actor: UserActor, id: string, deps: Deps = {}
   });
 }
 
+/** The live change of one occurrence of a series, locked, if there is one. */
+async function liveChange(tx: DbOrTx, seriesId: string, original: string): Promise<Event | null> {
+  const [row] = await tx
+    .select()
+    .from(event)
+    .where(
+      and(
+        eq(event.recurrenceParentId, seriesId),
+        eq(event.recurrenceOriginal, original),
+        eq(event.source, 'manual'),
+        isNull(event.archivedAt),
+      ),
+    )
+    .for('update')
+    .limit(1);
+  return row ?? null;
+}
+
 /**
- * "Skip this one" (ADR 0006 §37, §42): one more exdate, by the occurrence's
- * own date. Only a repeating event can be skipped, and only on a date its
+ * Changes one occurrence of a repeating manual event, leaving the series as
+ * it is (M4 contract §3.7, ADR 0007 §46). `original` names the occurrence as
+ * the series has it (occurrenceIdentity: a date, or a UTC instant to the
+ * second); it is proved against the series' current rule by the recurrence
+ * engine, never trusted from a form. The first change of an occurrence
+ * makes its override row, starting from that occurrence's own details and
+ * time; a later one updates the same row. The series is locked first, so
+ * two changes of one occurrence queue: the second updates what the first
+ * made. Who it is for and its notes are not copied (who.ts).
+ */
+export async function changeEventOccurrence(
+  actor: UserActor,
+  seriesId: string,
+  original: string,
+  patch: OccurrenceChangeInput,
+  deps: Deps = {},
+): Promise<Event> {
+  assertCanWrite(actor);
+  const parsed = occurrenceChangeInput.parse(patch);
+  const { time, ...data } = parsed;
+  const fields = Object.keys(parsed).sort();
+  return auditedWrite(actor, deps, async (tx) => {
+    const series = await R.lock(tx, actor, seriesId, 'exclude');
+    refuseSynced(series);
+    refuseOccurrenceChange(series);
+    if (!series.rrule) throw new NotPermittedError('not_recurring');
+    const occurrence = typeof original === 'string' ? occurrenceOf(series, original) : null;
+    if (!occurrence) throw new NotPermittedError('not_an_occurrence');
+    if (isSkippedOccurrence(series, occurrence)) throw new NotPermittedError('occurrence_skipped');
+    const meta = { seriesId: series.id, occurrence: original, fields };
+    const existing = await liveChange(tx, series.id, original);
+    if (existing) {
+      const row = await R.update(tx, actor, existing.id, 'exclude', {
+        ...data,
+        ...(time ? timeColumns(time) : {}),
+      });
+      return {
+        result: row,
+        audit: audit('event.occurrence_change', row, { ...meta, created: false }),
+      };
+    }
+    const own = occurrence.allDay
+      ? timeColumns({ allDay: true, startDate: occurrence.startDate, endDate: occurrence.endDate })
+      : timeColumns({
+          allDay: false,
+          startsAt: occurrence.startsAt,
+          endsAt: occurrence.endsAt,
+          timeZone: occurrence.timeZone,
+        });
+    const [row] = await tx
+      .insert(event)
+      .values({
+        title: series.title,
+        description: series.description,
+        location: series.location,
+        kind: series.kind,
+        domain: series.domain,
+        ...own,
+        ...data,
+        ...(time ? timeColumns(time) : {}),
+        rrule: null,
+        exdates: null,
+        source: 'manual',
+        recurrenceParentId: series.id,
+        recurrenceOriginal: original,
+        // It belongs to its series: the same owner and visibility, so it is
+        // seen by exactly who sees the series. The audit row says who changed it.
+        visibility: series.visibility,
+        createdBy: series.createdBy,
+        ...provenanceOf(deps),
+      })
+      .returning();
+    if (!row) throw new Error('occurrence change insert returned no row');
+    return {
+      result: row,
+      audit: audit('event.occurrence_change', row, { ...meta, created: true }),
+    };
+  });
+}
+
+/**
+ * "Back to the series" (M4 contract §3.7): the occurrence's live change is
+ * archived, never deleted, so its own people and notes stay with it; the
+ * series is untouched, and its regular occurrence shows again. There must
+ * be a live change of that occurrence to put back.
+ */
+export async function returnOccurrenceToSeries(
+  actor: UserActor,
+  seriesId: string,
+  original: string,
+  deps: Deps = {},
+): Promise<Event> {
+  assertCanWrite(actor);
+  return auditedWrite(actor, deps, async (tx) => {
+    const series = await R.lock(tx, actor, seriesId, 'exclude');
+    refuseSynced(series);
+    const live = typeof original === 'string' ? await liveChange(tx, series.id, original) : null;
+    if (!live) throw new NotPermittedError('not_changed');
+    const row = await R.update(tx, actor, live.id, 'exclude', { archivedAt: sql`now()` });
+    return {
+      result: row,
+      audit: audit('event.occurrence_return', row, { seriesId: series.id, occurrence: original }),
+    };
+  });
+}
+
+/** A series' occurrence changes the actor can see, live and archived, for its page (Package 8b). */
+export async function listOccurrenceChanges(
+  actor: UserActor,
+  seriesId: string,
+  deps: Deps = {},
+): Promise<Event[]> {
+  const db = deps.db ?? getDb();
+  const series = await getEvent(actor, seriesId, { includeArchived: true }, { db });
+  return db
+    .select()
+    .from(event)
+    .where(
+      and(
+        eq(event.recurrenceParentId, series.id),
+        eq(event.source, 'manual'),
+        R.readable(actor, 'include'),
+      ),
+    )
+    .orderBy(asc(event.recurrenceOriginal), asc(event.archivedAt), asc(event.id));
+}
+
+/**
+ * "Skip this one" (ADR 0006 §37, §42; ADR 0007 §46): one more exdate, by the
+ * occurrence's own date, refused while that occurrence has a live change. Only a repeating event can be skipped, and only on a date its
  * rule actually puts it on, judged by the engine here and never trusted
  * from a form; so a one-off event cannot be hidden by a crafted post.
  */
@@ -191,9 +434,13 @@ export async function skipEventOccurrence(
     if (!current.rrule) throw new NotPermittedError('not_recurring');
     if (!isValidIsoDate(date) || !isOccurrence(current, date))
       throw new NotPermittedError('not_an_occurrence');
-    const row = await R.update(tx, actor, current.id, 'exclude', {
-      exdates: skipOccurrence(current.exdates, date),
-    });
+    // A changed occurrence is not skipped as well: back to the series first,
+    // then skip it (ADR 0007 §46). The date is the series' own, as is each
+    // change's original, so a change is found whatever day home calls it.
+    const exdates = skipOccurrence(current.exdates, date);
+    if (skippedChanges(current, exdates, await lockChanges(tx, current.id, true)).length > 0)
+      throw new NotPermittedError('occurrence_already_changed');
+    const row = await R.update(tx, actor, current.id, 'exclude', { exdates });
     return { result: row, audit: audit('event.skip', row, { date }) };
   });
 }

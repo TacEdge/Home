@@ -483,6 +483,10 @@ function writeCalls(own: Adult): Record<string, Call> {
     'events.skipEventOccurrence': (a) => events.skipEventOccurrence(a, c.event, '2026-10-14', d),
     'events.putBackEventOccurrence': (a) =>
       events.putBackEventOccurrence(a, c.event, '2026-10-14', d),
+    'events.changeEventOccurrence': (a) =>
+      events.changeEventOccurrence(a, c.event, '2026-10-14', { title: 'x' }, d),
+    'events.returnOccurrenceToSeries': (a) =>
+      events.returnOccurrenceToSeries(a, c.event, '2026-10-14', d),
     'events.setEventPeople': (a) =>
       events.setEventPeople(a, c.event, [{ personId: c.person, role: 'attending' }], d),
     'events.createEventWithPeople': (a) =>
