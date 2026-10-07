@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { AgendaItemRow } from '@/app/_agenda/agenda-list';
 import { loadAgenda, todayInHomeZone } from '@/app/_agenda/load';
+import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
+import { hasStaleCalendar } from '@/app/_calendar/stale';
 import { listCaptures } from '@/domain/captures/service';
 import { listPeople } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
@@ -22,16 +24,19 @@ export const dynamic = 'force-dynamic';
 // something waits; "Which one is you? ›" only for an unlinked adult while
 // the gate allows linking. No meaning, no insights, no weather: that is
 // M5. A quiet day (nothing on, nothing due) says so and nothing more;
-// captures waiting don't make a day busy.
+// captures waiting don't make a day busy. Synced calendar events (M4
+// Package 6) arrive through the same loader and look the same; a calendar
+// older than fifteen minutes is refreshed after the page has rendered.
 export default async function TodayPage() {
   const actor = await requireActor();
   const today = todayInHomeZone();
-  const [agenda, tasks, projects, captures, people] = await Promise.all([
+  const [agenda, tasks, projects, captures, people, stale] = await Promise.all([
     loadAgenda(actor, today, 1),
     listTasks(actor, { status: 'open' }),
     listProjects(actor),
     listCaptures(actor),
     realDataGateOpen() ? listPeople(actor) : Promise.resolve(null),
+    hasStaleCalendar(actor),
   ]);
   // Tasks are listed below in their own words; the agenda's due-today rows
   // would say the same thing twice.
@@ -48,6 +53,7 @@ export default async function TodayPage() {
 
   return (
     <Page title={todayHeadline(today)}>
+      {stale ? <RefreshOnUse /> : null}
       {quiet ? (
         <EmptyState title="Nothing on today.">
           <ForwardLink />

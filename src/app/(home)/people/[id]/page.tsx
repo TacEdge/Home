@@ -11,6 +11,8 @@ import { listNotes } from '@/domain/notes/service';
 import { getPerson } from '@/domain/people/service';
 import { AgendaDays } from '@/app/_agenda/agenda-list';
 import { loadAgenda, todayInHomeZone } from '@/app/_agenda/load';
+import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
+import { hasStaleCalendar } from '@/app/_calendar/stale';
 import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { ItemRow, List } from '@/ui/list';
@@ -41,7 +43,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const today = todayInHomeZone();
   const age = ageOn(person.dateOfBirth, today);
   // Coming up: the same agenda engine as Forward, for this person (§3.4).
-  const loaded = await loadAgenda(actor, today, 30);
+  const [loaded, stale] = await Promise.all([
+    loadAgenda(actor, today, 30),
+    hasStaleCalendar(actor),
+  ]);
   const coming = forPerson(loaded.days, person.id);
   const you = person.userId === actor.userId;
   const linked = person.userId !== null;
@@ -68,6 +73,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         </Quiet>
       }
     >
+      {stale ? <RefreshOnUse /> : null}
       {person.stageNote ? (
         <>
           <Label>Right now</Label>

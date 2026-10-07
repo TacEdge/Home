@@ -118,7 +118,8 @@ const calm = (m: string) =>
     ? 'That’s before the first one.'
     : `${m[0]!.toUpperCase()}${m.slice(1)}.`;
 
-function readPeople(form: FormData, peopleIds: readonly string[]): EventPersonChoice[] {
+/** The people ticked, among those the form offered. */
+export function readPeople(form: FormData, peopleIds: readonly string[]): EventPersonChoice[] {
   const out: EventPersonChoice[] = [];
   for (const id of peopleIds) {
     if (form.get(`attending_${id}`) === 'on') out.push({ personId: id, role: 'attending' });

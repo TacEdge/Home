@@ -4,13 +4,21 @@ import { todayInHomeZone } from '@/app/_agenda/load';
 import { ActionForm } from '@/app/_forms/action-form';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotesSection } from '@/app/_notes/notes-section';
+import { getCalendar } from '@/domain/calendar/service';
 import { NotFoundError } from '@/domain/common/errors';
 import { expandEvent, readRRule, startDateOf } from '@/domain/engines/recurrence';
-import { recurringOf, startOf, upcomingSkips } from '@/domain/events/occurrences';
-import { getEvent, listEventPeople } from '@/domain/events/service';
+import {
+  overriddenOriginals,
+  recurringWithOverrides,
+  startOf,
+  upcomingSkips,
+} from '@/domain/events/occurrences';
+import { getEvent, listEventPeople, listEvents } from '@/domain/events/service';
+import { effectivePeople } from '@/domain/events/who';
 import { listNotes } from '@/domain/notes/service';
 import { listPeople } from '@/domain/people/service';
 import { addDays, clockOf as clock, longDate } from '@/lib/dates';
+import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { Button } from '@/ui/button';
 import { ItemRow, List } from '@/ui/list';
@@ -22,7 +30,14 @@ import {
   restoreEventAction,
   skipOccurrenceAction,
 } from '../actions';
-import { KIND_LABEL, repeatLabel, whenLabel } from '../copy';
+import {
+  KIND_LABEL,
+  ownedElsewhereLine,
+  repeatLabel,
+  REPEATS_AS_IN_CALENDAR,
+  sourceLine,
+  whenLabel,
+} from '../copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +46,11 @@ const UPCOMING_MAX = 6;
 
 // An event (M3 contract §3.6): when, how it repeats, who, where; the next
 // few times it happens with "Skip this one"; upcoming skipped dates with "Put back";
-// Edit, Archive and Restore. A synced event is read-only, and says so.
+// Edit, Archive and Restore. A synced event (M4 contract §5.2) is the same
+// page with one quiet line saying which calendar it comes from and how
+// fresh that is; its details are the calendar's to change, while who is
+// going and the notes stay HOME's. Nothing here names a provider, an
+// address, an id or a status code.
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
   const { id } = await params;
@@ -39,35 +58,51 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [annotations, people, notes] = await Promise.all([
+  const synced = event.source !== 'manual';
+  const [annotations, people, notes, calendar, siblings] = await Promise.all([
     listEventPeople(actor, event.id, { includeArchived: true }),
     listPeople(actor),
     listNotes(actor, { subject: { type: 'event', id: event.id }, includeArchived: true }),
+    // The calendar as this adult may see it: its HOME name and freshness, nothing of its connection.
+    synced && event.calendarSourceId
+      ? getCalendar(actor, event.calendarSourceId, { includeArchived: true }).catch(() => null)
+      : Promise.resolve(null),
+    // A synced series' live overrides, so its next few times skip what they replace.
+    synced && event.rrule ? listEvents(actor) : Promise.resolve([]),
   ]);
   const byId = new Map(people.map((p) => [p.id, p]));
+  const who = effectivePeople(
+    annotations.map((a) => ({
+      personId: a.personId,
+      role: a.role as 'attending' | 'responsible',
+    })),
+    calendar?.defaultPersonIds,
+    new Set(people.map((p) => p.id)),
+  );
   const names = (role: string) =>
-    annotations
+    who.people
       .filter((a) => a.role === role)
       .map((a) => byId.get(a.personId))
       .filter((p): p is NonNullable<typeof p> => Boolean(p));
   const start = startOf(event);
   const recurrence = readRRule(event.rrule, start);
-  const repeats = repeatLabel(recurrence, startDateOf(start));
+  const repeats =
+    synced && recurrence.preset === 'custom'
+      ? REPEATS_AS_IN_CALENDAR
+      : repeatLabel(recurrence, startDateOf(start));
   const archived = event.archivedAt !== null;
-  const synced = event.source !== 'manual';
   const editable = !archived && !synced;
   const today = todayInHomeZone();
+  const recurring = recurringWithOverrides(event, overriddenOriginals([event, ...siblings]));
   const upcoming = event.rrule
-    ? expandEvent(recurringOf(event), today, addDays(today, UPCOMING_DAYS - 1)).slice(
-        0,
-        UPCOMING_MAX,
-      )
+    ? expandEvent(recurring, today, addDays(today, UPCOMING_DAYS - 1)).slice(0, UPCOMING_MAX)
     : [];
   // Skipped dates still ahead that the rule would put it on: a past skip,
   // or one the rule no longer reaches, is not something to put back.
-  const skipped = upcomingSkips(event, today);
+  const skipped = synced ? [] : upcomingSkips(event, today);
   const going = names('attending');
   const responsible = names('responsible');
+  const now = new Date();
 
   return (
     <Page
@@ -87,7 +122,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     >
       {synced ? (
         <div className="mt-4">
-          <Quiet>This comes from a calendar, so change it there. HOME shows it as it is.</Quiet>
+          <Quiet>
+            {calendar ? sourceLine(calendar, now, env.HOME_TIMEZONE) : 'From a calendar'}
+          </Quiet>
         </div>
       ) : null}
       {event.location ? (
@@ -103,16 +140,19 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </>
       ) : null}
 
-      {going.length > 0 || responsible.length > 0 ? (
+      {going.length > 0 || responsible.length > 0 || (synced && !archived) ? (
         <>
           <Label>Who</Label>
+          {going.length > 0 || responsible.length > 0 ? null : (
+            <Quiet>Nobody in particular yet.</Quiet>
+          )}
           <List>
             {going.map((p) => (
               <ItemRow
                 key={`a-${p.id}`}
                 href={`/people/${p.id}`}
                 title={<PersonName name={p.name} colour={p.colour as PersonColour | null} />}
-                detail="Going"
+                detail={who.derived ? 'Usually going' : 'Going'}
               />
             ))}
             {responsible.map((p) => (
@@ -124,6 +164,16 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               />
             ))}
           </List>
+          {synced && !archived ? (
+            <p className="mt-3">
+              <Link
+                href={`/events/${event.id}/people`}
+                className="text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4"
+              >
+                Change who’s going
+              </Link>
+            </p>
+          ) : null}
         </>
       ) : null}
 
@@ -198,7 +248,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
       <Label>This event</Label>
       {synced ? (
-        <Quiet>Read-only in HOME.</Quiet>
+        <Quiet>
+          {calendar
+            ? ownedElsewhereLine(calendar.name)
+            : 'This comes from a calendar, so change those details there.'}
+        </Quiet>
       ) : archived ? (
         <ConfirmAction
           action={restoreEventAction}

@@ -10,12 +10,13 @@ import {
   getEvent,
   putBackEventOccurrence,
   restoreEvent,
+  setEventPeople,
   skipEventOccurrence,
 } from '@/domain/events/service';
 import type { CreateEventInput, UpdateEventInput } from '@/domain/events/schema';
 import { listPeople } from '@/domain/people/service';
 import { env } from '@/lib/env';
-import { readEventForm } from './event-form-data';
+import { readEventForm, readPeople } from './event-form-data';
 
 // Event server actions (M3 contract §3.6, §4.1). The actor comes from the
 // session inside formAction; the people a form may name are the people the
@@ -88,4 +89,31 @@ export async function putBackOccurrenceAction(_: FormState, form: FormData): Pro
     await putBackEventOccurrence(actor, id, requiredTextOf(form, 'date').trim());
     redirect(`/events/${id}`);
   });
+}
+
+/**
+ * Who's going and who's responsible, on their own (M4 Package 6): the one
+ * thing about a synced event HOME owns besides its notes. The same people
+ * service as an edit, so the same rules and audit rows.
+ */
+export async function setEventPeopleAction(
+  id: string,
+  _: FormState,
+  form: FormData,
+): Promise<FormState> {
+  return formAction(
+    async (actor) => {
+      const people = await listPeople(actor);
+      await setEventPeople(
+        actor,
+        id,
+        readPeople(
+          form,
+          people.map((p) => p.id),
+        ),
+      );
+      redirect(`/events/${id}`);
+    },
+    { form },
+  );
 }

@@ -78,3 +78,59 @@ export async function seedCalendar(opts: {
     return src.rows[0].id as string;
   });
 }
+
+/**
+ * A synced event written straight into the database for the sweeps (M4
+ * Package 6): one of a seeded calendar's mirrored events, as the sync would
+ * have written it, so the agenda and event pages have a synced row to show
+ * without any feed. Synthetic throughout; idempotent by its UID.
+ */
+export async function seedSyncedEvent(opts: {
+  calendarId: string;
+  owner: 'fixture-sam' | 'fixture-alex';
+  visibility: 'household' | 'private';
+  uid: string;
+  title: string;
+  /** An all-day event on this date (one day), or a timed one at these instants. */
+  date?: string;
+  startsAt?: string;
+  endsAt?: string;
+  kind?: string;
+  archived?: boolean;
+}): Promise<string> {
+  return withDb(async (pool) => {
+    const existing = await pool.query(
+      `select id from event where calendar_source_id = $1 and external_uid = $2 and recurrence_original is null`,
+      [opts.calendarId, opts.uid],
+    );
+    if (existing.rows[0]) return existing.rows[0].id as string;
+    const allDay = opts.date !== undefined;
+    const row = await pool.query(
+      `insert into event (created_by, created_via, visibility, title, kind, source, calendar_source_id, external_uid,
+         all_day, start_date, end_date, starts_at, ends_at, time_zone, archived_at)
+       values ($1, 'sync', $2, $3, $4, 'synced', $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+      [
+        opts.owner,
+        opts.visibility,
+        opts.title,
+        opts.kind ?? 'activity',
+        opts.calendarId,
+        opts.uid,
+        allDay,
+        allDay ? opts.date : null,
+        allDay ? nextDay(opts.date!) : null,
+        allDay ? null : opts.startsAt,
+        allDay ? null : opts.endsAt,
+        allDay ? null : 'Pacific/Auckland',
+        opts.archived ? new Date() : null,
+      ],
+    );
+    return row.rows[0].id as string;
+  });
+}
+
+const nextDay = (date: string) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};

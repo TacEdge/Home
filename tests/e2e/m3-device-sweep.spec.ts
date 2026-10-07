@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
-import { seedCalendar } from './calendar-feeds';
+import { seedCalendar, seedSyncedEvent } from './calendar-feeds';
 import { withDb } from './helpers';
 
 // M3 acceptance (contract §4.5, §10 items 10 and 11): the accessibility and
@@ -45,9 +45,36 @@ async function screens(): Promise<string[]> {
     disconnected: true,
     fingerprintTag: 'sweepdisconnected',
   });
+  // M4 Package 6: a synced event with no people and no detail (the one-line
+  // row) on Today and Forward, and a timed one, with their own pages.
+  const { d, f } = (
+    await q(
+      `select to_char(now() at time zone 'Pacific/Auckland', 'YYYY-MM-DD') as d,
+              to_char(now() at time zone 'Pacific/Auckland' + interval '2 days', 'YYYY-MM-DD') as f`,
+    )
+  )[0] as { d: string; f: string };
+  const oneLine = await seedSyncedEvent({
+    calendarId: calendar,
+    owner: 'fixture-sam',
+    visibility: 'household',
+    uid: 'sweep-one-line@example.test',
+    title: 'Bins out',
+    date: d,
+  });
+  await seedSyncedEvent({
+    calendarId: calendar,
+    owner: 'fixture-sam',
+    visibility: 'household',
+    uid: 'sweep-timed@example.test',
+    title: 'Sweep clinic',
+    startsAt: `${f}T10:00:00+13:00`,
+    endsAt: `${f}T11:00:00+13:00`,
+  });
   return [
     '/today',
     '/forward',
+    `/events/${oneLine}`,
+    `/events/${oneLine}/people`,
     '/people',
     '/people/new',
     `/people/${person}`,
@@ -131,6 +158,22 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       await expectNoHorizontalScroll(page, `${name} ${path}`);
       await expectAccessible(page, `${name} ${path}`);
       small.push(...(await smallTargets(page)).map((s) => `${path}: ${s}`));
+    }
+    // Every event row on Today and Forward, the one-line synced row among
+    // them, is a 44px target (M4 Package 6).
+    for (const path of ['/today', '/forward']) {
+      await page.goto(path);
+      const rows = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('main ul li a')].map((a) => ({
+          text: (a.textContent ?? '').trim().slice(0, 30),
+          height: a.getBoundingClientRect().height,
+        })),
+      );
+      expect(rows.length, `${name} ${path} has event rows`).toBeGreaterThan(0);
+      expect(
+        rows.filter((r) => r.height < 44).map((r) => `${path}: ${r.text} ${r.height}px`),
+        `${name}: event rows under 44px`,
+      ).toEqual([]);
     }
     // The skip link, where it is seen: focused.
     await page.goto('/today');
