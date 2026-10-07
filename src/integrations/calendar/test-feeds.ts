@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { testFeedEnv } from '@/lib/env';
 import { SafeFetchError, type SafeFetchErrorCode } from '../net/safe-fetch';
 import type { FeedFetcher } from './ics/provider';
@@ -55,7 +55,7 @@ export function testFeedFetcher(dir: string): FeedFetcher {
   return async (address) => {
     const token = TOKEN.exec(new URL(address).pathname)?.[1];
     if (!token) throw new SafeFetchError('address_rejected');
-    const file = (ext: string) => join(dir, `${token}.${ext}`);
+    const file = (ext: string) => `${dir}/${token}.${ext}`;
     for (
       let waited = 0;
       (await exists(file('hold'))) && waited < HOLD_MAX_MS;
