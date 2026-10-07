@@ -62,7 +62,7 @@ export const dynamic = 'force-dynamic';
 const UPCOMING_DAYS = 56;
 const UPCOMING_MAX = 6;
 
-const link = 'text-ink-2 inline-flex min-h-11 items-center underline underline-offset-4';
+const link = 'text-ink-2 inline-flex min-h-11 min-w-11 items-center underline underline-offset-4';
 
 // An event (M3 contract §3.6): when, how it repeats, who, where; the next
 // few times it happens, each with "Change this one" and "Skip this one"
