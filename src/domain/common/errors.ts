@@ -28,8 +28,8 @@ export type NotPermittedCode =
   | 'not_an_occurrence' // skip names a date the event's rule does not put it on
   | 'not_skipped' // put back names a date that was not skipped
   | 'occurrence_change' // a changed occurrence is changed through its series' occurrence, not as an event of its own (M4 §3.7)
-  | 'occurrence_skipped' // a skipped occurrence is put back before it is changed
-  | 'occurrence_already_changed' // an occurrence has one live change at a time
+  | 'occurrence_skipped' // a skipped occurrence is put back before it is changed or a change of it restored
+  | 'occurrence_already_changed' // an occurrence has one live change at a time, and a changed one is not skipped
   | 'not_changed' // back to the series names an occurrence that has no live change
   | 'series_archived' // a change comes back only into a live series
   | 'not_owner' // only a calendar's owner may change, disconnect or reconnect it (M4 §3.2)

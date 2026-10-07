@@ -13,7 +13,13 @@ import { auditedWrite, provenanceOf, type Deps } from '../common/write';
 import { assertFamilyWritesOpen } from '../common/guards';
 import { skipOccurrence } from '../engines/recurrence';
 import { isValidIsoDate, type IsoDate } from '@/lib/dates';
-import { isOccurrence, isOccurrenceChange, isSkippedOccurrence, occurrenceOf } from './occurrences';
+import {
+  isOccurrence,
+  isOccurrenceChange,
+  isSkippedOccurrence,
+  occurrenceOf,
+  skippedChanges,
+} from './occurrences';
 import {
   createEventInput,
   eventPersonInput,
@@ -160,6 +166,13 @@ export async function updateEvent(
     // (and owner), so they are checked and moved with it: one changed
     // Wednesday can never stay household on a series made private.
     const changes = await lockChanges(tx, current.id, false);
+    // Skipping a changed occurrence by an exdates patch is refused, before
+    // anything is written: an occurrence is never skipped and changed (§46).
+    if (data.exdates !== undefined) {
+      const prospective = { ...current, ...data, ...(time ? timeColumns(time) : {}) } as Event;
+      if (skippedChanges(prospective, data.exdates, changes).length > 0)
+        throw new NotPermittedError('occurrence_already_changed');
+    }
     if (next !== current.visibility) {
       if (current.createdBy !== actor.userId) throw new NotPermittedError('not_creator');
       for (const target of [current, ...changes]) {
@@ -240,8 +253,11 @@ export async function restoreEvent(actor: UserActor, id: string, deps: Deps = {}
         ? await R.lock(tx, actor, seen.recurrenceParentId, 'include')
         : null;
       if (!series || series.archivedAt !== null) throw new NotPermittedError('series_archived');
-      if (occurrenceOf(series, seen.recurrenceOriginal!) === null)
-        throw new NotPermittedError('not_an_occurrence');
+      const occurrence = occurrenceOf(series, seen.recurrenceOriginal!);
+      if (occurrence === null) throw new NotPermittedError('not_an_occurrence');
+      // Skipped since it went back: put it back first (§46).
+      if (isSkippedOccurrence(series, occurrence))
+        throw new NotPermittedError('occurrence_skipped');
       const live = await liveChange(tx, series.id, seen.recurrenceOriginal!);
       if (live && live.id !== seen.id) throw new NotPermittedError('occurrence_already_changed');
     }
@@ -400,8 +416,8 @@ export async function listOccurrenceChanges(
 }
 
 /**
- * "Skip this one" (ADR 0006 §37, §42): one more exdate, by the occurrence's
- * own date. Only a repeating event can be skipped, and only on a date its
+ * "Skip this one" (ADR 0006 §37, §42; ADR 0007 §46): one more exdate, by the
+ * occurrence's own date, refused while that occurrence has a live change. Only a repeating event can be skipped, and only on a date its
  * rule actually puts it on, judged by the engine here and never trusted
  * from a form; so a one-off event cannot be hidden by a crafted post.
  */
@@ -418,9 +434,13 @@ export async function skipEventOccurrence(
     if (!current.rrule) throw new NotPermittedError('not_recurring');
     if (!isValidIsoDate(date) || !isOccurrence(current, date))
       throw new NotPermittedError('not_an_occurrence');
-    const row = await R.update(tx, actor, current.id, 'exclude', {
-      exdates: skipOccurrence(current.exdates, date),
-    });
+    // A changed occurrence is not skipped as well: back to the series first,
+    // then skip it (ADR 0007 §46). The date is the series' own, as is each
+    // change's original, so a change is found whatever day home calls it.
+    const exdates = skipOccurrence(current.exdates, date);
+    if (skippedChanges(current, exdates, await lockChanges(tx, current.id, true)).length > 0)
+      throw new NotPermittedError('occurrence_already_changed');
+    const row = await R.update(tx, actor, current.id, 'exclude', { exdates });
     return { result: row, audit: audit('event.skip', row, { date }) };
   });
 }

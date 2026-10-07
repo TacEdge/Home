@@ -11,6 +11,7 @@ import {
   overriddenOriginals,
   recurringOf,
   recurringWithOverrides,
+  skippedChanges,
 } from '@/domain/events/occurrences';
 import type { Event } from '@/domain/events/service';
 import { occurrenceChangePeople } from '@/domain/events/who';
@@ -370,5 +371,67 @@ describe('the regular week ignores one-off changes', () => {
         title: 'swim',
       },
     ]);
+  });
+});
+
+describe('skipped or changed, never both (skippedChanges)', () => {
+  // Which live changes a set of exdates would skip, in the SERIES' terms:
+  // a date skips the occurrence starting that day in the series' zone.
+  const ids = (series: Event, exdates: string[] | null, changes: Event[]) =>
+    skippedChanges(series, exdates, changes);
+
+  it('a home-zone series: by its date or its instant, and nothing else', () => {
+    const c = change('c', swim, WED_21, '2026-10-21T03:00:00Z');
+    expect(ids(swim, ['2026-10-21'], [c])).toEqual(['c']);
+    expect(ids(swim, [WED_21], [c])).toEqual(['c']);
+    expect(ids(swim, ['2026-10-28'], [c])).toEqual([]);
+    expect(ids(swim, null, [c])).toEqual([]);
+  });
+
+  it('a UTC series: the series’ date, not the home date it shows on', () => {
+    const s = timed('utc', '2026-10-19T20:00:00Z', 'UTC', 'FREQ=WEEKLY;BYDAY=MO');
+    const c = change('c', s, '2026-10-26T20:00:00Z', '2026-10-26T21:00:00Z'); // Tue 27 at home
+    expect(ids(s, ['2026-10-26'], [c])).toEqual(['c']);
+    expect(ids(s, ['2026-10-27'], [c])).toEqual([]);
+  });
+
+  it('a London series whose occurrence is a day later at home', () => {
+    const s = timed('ldn', '2026-10-20T21:00:00Z', 'Europe/London', 'FREQ=WEEKLY;BYDAY=TU');
+    const c = change('c', s, '2026-10-27T22:00:00Z', '2026-10-27T23:00:00Z');
+    expect(ids(s, ['2026-10-27'], [c])).toEqual(['c']); // Tuesday in London
+    expect(ids(s, ['2026-10-28'], [c])).toEqual([]); // Wednesday at home
+  });
+
+  it('NZ DST: the skipped hour (spring-forward) and the repeated hour (fall-back)', () => {
+    const gap = timed('gap', '2026-09-19T14:30:00Z', NZ, 'FREQ=WEEKLY;BYDAY=SU');
+    const [gapId] = identities(gap, '2026-09-27', '2026-09-27');
+    const g = change('g', gap, gapId!, '2026-09-27T00:00:00Z');
+    expect(ids(gap, ['2026-09-27'], [g])).toEqual(['g']);
+    expect(ids(gap, ['2026-09-20'], [g])).toEqual([]);
+    const overlap = timed('ov', '2027-03-27T13:30:00Z', NZ, 'FREQ=WEEKLY;BYDAY=SU');
+    const [ovId] = identities(overlap, '2027-04-04', '2027-04-04');
+    const o = change('o', overlap, ovId!, '2027-04-04T00:00:00Z');
+    expect(ids(overlap, ['2027-04-04'], [o])).toEqual(['o']);
+    expect(ids(overlap, [ovId!], [o])).toEqual(['o']);
+  });
+
+  it('an all-day series: by its date', () => {
+    const bins = allDay('bins', '2026-10-13', '2026-10-14', 'FREQ=WEEKLY');
+    const c = change('c', bins, '2026-10-20', '2026-10-19T19:00:00Z');
+    expect(ids(bins, ['2026-10-20'], [c])).toEqual(['c']);
+    expect(ids(bins, ['2026-10-27'], [c])).toEqual([]);
+  });
+
+  it('several live changes: each found on its own date; archived or unreached ones never', () => {
+    const a = change('a', swim, WED_21, '2026-10-21T03:00:00Z');
+    const b = change('b', swim, '2026-10-28T02:30:00Z', '2026-10-29T02:30:00Z');
+    const gone = change('gone', swim, '2026-11-04T02:30:00Z', '2026-11-04T03:00:00Z', {
+      archivedAt: new Date(),
+    });
+    const stray = change('stray', swim, '2026-11-05T02:30:00Z', '2026-11-05T03:00:00Z');
+    const all = [a, b, gone, stray];
+    expect(ids(swim, ['2026-10-28'], all)).toEqual(['b']);
+    expect(ids(swim, ['2026-10-21', '2026-10-28'], all)).toEqual(['a', 'b']);
+    expect(ids(swim, ['2026-11-04', '2026-11-05', '2026-11-11'], all)).toEqual([]);
   });
 });

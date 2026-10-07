@@ -169,6 +169,30 @@ export function isSkippedOccurrence(series: Event, o: Occurrence): boolean {
 }
 
 /**
+ * The live changes a series would skip with these exdates, judged in the
+ * series' own terms (ADR 0007 §46): each change's original occurrence is
+ * found by the current rule and checked against the exdates as the engine
+ * reads them, a date skipping the occurrence that starts that day in the
+ * series' zone, an instant the one starting then. An original the rule no
+ * longer reaches is not an occurrence, so it cannot be skipped. An
+ * occurrence is normal, skipped or changed, never skipped and changed.
+ */
+export function skippedChanges(
+  series: Event,
+  exdates: readonly string[] | null,
+  changes: readonly Pick<Event, 'id' | 'recurrenceOriginal' | 'archivedAt'>[],
+): string[] {
+  const withSkips = { ...series, exdates: exdates === null ? null : [...exdates] } as Event;
+  return changes
+    .filter((c) => c.archivedAt === null && c.recurrenceOriginal !== null)
+    .filter((c) => {
+      const o = occurrenceOf(series, c.recurrenceOriginal!);
+      return o !== null && isSkippedOccurrence(withSkips, o);
+    })
+    .map((c) => c.id);
+}
+
+/**
  * The live occurrence changes that are not shown, from the rows the caller
  * could read: a manual change whose series is not here and live (archived,
  * or gone) is part of that series, not an event of its own. Restoring the

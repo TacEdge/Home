@@ -21,6 +21,7 @@ import {
   listEventPeople,
   listEvents,
   listOccurrenceChanges,
+  putBackEventOccurrence,
   restoreEvent,
   returnOccurrenceToSeries,
   setEventPeople,
@@ -773,5 +774,131 @@ describe('the regular week', () => {
     expect(await usual()).toEqual(before);
     await returnOccurrenceToSeries(h.sam, swim.id, WED_14, deps);
     expect(await usual()).toEqual(before);
+  });
+});
+
+describe('an occurrence is normal, skipped or changed: never skipped and changed (ADR 0007 §46)', () => {
+  const allAudits = async () => (await db.select({ id: auditLog.id }).from(auditLog)).length;
+
+  it('the review’s exact flow: changed → back to the series → skip → put back → restore', async () => {
+    const swim = await weekly(h.sam);
+    const c = await changeEventOccurrence(
+      h.sam,
+      swim.id,
+      WED_21,
+      { time: at('2026-10-21T16:00:00+13:00') },
+      deps,
+    );
+    const on21 = () => showing(h.sam, [swim.id], '2026-10-21', '2026-10-21');
+
+    // A. Skip this one: refused; nothing written; the 16:00 change stays, still editable.
+    const before = await allAudits();
+    expect(await code(skipEventOccurrence(h.sam, swim.id, '2026-10-21', deps))).toBe(
+      'occurrence_already_changed',
+    );
+    expect(await allAudits()).toBe(before);
+    expect((await rowOf(swim.id)).exdates).toBeNull();
+    expect(await on21()).toEqual([`2026-10-21 2026-10-21T03:00:00.000Z ${swim.title}`]);
+    const edited = await changeEventOccurrence(
+      h.sam,
+      swim.id,
+      WED_21,
+      { title: 'Still mine' },
+      deps,
+    );
+    expect(edited.id).toBe(c.id);
+
+    // B. Back to the series: the change is archived; the ordinary 15:30 returns.
+    await returnOccurrenceToSeries(h.sam, swim.id, WED_21, deps);
+    expect((await rowOf(c.id)).archivedAt).not.toBeNull();
+    expect(await on21()).toEqual([`2026-10-21 2026-10-21T02:30:00.000Z ${swim.title}`]);
+
+    // C. Skip after going back: it succeeds and the occurrence goes.
+    await skipEventOccurrence(h.sam, swim.id, '2026-10-21', deps);
+    expect(await on21()).toEqual([]);
+
+    // D. Restoring the archived change while it is skipped: refused, nothing written.
+    const beforeRestore = await allAudits();
+    expect(await code(restoreEvent(h.sam, c.id, deps))).toBe('occurrence_skipped');
+    expect(await allAudits()).toBe(beforeRestore);
+    expect((await rowOf(c.id)).archivedAt).not.toBeNull();
+
+    // E. Put back: the skip goes and the ordinary occurrence returns.
+    await putBackEventOccurrence(h.sam, swim.id, '2026-10-21', deps);
+    expect((await rowOf(swim.id)).exdates).toBeNull();
+    expect(await on21()).toEqual([`2026-10-21 2026-10-21T02:30:00.000Z ${swim.title}`]);
+
+    // F. Restoring the change now works, and it shows once.
+    await restoreEvent(h.sam, c.id, deps);
+    expect(await on21()).toEqual(['2026-10-21 2026-10-21T03:00:00.000Z Still mine']);
+    expect(await liveChangesOf(swim.id)).toHaveLength(1);
+  });
+
+  it('several changes: each blocks its own date only; an exdates patch with either is refused whole', async () => {
+    const swim = await weekly(h.sam);
+    await changeEventOccurrence(h.sam, swim.id, WED_21, { title: 'One' }, deps);
+    await changeEventOccurrence(h.sam, swim.id, WED_28, { title: 'Two' }, deps);
+    expect(await code(skipEventOccurrence(h.sam, swim.id, '2026-10-21', deps))).toBe(
+      'occurrence_already_changed',
+    );
+    expect(await code(skipEventOccurrence(h.sam, swim.id, '2026-10-28', deps))).toBe(
+      'occurrence_already_changed',
+    );
+    await skipEventOccurrence(h.sam, swim.id, '2026-11-04', deps);
+    expect((await rowOf(swim.id)).exdates).toEqual(['2026-11-04']);
+    const before = await rowOf(swim.id);
+    for (const exdates of [
+      ['2026-11-04', '2026-10-21'],
+      ['2026-10-28'],
+      ['2026-11-11', WED_28], // by instant, too
+    ])
+      expect(
+        await code(updateEvent(h.sam, swim.id, { title: 'Renamed', exdates }, deps)),
+        exdates.join(),
+      ).toBe('occurrence_already_changed');
+    expect(await rowOf(swim.id)).toEqual(before); // nothing partial: not even the title
+  });
+
+  it('updateEvent: a series edit and an unrelated exdate still work; a changed one never does', async () => {
+    const swim = await weekly(h.sam);
+    await changeEventOccurrence(h.sam, swim.id, WED_21, { title: 'Changed' }, deps);
+    await updateEvent(h.sam, swim.id, { title: 'Renamed 8a', location: 'Elsewhere' }, deps);
+    await updateEvent(h.sam, swim.id, { exdates: ['2026-11-04'] }, deps);
+    expect((await rowOf(swim.id)).exdates).toEqual(['2026-11-04']);
+    expect(await code(updateEvent(h.sam, swim.id, { exdates: ['2026-10-21'] }, deps))).toBe(
+      'occurrence_already_changed',
+    );
+    // The same through the people-and-fields edit (and so any caller of updateEvent).
+    expect(
+      await code(editEventWithPeople(h.sam, swim.id, { exdates: ['2026-10-21'] }, [], deps)),
+    ).toBe('occurrence_already_changed');
+    expect((await rowOf(swim.id)).exdates).toEqual(['2026-11-04']);
+  });
+
+  it('a series in another zone: the skip date is the series’ own, not home’s', async () => {
+    // Tuesdays 22:00 in London (BST then GMT): Wednesday morning at home.
+    const ldn = await createEvent(
+      h.sam,
+      {
+        title: 'London call 8a',
+        kind: 'other',
+        time: {
+          allDay: false,
+          startsAt: '2026-10-20T22:00:00+01:00',
+          endsAt: '2026-10-20T23:00:00+01:00',
+          timeZone: 'Europe/London',
+        },
+        rrule: 'FREQ=WEEKLY;BYDAY=TU',
+      },
+      deps,
+    );
+    await changeEventOccurrence(h.sam, ldn.id, '2026-10-27T22:00:00Z', { title: 'Moved' }, deps);
+    expect(await code(skipEventOccurrence(h.sam, ldn.id, '2026-10-27', deps))).toBe(
+      'occurrence_already_changed',
+    );
+    expect(await code(skipEventOccurrence(h.sam, ldn.id, '2026-10-28', deps))).toBe(
+      'not_an_occurrence', // home's date for it is not the series' date
+    );
+    await skipEventOccurrence(h.sam, ldn.id, '2026-11-03', deps);
   });
 });
