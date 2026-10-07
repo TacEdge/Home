@@ -502,6 +502,7 @@ test('an archived series puts its changes away with it; restoring brings them ba
   await expect(page).toHaveURL(new RegExp(`/events/${ids.choir}$`));
   await expect(nextTimes(page).locator('li', { hasText: d7.long })).toContainText('18:00');
   await page.getByRole('button', { name: `Back to the series: ${d7.long}` }).click();
+  await expect(changeLink(page, d7)).toBeVisible();
   expect(await liveChangesOf(ids.choir)).toHaveLength(0);
 });
 
