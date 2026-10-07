@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { ARCHIVED_MARK, CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { fixtureAdultContext, type Adult } from './fixture-adults';
-import { seedCalendar } from './calendar-feeds';
+import { seedCalendar, seedSyncedEvent } from './calendar-feeds';
 import { withDb } from './helpers';
 
 // M3 acceptance (contract §8.3, §10 items 4, 5 and 8): the two-adult privacy
@@ -108,7 +108,10 @@ async function routesFor(adult: Adult) {
       archived,
     );
     add(
-      ids.events.flatMap((id) => [`/events/${id}`, ...(archived ? [] : [`/events/${id}/edit`])]),
+      ids.events.flatMap((id) => [
+        `/events/${id}`,
+        ...(archived ? [] : [`/events/${id}/edit`, `/events/${id}/people`]),
+      ]),
       archived,
     );
     add(
@@ -169,8 +172,9 @@ async function activityIds(request: APIRequestContext): Promise<Set<string>> {
 test.beforeAll(async () => {
   // M4: a private calendar for each adult carrying their canary mark, and a
   // household one of Sam's, connected and disconnected.
+  const privateCalendar: Record<string, string> = {};
   for (const adult of ['sam', 'alex'] as const)
-    await seedCalendar({
+    privateCalendar[adult] = await seedCalendar({
       owner: USER[adult] as 'fixture-sam' | 'fixture-alex',
       name: `${CANARY_MARK[adult]}${P10}calendar`,
       visibility: 'private',
@@ -208,6 +212,15 @@ test.beforeAll(async () => {
        values ($1, 'other', true, $2, ($2::date + 1), $3, 'ui', 'private', 'manual')`,
       [`${mark}event-today`, d, by],
     );
+    // M4 Package 6: a synced event of their private calendar, dated today.
+    await seedSyncedEvent({
+      calendarId: privateCalendar[adult]!,
+      owner: by as 'fixture-sam' | 'fixture-alex',
+      visibility: 'private',
+      uid: `${mark}synced-today@example.test`,
+      title: `${mark}synced-today`,
+      date: d,
+    });
     await q(
       `insert into event (title, kind, all_day, starts_at, ends_at, time_zone, created_by, created_via, visibility, source)
        values ($1, 'appointment', false, ($2 || 'T10:00:00')::timestamp at time zone 'Pacific/Auckland',
@@ -296,7 +309,11 @@ for (const adult of ['sam', 'alex'] as const) {
     const theirs = await privateIdsOf(other);
     const paths = [
       ...theirs.person!.flatMap((id) => [`/people/${id}`, `/people/${id}/edit`]),
-      ...theirs.event!.flatMap((id) => [`/events/${id}`, `/events/${id}/edit`]),
+      ...theirs.event!.flatMap((id) => [
+        `/events/${id}`,
+        `/events/${id}/edit`,
+        `/events/${id}/people`,
+      ]),
       ...theirs.project!.flatMap((id) => [`/home/projects/${id}`, `/home/projects/${id}/edit`]),
       ...theirs.task!.map((id) => `/tasks/${id}`),
       ...theirs.calendar_source!.flatMap((id) => [

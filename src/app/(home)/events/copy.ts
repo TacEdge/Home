@@ -5,10 +5,38 @@ import {
   clockOf as clock,
   isoDateInZone as dateIn,
   longDate,
+  softWhen,
   type IsoDate,
 } from '@/lib/dates';
 
-// Words for events: kinds, when, and how they repeat.
+// Words for events: kinds, when, how they repeat, and where a synced one
+// comes from (M4 Package 6): the calendar's HOME name and how fresh it is,
+// never a provider's words, an address, an id or a status code.
+
+/** "Sam's work calendar", "Family calendar": the name as HOME knows it, said as a calendar. */
+export function calendarPhrase(name: string): string {
+  return /calendar/i.test(name) ? name : `${name} calendar`;
+}
+
+/** "From Sam's work calendar · updated 12 min ago". */
+export function sourceLine(
+  calendar: { name: string; lastSyncedAt: Date | null; archivedAt: Date | null },
+  now: Date,
+  timeZone: string,
+): string {
+  const from = `From ${calendarPhrase(calendar.name)}`;
+  if (calendar.archivedAt) return `${from} · not connected at the moment`;
+  if (!calendar.lastSyncedAt) return `${from} · not updated yet`;
+  return `${from} · updated ${softWhen(calendar.lastSyncedAt, now, timeZone)}`;
+}
+
+/** "This comes from Sam's work calendar, so change those details there." */
+export function ownedElsewhereLine(name: string): string {
+  return `This comes from ${calendarPhrase(name)}, so change those details there.`;
+}
+
+/** How a synced event repeats: HOME's own words where the rule is one of its presets, else as in the calendar. */
+export const REPEATS_AS_IN_CALENDAR = 'Repeats as in the calendar';
 
 export const KIND_LABEL: Record<string, string> = {
   appointment: 'Appointment',

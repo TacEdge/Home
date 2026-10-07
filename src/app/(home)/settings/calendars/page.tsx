@@ -5,7 +5,7 @@ import { ItemRow, List } from '@/ui/list';
 import { EmptyState, Page, Quiet } from '@/ui/page';
 import { needsAttention, statusLine, VISIBILITY_LABEL } from './copy';
 import { peopleFor } from './people';
-import { RefreshOnUse } from './refresh-on-use';
+import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
 
 export const dynamic = 'force-dynamic';
 

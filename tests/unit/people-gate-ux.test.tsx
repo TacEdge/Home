@@ -30,6 +30,7 @@ vi.mock('@/trust/session', () => ({
 }));
 vi.mock('@/domain/people/service', () => ({ listPeople: async () => people }));
 vi.mock('@/domain/captures/service', () => ({ listCaptures: async () => [] }));
+vi.mock('@/app/_calendar/stale', () => ({ hasStaleCalendar: async () => false }));
 vi.mock('@/domain/tasks/service', () => ({ listTasks: async () => [] }));
 vi.mock('@/domain/projects/service', () => ({ listProjects: async () => [] }));
 vi.mock('@/app/_agenda/load', () => ({
