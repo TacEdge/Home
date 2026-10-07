@@ -4,7 +4,7 @@ import {
   type Occurrence,
   type RecurringEvent,
 } from '../engines/recurrence';
-import { isoDateInZone, isValidIsoDate, type IsoDate } from '@/lib/dates';
+import { addDays, compareIsoDates, isoDateInZone, isValidIsoDate, type IsoDate } from '@/lib/dates';
 import type { Event } from './service';
 
 // Override suppression (ADR 0007 §13, §42; M4 Package 6). A moved or changed
@@ -211,4 +211,83 @@ export function hiddenOccurrenceChanges(events: readonly Event[]): Set<string> {
     )
       hidden.add(e.id);
   return hidden;
+}
+
+/**
+ * A series' next few times as its page shows them (contract §5.3): the
+ * regular occurrences the rule still puts on, with each live change's
+ * original left out, and every live change at its own date and time, once.
+ * Composed exactly as the agenda composes it (overriddenOriginals), then
+ * ordered by home date, all-day first, then start, title and id. Pure.
+ */
+export type NextTime =
+  | { kind: 'regular'; occurrence: Occurrence; identity: string }
+  | { kind: 'changed'; change: Event; occurrence: Occurrence };
+
+export function nextTimes(
+  series: Event,
+  changes: readonly Event[],
+  from: IsoDate,
+  to: IsoDate,
+  timeZone: string,
+): NextTime[] {
+  const live = changes.filter((c) => isOccurrenceChange(c) && c.archivedAt === null);
+  const regular = expandEvent(
+    recurringWithOverrides(series, overriddenOriginals([series, ...live])),
+    from,
+    to,
+  ).map((o): NextTime => ({ kind: 'regular', occurrence: o, identity: occurrenceIdentity(o) }));
+  // A change is dated at home, so one moved to another day is read a day either side.
+  const changed = live.flatMap((c) =>
+    expandEvent(recurringOf(c), addDays(from, -1), addDays(to, 1))
+      .filter((o) => {
+        const home = homeDateOf(o, timeZone);
+        return home >= from && home <= to;
+      })
+      .map((o): NextTime => ({ kind: 'changed', change: c, occurrence: o })),
+  );
+  return [...regular, ...changed].sort(compareNextTimes(series, timeZone));
+}
+
+const homeDateOf = (o: Occurrence, timeZone: string): IsoDate =>
+  o.allDay ? o.date : isoDateInZone(o.startsAt, timeZone);
+
+function compareNextTimes(series: Event, timeZone: string) {
+  const title = (t: NextTime) => (t.kind === 'changed' ? t.change.title : series.title);
+  const id = (t: NextTime) => (t.kind === 'changed' ? t.change.id : series.id);
+  return (a: NextTime, b: NextTime): number => {
+    const d = compareIsoDates(
+      homeDateOf(a.occurrence, timeZone),
+      homeDateOf(b.occurrence, timeZone),
+    );
+    if (d !== 0) return d;
+    if (a.occurrence.allDay !== b.occurrence.allDay) return a.occurrence.allDay ? -1 : 1;
+    if (!a.occurrence.allDay && !b.occurrence.allDay) {
+      const s = a.occurrence.startsAt.getTime() - b.occurrence.startsAt.getTime();
+      if (s !== 0) return s;
+    }
+    const t = title(a).localeCompare(title(b), 'en-NZ');
+    if (t !== 0) return t;
+    return id(a) < id(b) ? -1 : id(a) > id(b) ? 1 : 0;
+  };
+}
+
+/** The date, in the series' own terms, that a change's original occurrence falls on. */
+export function originalDateOf(series: Event, change: Pick<Event, 'recurrenceOriginal'>): IsoDate {
+  const original = change.recurrenceOriginal ?? '';
+  if (DATE.test(original)) return original;
+  return isoDateInZone(new Date(original), series.timeZone ?? 'UTC');
+}
+
+/**
+ * A series' changes that were put away (archived) and whose original
+ * occurrence is still ahead: shown under the series as no longer part of
+ * it (contract §3.7), newest original last. A change the rule reaches
+ * can be brought back; one it no longer reaches is history.
+ */
+export function putAwayChanges(series: Event, changes: readonly Event[], from: IsoDate): Event[] {
+  return changes
+    .filter((c) => isOccurrenceChange(c) && c.archivedAt !== null)
+    .filter((c) => originalDateOf(series, c) >= from)
+    .sort((a, b) => (a.recurrenceOriginal! < b.recurrenceOriginal! ? -1 : 1));
 }

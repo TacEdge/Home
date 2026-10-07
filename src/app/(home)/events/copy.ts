@@ -1,4 +1,4 @@
-import type { ReadRecurrence } from '@/domain/engines/recurrence';
+import type { Occurrence, ReadRecurrence } from '@/domain/engines/recurrence';
 import type { Event } from '@/domain/events/service';
 import {
   addDays,
@@ -116,3 +116,31 @@ export function repeatLabel(r: ReadRecurrence, startDate: IsoDate): string | nul
   if (end.type === 'count') return `${base}, ${end.count === 1 ? 'once' : `${end.count} times`}`;
   return base;
 }
+
+// One time of a repeating event, changed on its own (M4 contract §5.3,
+// ADR 0007 §46): said as one time of the series, never as an override, an
+// original or an exdate.
+
+/** "Wednesday 21 October · 15:30–16:15", for an occurrence as the engine places it. */
+export function occurrenceWhen(o: Occurrence): string {
+  if (o.allDay) {
+    const last = addDays(o.endDate, -1);
+    return last === o.startDate
+      ? longDate(o.startDate)
+      : `${longDate(o.startDate)} to ${longDate(last)}`;
+  }
+  return `${longDate(dateIn(o.startsAt, o.timeZone))} · ${clock(o.startsAt, o.timeZone)}–${clock(o.endsAt, o.timeZone)}`;
+}
+
+/** "One time of Swimming, changed from the usual." */
+export const changedFromUsual = (seriesTitle: string) =>
+  `One time of ${seriesTitle}, changed from the usual.`;
+
+/** "Usually Wednesday 21 October · 15:30–16:15." */
+export const usuallyLine = (usual: Occurrence) => `Usually ${occurrenceWhen(usual)}.`;
+
+/** The Back to the series question. */
+export const backToSeriesQuestion = (seriesTitle: string, usual: Occurrence | null) =>
+  usual
+    ? `Put this one-off change away? ${seriesTitle} goes back to the usual: ${occurrenceWhen(usual)}. Nothing is deleted.`
+    : `Put this one-off change away? ${seriesTitle} goes back to the usual. Nothing is deleted.`;

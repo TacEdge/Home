@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { NotFoundError } from '@/domain/common/errors';
+import { isOccurrenceChange } from '@/domain/events/occurrences';
 import { getEvent, listEventPeople } from '@/domain/events/service';
 import { listPeople } from '@/domain/people/service';
 import { requireActor } from '@/trust/session';
@@ -12,7 +13,8 @@ export const dynamic = 'force-dynamic';
 
 // Who's going to, and responsible for, a synced event (M4 contract §5.2):
 // HOME's own say about an event whose details belong to its calendar. A
-// manual event says this on its edit page, so it is sent there.
+// manual event says this on its edit page, so it is sent there; one changed
+// time of a series (§5.3) says it here, for that time only.
 export default async function EventPeoplePage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
   const { id } = await params;
@@ -20,7 +22,8 @@ export default async function EventPeoplePage({ params }: { params: Promise<{ id
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  if (event.source === 'manual') redirect(`/events/${event.id}/edit`);
+  const once = isOccurrenceChange(event);
+  if (event.source === 'manual' && !once) redirect(`/events/${event.id}/edit`);
   const [people, annotations] = await Promise.all([
     listPeople(actor),
     listEventPeople(actor, event.id),
@@ -31,7 +34,11 @@ export default async function EventPeoplePage({ params }: { params: Promise<{ id
   return (
     <Page
       title={`Who’s going to ${event.title}`}
-      intro="The rest of it stays as the calendar has it."
+      intro={
+        once
+          ? 'Just for this one time. The usual people stay on every other time.'
+          : 'The rest of it stays as the calendar has it.'
+      }
     >
       <PeopleForm
         action={setEventPeopleAction.bind(null, event.id)}
