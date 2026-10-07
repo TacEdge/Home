@@ -23,14 +23,29 @@ describe('effectivePeople', () => {
     });
   });
 
-  it('a person the reader cannot see is left out of either, never leaked through defaults', () => {
-    expect(
-      effectivePeople([{ personId: 'secret', role: 'attending' }], ['secret', 'milo'], visible),
-    ).toEqual({
+  it('a person the reader cannot see is left out, and never leaked through defaults', () => {
+    expect(effectivePeople([], ['secret', 'milo'], visible)).toEqual({
       people: [{ personId: 'milo', role: 'attending' }],
       derived: true,
     });
     expect(effectivePeople([], ['secret'], visible)).toEqual({ people: [], derived: false });
+  });
+
+  it('an event whose only annotation names someone the reader no longer lists shows nobody, not the usual people (Package 6 carry-forward)', () => {
+    expect(
+      effectivePeople([{ personId: 'archived-kid', role: 'attending' }], ['milo'], visible),
+    ).toEqual({ people: [], derived: false });
+    // Some of its own people still listed: just those.
+    expect(
+      effectivePeople(
+        [
+          { personId: 'archived-kid', role: 'attending' },
+          { personId: 'isla', role: 'responsible' },
+        ],
+        ['milo'],
+        visible,
+      ),
+    ).toEqual({ people: [{ personId: 'isla', role: 'responsible' }], derived: false });
   });
 
   it('a manual event (no calendar) has only its own people', () => {

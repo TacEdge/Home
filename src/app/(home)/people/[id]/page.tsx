@@ -6,10 +6,11 @@ import { NotFoundError } from '@/domain/common/errors';
 import type { ContextCategory } from '@/domain/context/schema';
 import { listContext } from '@/domain/context/service';
 import { forPerson } from '@/domain/engines/agenda';
-import { ageOn } from '@/domain/engines/profile';
+import { ageOn, regularWeek } from '@/domain/engines/profile';
 import { listNotes } from '@/domain/notes/service';
 import { getPerson } from '@/domain/people/service';
 import { AgendaDays } from '@/app/_agenda/agenda-list';
+import { RegularWeek } from '@/app/_profile/regular-week';
 import { loadAgenda, todayInHomeZone } from '@/app/_agenda/load';
 import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
 import { hasStaleCalendar } from '@/app/_calendar/stale';
@@ -27,8 +28,9 @@ import { ageLabel, CONTEXT_CATEGORY_LABEL, roleLabel } from '../copy';
 // profile engine; things to know are normal context about them (sensitive
 // never appears here: the default read leaves it out); coming up is the
 // what is coming up for them in the next 30 days (the agenda engine, as
-// Forward uses it); notes about them are written here (§3.7). Archived
-// people are shown, with Restore.
+// Forward uses it); "Usually" is their regular week (M4 contract §3.6),
+// shown only when they have one; notes about them are written here (§3.7).
+// Archived people are shown, with Restore.
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
   const { id } = await params;
@@ -48,6 +50,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     hasStaleCalendar(actor),
   ]);
   const coming = forPerson(loaded.days, person.id);
+  // Usually: their weekly and fortnightly series, from the events the agenda
+  // just read as this adult (M4 contract §3.6); derived, never stored.
+  const usually = regularWeek(loaded.events, person.id, {
+    today,
+    timeZone: env.HOME_TIMEZONE,
+  });
   const you = person.userId === actor.userId;
   const linked = person.userId !== null;
   const archived = person.archivedAt !== null;
@@ -95,6 +103,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           ))}
         </List>
       )}
+
+      <RegularWeek entries={usually} />
 
       <Label>Coming up</Label>
       {coming.length === 0 ? (

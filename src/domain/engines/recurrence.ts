@@ -232,6 +232,32 @@ export function readRRule(rrule: string | null | undefined, start: EventStart): 
   }
 }
 
+/** How often a weekly rule repeats: every week, or every second week. */
+export type WeeklyCadence = 'weekly' | 'fortnightly';
+
+/**
+ * Whether a stored rule is a plain weekly rhythm, and how often (M4 contract
+ * §3.6, the regular week). Conservative: FREQ=WEEKLY with INTERVAL 1 or 2,
+ * plain weekdays (no "second Tuesday"), and nothing else beyond COUNT, UNTIL
+ * and WKST (which only says where a week starts, as calendars write it). Any
+ * other rule, or one that cannot be read, is not a weekly rhythm: null.
+ */
+export function weeklyCadence(rrule: string | null | undefined): WeeklyCadence | null {
+  if (rrule === null || rrule === undefined || rrule.trim() === '') return null;
+  const o = parseRule(rrule);
+  if (!o || o.freq !== RRule.WEEKLY) return null;
+  const keys = rrule
+    .trim()
+    .replace(/^RRULE:/i, '')
+    .split(';')
+    .map((p) => p.split('=')[0]!.toUpperCase());
+  if (keys.some((k) => !['FREQ', 'INTERVAL', 'BYDAY', 'COUNT', 'UNTIL', 'WKST'].includes(k)))
+    return null;
+  if (keys.includes('BYDAY') && weekdayNumbers(o.byweekday) === null) return null;
+  const interval = o.interval ?? 1;
+  return interval === 1 ? 'weekly' : interval === 2 ? 'fortnightly' : null;
+}
+
 // ---------------------------------------------------------------------------
 // Expansion
 

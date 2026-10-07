@@ -17,8 +17,12 @@ export function effectivePeople(
   defaults: readonly string[] | undefined,
   visiblePersonIds: ReadonlySet<string>,
 ): EffectivePeople {
+  // Whether the event has people of its own is decided before anyone is
+  // left out for display: an event whose only annotation names someone the
+  // reader no longer lists (archived, say) shows nobody, never its
+  // calendar's usual people in their place.
   const own = annotations.filter((a) => visiblePersonIds.has(a.personId));
-  if (own.length > 0 || !defaults) return { people: own, derived: false };
+  if (annotations.length > 0 || !defaults) return { people: own, derived: false };
   const seen = new Set<string>();
   const people: AgendaPersonRef[] = [];
   for (const id of defaults) {
