@@ -37,10 +37,14 @@ test.beforeEach(() => {
   failFeed(TOKEN, null);
   holdFeed(TOKEN, false);
 });
-// The person a test adds is put away afterwards, so the People specs see the family as seeded.
+// The person a test adds, and the events the synthetic feeds brought in, are
+// put away afterwards, so the specs that follow see the family as seeded.
 test.afterAll(async () => {
   await q(
     `update person set archived_at = now() where name = 'Coach Rehearsal' and archived_at is null`,
+  );
+  await q(
+    `update event set archived_at = now() where calendar_source_id is not null and archived_at is null`,
   );
 });
 
