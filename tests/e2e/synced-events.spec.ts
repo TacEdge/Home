@@ -18,11 +18,14 @@ const q = (sql: string, a: unknown[] = []) =>
   withDb(async (pool) => (await pool.query(sql, a)).rows as Record<string, string>[]);
 const calendarIdNamed = async (name: string) =>
   (await q(`select id from calendar_source where name = $1`, [name]))[0]!.id!;
-const eventIdNamed = async (title: string) =>
+/** A synced event of this spec's own calendar, by title (other specs seed calendars and events of their own). */
+const eventIdNamed = async (title: string, calendar = 'Sam’s squad') =>
   (
-    await q(`select id from event where title = $1 and source = 'synced' order by created_at`, [
-      title,
-    ])
+    await q(
+      `select e.id from event e join calendar_source s on s.id = e.calendar_source_id
+       where e.title = $1 and s.name = $2 and e.source = 'synced' order by e.created_at`,
+      [title, calendar],
+    )
   )[0]!.id!;
 
 /** A day relative to today in the home zone, as the feeds and the pages write it. */
@@ -74,7 +77,7 @@ async function feedOf(step: 'initial' | 'partial' | 'repaired'): Promise<string>
     uid: 'bins-e2e-p6@example.test',
     start: today.ymd,
     end: (await day(1)).ymd,
-    summary: 'Bins out',
+    summary: 'Recycling out',
   });
   const games = nzEvent({
     uid: 'games-e2e-p6@example.test',
@@ -173,17 +176,17 @@ test('Today and Forward: synced events sit among the manual ones, in agenda orde
   page,
 }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await connect(page, 'Sam’s work', SECRET);
+  const id = await connect(page, 'Sam’s squad', SECRET);
   await refreshNow(page, id);
   await expect(page.getByText(/^Updated just now/)).toBeVisible();
 
   await page.goto('/today');
   const onToday = page.locator('section[aria-labelledby="today-on"]');
-  await expect(onToday.getByRole('link', { name: /Bins out/ })).toBeVisible();
+  await expect(onToday.getByRole('link', { name: /Recycling out/ })).toBeVisible();
   await expect(onToday.getByRole('link', { name: /Swim squad/ })).toContainText('15:30');
   // All-day first: Bins out above Swimming, whatever else the family has on.
   const titles = await onToday.getByRole('link').allInnerTexts();
-  expect(titles.findIndex((t) => t.includes('Bins out'))).toBeLessThan(
+  expect(titles.findIndex((t) => t.includes('Recycling out'))).toBeLessThan(
     titles.findIndex((t) => t.includes('Swim squad')),
   );
   expect(await page.locator('main').innerText()).not.toMatch(PROVIDER_WORDS);
@@ -211,12 +214,12 @@ test('a synced event’s page: where it comes from and how fresh, calm ownership
   await page.goto(`/events/${swimId}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Swim squad' })).toBeVisible();
   await expect(
-    page.getByText(/From Sam’s work calendar · updated (just now|\d+ min ago)/),
+    page.getByText(/From Sam’s squad calendar · updated (just now|\d+ min ago)/),
   ).toBeVisible();
   await expect(page.getByText(`Every ${(await day(0)).weekday}`)).toBeVisible();
   await expect(page.getByText('Synthetic Aquatic Centre')).toBeVisible();
   await expect(
-    page.getByText('This comes from Sam’s work calendar, so change those details there.'),
+    page.getByText('This comes from Sam’s squad calendar, so change those details there.'),
   ).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'Next few times' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Edit', exact: true })).toHaveCount(0);
@@ -283,16 +286,16 @@ test('a calendar’s usual people show on its events that have none of their own
   page,
 }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await calendarIdNamed('Sam’s work');
+  const id = await calendarIdNamed('Sam’s squad');
   await page.goto(`/settings/calendars/${id}/edit`);
   await page.getByRole('checkbox', { name: /Isla/ }).check();
   await page.getByRole('button', { name: 'Save' }).click();
   await page.waitForURL(new RegExp(`/settings/calendars/${id}$`));
-  const bins = await eventIdNamed('Bins out');
+  const bins = await eventIdNamed('Recycling out');
   await page.goto(`/events/${bins}`);
   await expect(page.getByRole('link', { name: /Isla/ })).toContainText('Usually going');
   await page.goto('/forward');
-  await expect(page.getByRole('link', { name: /Bins out/ })).toContainText('Isla');
+  await expect(page.getByRole('link', { name: /Recycling out/ })).toContainText('Isla');
   // Swimming has its own people, so Isla is not shown there.
   await expect(page.getByRole('link', { name: /Swim squad/ }).first()).not.toContainText('Isla');
   expect(
@@ -304,7 +307,7 @@ test('a moved occurrence shows once at its new time, even while the series lacks
   page,
 }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await calendarIdNamed('Sam’s work');
+  const id = await calendarIdNamed('Sam’s squad');
   const in7 = await day(7);
   writeFeed(TOKEN, await feedOf('partial'));
   await refreshNow(page, id);
@@ -333,7 +336,7 @@ test('a moved occurrence shows once at its new time, even while the series lacks
 
 test('a failed refresh keeps the last-known events, with no alarm anywhere', async ({ page }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await calendarIdNamed('Sam’s work');
+  const id = await calendarIdNamed('Sam’s squad');
   failFeed(TOKEN, 'unreachable');
   await refreshNow(page, id);
   await expect(page.getByText(/^Couldn’t update just now/)).toBeVisible();
@@ -343,7 +346,7 @@ test('a failed refresh keeps the last-known events, with no alarm anywhere', asy
   expect(main).not.toMatch(/couldn’t|stale|broken|failed|error/i);
   await page.goto(`/events/${await eventIdNamed('Swim squad')}`);
   await expect(
-    page.getByText(/From Sam’s work calendar · updated (just now|\d+ min ago)/),
+    page.getByText(/From Sam’s squad calendar · updated (just now|\d+ min ago)/),
   ).toBeVisible();
   expect(await page.locator('main').innerText()).not.toMatch(/couldn’t|stale|broken|failed|error/i);
 });
@@ -354,7 +357,7 @@ test('privacy: the other adult’s private synced event is nowhere, not even by 
   const alex = await fixtureAdultContext(browser, 'alex', { width: 375, height: 812 });
   const alexCal = await connect(alex.page, 'Alex only', addressFor(ALEX_TOKEN), 'private');
   await refreshNow(alex.page, alexCal);
-  const privateId = await eventIdNamed('Alex’s private appointment');
+  const privateId = await eventIdNamed('Alex’s private appointment', 'Alex only');
   expect(privateId).toBeTruthy();
   await alex.page.goto('/forward');
   await expect(alex.page.getByRole('link', { name: /Alex’s private appointment/ })).toBeVisible();
@@ -363,7 +366,7 @@ test('privacy: the other adult’s private synced event is nowhere, not even by 
   // freshness, HOME's own people controls, nothing of the connection.
   const swimId = await eventIdNamed('Swim squad');
   await alex.page.goto(`/events/${swimId}`);
-  await expect(alex.page.getByText(/From Sam’s work calendar · updated/)).toBeVisible();
+  await expect(alex.page.getByText(/From Sam’s squad calendar · updated/)).toBeVisible();
   await expect(alex.page.getByRole('link', { name: 'Change who’s going' })).toBeVisible();
   const html = await alex.page.content();
   for (const s of forbidden) expect(html, s).not.toContain(s);
@@ -387,7 +390,7 @@ test('disconnecting takes the events off the agenda; reconnecting brings the sam
   page,
 }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await calendarIdNamed('Sam’s work');
+  const id = await calendarIdNamed('Sam’s squad');
   const swimId = await eventIdNamed('Swim squad');
   await page.goto(`/settings/calendars/${id}`);
   await page.locator('summary', { hasText: 'Disconnect' }).click();
@@ -395,7 +398,7 @@ test('disconnecting takes the events off the agenda; reconnecting brings the sam
   await expect(page.getByText('Disconnected.', { exact: true })).toBeVisible();
   await page.goto('/forward');
   await expect(page.getByRole('link', { name: /Swim squad/ })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: /Bins out/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /Recycling out/ })).toHaveCount(0);
 
   await page.goto(`/settings/calendars/${id}/reconnect`);
   await page.getByLabel('Google Calendar address').fill(SECRET);
@@ -415,7 +418,7 @@ test('refresh on use: Today asks for a refresh after it has rendered when a cale
   page,
 }) => {
   await signInAsFixtureAdult(page, 'sam');
-  const id = await calendarIdNamed('Sam’s work');
+  const id = await calendarIdNamed('Sam’s squad');
   await q(
     `update calendar_source set last_attempt_at = now() - interval '20 minutes', last_synced_at = now() - interval '20 minutes', feed_hash = null where id = $1`,
     [id],
@@ -439,7 +442,7 @@ test('without JavaScript: who’s going is changed from the event page', async (
     { width: 375, height: 812 },
     { javaScriptEnabled: false },
   );
-  const bins = await eventIdNamed('Bins out');
+  const bins = await eventIdNamed('Recycling out');
   await page.goto(`/events/${bins}/people`);
   await page
     .getByRole('group', { name: 'Who’s going' })

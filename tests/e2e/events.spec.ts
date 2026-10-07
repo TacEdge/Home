@@ -184,7 +184,11 @@ test('a synced event is read-only, with calm copy', async ({ page }) => {
     return r.rows[0].id as string;
   });
   await page.goto(`/events/${id}`);
-  await expect(page.getByText('This comes from a calendar, so change it there.')).toBeVisible();
+  // M4 Package 6: where it comes from, and that its details are the calendar's to change.
+  await expect(page.getByText('From Appointments calendar · not updated yet')).toBeVisible();
+  await expect(
+    page.getByText('This comes from Appointments calendar, so change those details there.'),
+  ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Edit' })).toHaveCount(0);
   await expect(page.locator('summary', { hasText: 'Archive' })).toHaveCount(0);
   await page.goto(`/events/${id}/edit`);
