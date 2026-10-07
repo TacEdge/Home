@@ -2,17 +2,20 @@
 
 import { redirect } from 'next/navigation';
 import { formAction, type FormState } from '@/app/_forms/action';
+import { FormRefusal } from '@/app/_forms/errors';
 import { idOf } from '@/app/_forms/read';
+import { CalendarCanReconnectError } from '@/domain/calendar/errors';
 import {
   connectCalendar,
   disconnectCalendar,
+  getCalendar,
   reconnectCalendar,
   updateCalendar,
 } from '@/domain/calendar/service';
 import { NotPermittedError } from '@/domain/common/errors';
 import { refreshCalendarNow } from '@/integrations/calendar/entry';
 import { readAddress, readCalendarPatch, readNewCalendar } from './calendar-form-data';
-import { REFRESH_BUSY_COPY } from './copy';
+import { CAN_RECONNECT_COPY, REFRESH_BUSY_COPY } from './copy';
 
 // Settings › Calendars server actions (M4 contract §5.1, ADR 0007 §43). The
 // actor comes from the session inside formAction; the Package 4b services
@@ -33,7 +36,22 @@ function withoutAddress(form: FormData): FormData {
 export async function connectCalendarAction(_: FormState, form: FormData): Promise<FormState> {
   return formAction(
     async (actor) => {
-      const { calendarId } = await connectCalendar(actor, readNewCalendar(form));
+      let calendarId: string;
+      try {
+        ({ calendarId } = await connectCalendar(actor, readNewCalendar(form)));
+      } catch (e) {
+        // The address is one of this adult's own disconnected calendars: say
+        // so and point at it (ADR 0007 §40); reconnecting stays their own,
+        // separate act. The name comes from the ordinary read, as the actor.
+        if (e instanceof CalendarCanReconnectError) {
+          const mine = await getCalendar(actor, e.calendarId, { includeArchived: true });
+          throw new FormRefusal(CAN_RECONNECT_COPY, {
+            href: `${HERE}/${mine.id}`,
+            label: `Go to ${mine.name}`,
+          });
+        }
+        throw e;
+      }
       redirect(`${HERE}/${calendarId}?connected=1`);
     },
     { form: withoutAddress(form) },

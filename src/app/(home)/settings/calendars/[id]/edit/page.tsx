@@ -33,7 +33,14 @@ export default async function EditCalendarPage({ params }: { params: Promise<{ i
         action={updateCalendarAction.bind(null, calendar.id)}
         mode="edit"
         people={people.all}
-        current={calendar}
+        // The form's own values only: nothing about the connection, the
+        // owner or the last refresh reaches the browser's form state.
+        current={{
+          name: calendar.name,
+          visibility: calendar.visibility,
+          defaultKind: calendar.defaultKind,
+          defaultPersonIds: calendar.defaultPersonIds,
+        }}
         submitLabel="Save"
       />
     </Page>

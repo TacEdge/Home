@@ -44,10 +44,15 @@ function updated(at: Date, now: Date, timeZone: string): string {
   return recent ? `Updated ${when}` : `Last updated ${when}`;
 }
 
+/** What is wrong, then how old what is shown is: "… · Last updated 4 Oct"; alone if nothing was ever read. */
+function failed(words: string, lastSyncedAt: Date | null, now: Date, timeZone: string): string {
+  return lastSyncedAt ? `${words} · Last updated ${softWhen(lastSyncedAt, now, timeZone)}` : words;
+}
+
 /**
  * The one line that says how a calendar is: its freshness, or what is wrong
- * in words. Failure keeps the last good time in view, so a person knows what
- * HOME is showing them.
+ * in words with the last good time beside it, so a person knows how old what
+ * HOME is showing them is. Never a code, never red, never a countdown.
  */
 export function statusLine(
   c: Pick<CalendarView, 'lastSyncStatus' | 'lastSyncedAt' | 'lastAttemptAt' | 'archivedAt'>,
@@ -61,19 +66,19 @@ export function statusLine(
       return last ?? 'Updated';
     case 'partial':
       return `${last ?? 'Updated'}, with a few things skipped`;
-    case 'unreachable': {
-      // What is shown is the last good read; when that was moments ago, the
-      // one sentence says enough.
-      const stillFresh =
-        c.lastSyncedAt !== null && now.getTime() - c.lastSyncedAt.getTime() < 5 * 60_000;
-      return last && !stillFresh ? `Couldn’t update just now. ${last}` : 'Couldn’t update just now';
-    }
+    case 'unreachable':
+      return failed('Couldn’t update just now', c.lastSyncedAt, now, timeZone);
     case 'address_rejected':
-      return 'The Google Calendar address needs attention';
+      return failed('The Google Calendar address needs attention', c.lastSyncedAt, now, timeZone);
     case 'not_a_calendar':
-      return 'HOME couldn’t read this calendar';
+      return failed('HOME couldn’t read this calendar', c.lastSyncedAt, now, timeZone);
     case 'too_large':
-      return 'This calendar has more history than HOME can read at once';
+      return failed(
+        'This calendar has more history than HOME can read at once',
+        c.lastSyncedAt,
+        now,
+        timeZone,
+      );
     default:
       return c.lastAttemptAt ? 'Not updated yet' : 'Connected, not updated yet';
   }
@@ -110,3 +115,5 @@ export function statusHelp(c: Pick<CalendarView, 'lastSyncStatus' | 'archivedAt'
 
 export const REFRESH_BUSY_COPY = 'Already updating. Give it a moment.';
 export const PASTE_AGAIN_COPY = 'For safety the address isn’t kept. Please paste it again.';
+export const CAN_RECONNECT_COPY =
+  'You’ve connected this calendar before. Connect it again from its page, and its people and notes come back.';

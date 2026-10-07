@@ -256,8 +256,40 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
     await expect(page.locator('[data-form-message]')).toBeFocused();
     expect(await focusUnobscured(page), `${name} person edit`).toBeNull();
 
+    // M4 Package 5: a field refusal on the connect form (a name that is an
+    // address), with the secret field cleared; and a refusal that names no
+    // field on the reconnect form (the wrong address), focusing the message.
+    const sam = await fixtureAdultContext(browser, 'sam', viewport);
+    await sam.page.goto('/settings/calendars/new');
+    await sam.page.getByLabel('Name', { exact: true }).fill('p10 https://refusal');
+    await sam.page
+      .getByLabel('Google Calendar address')
+      .fill(
+        'https://calendar.google.com/calendar/ical/synthetic%40example.test/private-p10refusal0000000000000000/basic.ics',
+      );
+    await sam.page.getByRole('button', { name: 'Connect' }).click();
+    await expect(sam.page.getByLabel('Name', { exact: true })).toBeFocused();
+    expect(await focusUnobscured(sam.page), `${name} /settings/calendars/new`).toBeNull();
+    await expect(sam.page.getByLabel('Google Calendar address')).toHaveValue('');
+    const disconnected = await seedCalendar({
+      owner: 'fixture-sam',
+      name: 'Sweep calendar (disconnected)',
+      visibility: 'household',
+      disconnected: true,
+      fingerprintTag: 'sweepdisconnected',
+    });
+    await sam.page.goto(`/settings/calendars/${disconnected}/reconnect`);
+    await sam.page
+      .getByLabel('Google Calendar address')
+      .fill(
+        'https://calendar.google.com/calendar/ical/synthetic%40example.test/private-p10wrong00000000000000000000/basic.ics',
+      );
+    await sam.page.getByRole('button', { name: 'Reconnect' }).click();
+    await expect(sam.page.locator('[data-form-message]')).toBeFocused();
+    expect(await focusUnobscured(sam.page), `${name} calendar reconnect`).toBeNull();
+    await sam.context.close();
+
     // The capture bar's own refusal keeps focus in the box, in view.
-    await page.goto('/today');
     await page.locator('#capture-text').fill('   ');
     await page.getByRole('button', { name: 'Keep' }).click();
     await expect(page.locator('#capture-text')).toBeFocused();

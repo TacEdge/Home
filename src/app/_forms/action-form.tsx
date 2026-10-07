@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState } from 'react';
 import { useRefusalFocus } from './focus';
 import { idle, type FormState } from './state';
@@ -33,15 +34,30 @@ export function ActionForm({
 export function FormMessage({ state }: { state: FormState }) {
   if (state.status === 'error')
     return (
-      <p
-        role="alert"
-        tabIndex={-1}
-        data-form-message
-        className="text-ink mt-4 flex items-baseline gap-2"
-      >
-        <span aria-hidden="true" className="bg-accent inline-block h-2 w-2 shrink-0 rounded-full" />
-        {state.message}
-      </p>
+      <>
+        <p
+          role="alert"
+          tabIndex={-1}
+          data-form-message
+          className="text-ink mt-4 flex items-baseline gap-2"
+        >
+          <span
+            aria-hidden="true"
+            className="bg-accent inline-block h-2 w-2 shrink-0 rounded-full"
+          />
+          {state.message}
+        </p>
+        {state.link ? (
+          <p className="mt-1 pl-4">
+            <Link
+              href={state.link.href}
+              className="text-ink-2 inline-flex min-h-11 items-center underline underline-offset-4"
+            >
+              {state.link.label} ›
+            </Link>
+          </p>
+        ) : null}
+      </>
     );
   if (state.status === 'ok' && state.message)
     return (

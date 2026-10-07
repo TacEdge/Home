@@ -193,6 +193,20 @@ test('change settings, connected: name, who can see it, kind and people; the eve
   await page.getByRole('link', { name: 'Change settings' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Change Sam’s work' })).toBeVisible();
   expect(await page.content()).not.toContain('Google Calendar address');
+  // The page's source (and the form state it hands the browser) carries the
+  // form's values only: nothing about the owner, the connection or the last refresh.
+  const source = await (await page.request.get(`/settings/calendars/${id}/edit`)).text();
+  for (const internal of [
+    'ownerUserId',
+    'lastSyncErrorCode',
+    'lastSyncStatus',
+    'lastAttemptAt',
+    'lastSkippedCount',
+    'lastErrorCode',
+    'disconnectedAt',
+    'isOwner',
+  ])
+    expect(source, internal).not.toContain(internal);
   await page.getByLabel('Name', { exact: true }).fill('Sam’s work (renamed)');
   await page.getByLabel('Usual kind').selectOption('appointment');
   await page.getByRole('checkbox', { name: /Milo/ }).uncheck();
@@ -266,6 +280,62 @@ test('the other adult sees a household calendar, may refresh it, and gets no con
   await expect(page.getByRole('link', { name: 'Reconnect' })).toHaveCount(0);
   expect((await page.request.get(`/settings/calendars/${id}/edit`)).status()).toBe(404);
   expect((await page.request.get(`/settings/calendars/${id}/reconnect`)).status()).toBe(404);
+  // Help about the connection is the owner's: the other adult sees the state, not what to do about it.
+  await q(
+    `update calendar_source set last_sync_status = 'address_rejected', last_sync_error_code = 'address_rejected' where id = $1`,
+    [id],
+  );
+  await page.reload();
+  await expect(page.getByText('The Google Calendar address needs attention')).toBeVisible();
+  await expect(page.getByText(/If you reset the secret address/)).toHaveCount(0);
+  await q(
+    `update calendar_source set last_sync_status = 'ok', last_sync_error_code = null where id = $1`,
+    [id],
+  );
+});
+
+test('whose a calendar is reads from ownership, never from whether a person is linked to the owner', async ({
+  browser,
+}) => {
+  const id = await calendarIdNamed('Sam’s work');
+  const sam = (
+    await q(`select id, user_id from person where name = 'Sam' and user_id is not null`)
+  )[0]!;
+  const controls = async (page: Page) => ({
+    change: await page.getByRole('link', { name: 'Change settings' }).count(),
+    disconnect: await page.locator('summary', { hasText: 'Disconnect' }).count(),
+    refresh: await page.getByRole('button', { name: 'Refresh now' }).count(),
+  });
+  const owner = await fixtureAdultContext(browser, 'sam', { width: 375, height: 812 });
+  const viewer = await fixtureAdultContext(browser, 'alex', { width: 375, height: 812 });
+  try {
+    // Owner linked to a person; viewer sees the owner's name.
+    await owner.page.goto(`/settings/calendars/${id}`);
+    await expect(owner.page.getByText('Yours · Everyone at home')).toBeVisible();
+    expect(await controls(owner.page)).toEqual({ change: 1, disconnect: 1, refresh: 1 });
+    await viewer.page.goto(`/settings/calendars/${id}`);
+    await expect(viewer.page.getByText('Sam’s · Everyone at home')).toBeVisible();
+    expect(await controls(viewer.page)).toEqual({ change: 0, disconnect: 0, refresh: 1 });
+
+    // Owner not linked to any person: still "Yours" for the owner, never for the viewer.
+    await q(`update person set user_id = null where id = $1`, [sam.id]);
+    await owner.page.reload();
+    await expect(owner.page.getByText('Yours · Everyone at home')).toBeVisible();
+    expect(await controls(owner.page)).toEqual({ change: 1, disconnect: 1, refresh: 1 });
+    await viewer.page.reload();
+    await expect(viewer.page.getByText('Someone at home · Everyone at home')).toBeVisible();
+    await expect(viewer.page.getByText('Yours')).toHaveCount(0);
+    expect(await controls(viewer.page)).toEqual({ change: 0, disconnect: 0, refresh: 1 });
+    await viewer.page.goto('/settings/calendars');
+    await expect(viewer.page.getByRole('link', { name: /Sam’s work/ })).toContainText(
+      'Everyone at home',
+    );
+    expect(await viewer.page.locator('main').innerText()).not.toContain('Yours');
+  } finally {
+    await q(`update person set user_id = $2 where id = $1`, [sam.id, sam.user_id]);
+    await owner.context.close();
+    await viewer.context.close();
+  }
 });
 
 test('disconnect, then edit while disconnected (the privacy recovery), then reconnect with the same address', async ({
@@ -333,14 +403,33 @@ test('disconnect, then edit while disconnected (the privacy recovery), then reco
   await page.getByRole('button', { name: 'Save' }).click();
   await page.waitForURL(new RegExp(`/people/${coach}$`));
 
-  // Connecting the same address anew is refused and points at reconnecting.
+  // Connecting the same address anew is refused, names the calendar and
+  // links to it; nothing is reconnected by the attempt.
   await page.goto('/settings/calendars/new');
   await page.getByLabel('Name', { exact: true }).fill('Same again');
   await page.getByLabel('Google Calendar address').fill(SECRET);
   await page.getByRole('button', { name: 'Connect' }).click();
-  await expect(page.getByText('You connected that calendar before.')).toBeVisible();
+  await expect(page.getByText('You’ve connected this calendar before.')).toBeVisible();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Same again'); // safe values stay
+  await expect(page.getByLabel('Google Calendar address')).toHaveValue(''); // the secret does not
+  expect(await page.content()).not.toContain(TOKEN);
+  const goTo = page.getByRole('link', { name: /Go to Sam’s work/ });
+  await expect(goTo).toHaveAttribute('href', `/settings/calendars/${id}`);
+  await goTo.click();
+  await page.waitForURL(new RegExp(`/settings/calendars/${id}$`));
+  await expect(page.getByText('Disconnected.', { exact: true })).toBeVisible(); // still: no silent reconnect
+  expect(
+    (
+      await q(
+        `select status from calendar_connection c join calendar_source s on s.connection_id = c.id where s.id = $1`,
+        [id],
+      )
+    )[0]!.status,
+  ).toBe('disconnected');
+  expect(
+    (await q(`select count(*)::int as n from calendar_source where name = 'Same again'`))[0]!.n,
+  ).toBe(0);
 
-  await page.goto(`/settings/calendars/${id}`);
   await page.getByRole('link', { name: 'Reconnect' }).click();
   await page.waitForURL(new RegExp(`/settings/calendars/${id}/reconnect$`));
   await page.goto(`/settings/calendars/${id}/reconnect`); // a full load: the HTML, not the last page's
@@ -371,7 +460,7 @@ test('disconnect, then edit while disconnected (the privacy recovery), then reco
   ).toBeGreaterThan(0);
 });
 
-test('the secret address is in no log line, audit row or export', async ({ page }) => {
+test('the secret address is in no audit row and not in the export', async ({ page }) => {
   await signInAsFixtureAdult(page, 'sam');
   const audit = await q(
     `select coalesce(summary, '') || coalesce(meta::text, '') as t from audit_log`,
@@ -416,6 +505,47 @@ test('without JavaScript: connect, change settings, refresh, disconnect and reco
   await page.getByLabel('Google Calendar address').fill(addressFor(token));
   await page.getByRole('button', { name: 'Reconnect' }).click();
   await page.waitForURL(/\?reconnected=1$/);
+  await context.close();
+});
+
+test('without JavaScript: a refused connect keeps the safe values, clears the address and asks for it again', async ({
+  browser,
+}) => {
+  const { context, page } = await fixtureAdultContext(
+    browser,
+    'alex',
+    { width: 375, height: 812 },
+    { javaScriptEnabled: false },
+  );
+  await page.goto('/settings/calendars/new');
+  // A name that is an address is refused by the shared schema, on the name.
+  await page.getByLabel('Name', { exact: true }).fill('No-script https://refusal');
+  await page
+    .getByLabel('Google Calendar address')
+    .fill(addressFor('e2enojsrefused000000000000000000'));
+  await page.getByLabel('Who can see it').selectOption('private');
+  await page.getByLabel('Usual kind').selectOption('work');
+  await page.getByRole('checkbox', { name: /Milo/ }).check();
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.waitForLoadState('load');
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('No-script https://refusal');
+  await expect(page.getByLabel('Who can see it')).toHaveValue('private');
+  await expect(page.getByLabel('Usual kind')).toHaveValue('work');
+  await expect(page.getByRole('checkbox', { name: /Milo/ })).toBeChecked();
+  await expect(page.getByLabel('Google Calendar address')).toHaveValue('');
+  await expect(page.getByText('Please paste it again.')).toBeVisible();
+  const html = await page.content();
+  expect(html).not.toContain('e2enojsrefused');
+  expect(
+    (
+      await q(`select count(*)::int as n from calendar_source where name like 'No-script https%'`)
+    )[0]!.n,
+  ).toBe(0);
+  // Without scripts nothing moves focus; the field is still marked invalid and
+  // the message is an alert, so the relationship holds for assistive tech.
+  expect(html).toContain('role="alert"');
   await context.close();
 });
 

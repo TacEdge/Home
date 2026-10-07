@@ -32,7 +32,7 @@ export const NOT_PERMITTED_COPY: Record<NotPermittedCode, string> = {
     'That isn’t a Google Calendar secret address. It starts with https://calendar.google.com and ends in basic.ics.',
   calendar_already_connected: 'That calendar is already connected in HOME.',
   calendar_can_reconnect:
-    'You connected that calendar before. Connect it again from its page, and its people and notes come back.',
+    'You’ve connected this calendar before. Connect it again from its page, and its people and notes come back.',
   calendar_address_mismatch:
     'That isn’t the address this calendar was connected with. Use the same secret address, or connect it as a new calendar.',
   calendar_keys_unavailable: 'Calendars can’t be connected here just now.',

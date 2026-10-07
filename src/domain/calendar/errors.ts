@@ -11,6 +11,20 @@ import { NotFoundError, NotPermittedError } from '../common/errors';
 // error's class name and a Postgres SQLSTATE. No message, no cause, no stack
 // from the original. The logger's value scrubbing stays as defence in depth.
 
+/**
+ * "That address is one of your own disconnected calendars" (ADR 0007 §40):
+ * the same refusal, carrying the calendar's id so a screen can point at it.
+ * Only the signed-in owner's own calendar is ever named, identity having been
+ * proven by the address they just typed; the id is a HOME record id, never a
+ * connection id, fingerprint or address.
+ */
+export class CalendarCanReconnectError extends NotPermittedError {
+  constructor(readonly calendarId: string) {
+    super('calendar_can_reconnect');
+    this.name = 'CalendarCanReconnectError';
+  }
+}
+
 export class CalendarUnexpectedError extends Error {
   constructor(
     readonly operation: string,

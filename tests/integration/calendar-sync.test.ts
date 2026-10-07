@@ -10,7 +10,7 @@ import {
   listCalendars,
   updateCalendar,
 } from '@/domain/calendar/service';
-import { CalendarUnexpectedError } from '@/domain/calendar/errors';
+import { CalendarCanReconnectError, CalendarUnexpectedError } from '@/domain/calendar/errors';
 import { refreshCalendar } from '@/domain/calendar/sync';
 import { auditedWrite } from '@/domain/common/write';
 import { NotFoundError, NotPermittedError } from '@/domain/common/errors';
@@ -653,6 +653,10 @@ describe('disconnect and reconnect', () => {
       deps,
     ).catch((e: unknown) => e);
     expect((refused as NotPermittedError).code).toBe('calendar_can_reconnect');
+    // The refusal names the calendar to go back to (its own record id, nothing else).
+    expect(refused).toBeInstanceOf(CalendarCanReconnectError);
+    expect((refused as CalendarCanReconnectError).calendarId).toBe(calendarId);
+    expect(Object.keys(refused as object).sort()).toEqual(['calendarId', 'code', 'name']);
     expect(
       (await getCalendar(h.sam, calendarId, { includeArchived: true }, deps)).archivedAt,
     ).not.toBeNull();

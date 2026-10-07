@@ -26,17 +26,45 @@ describe('statusLine', () => {
     ).toMatch(/^Last updated /);
   });
 
-  it('says what was skipped, and what could not be reached, keeping the last good time in view', () => {
+  it('says what was skipped, and keeps the last good time beside a failure', () => {
     expect(statusLine(view({ lastSyncStatus: 'partial', lastSyncedAt: ago(3) }), now, tz)).toBe(
       'Updated 3 min ago, with a few things skipped',
     );
     expect(
-      statusLine(view({ lastSyncStatus: 'unreachable', lastSyncedAt: ago(40) }), now, tz),
-    ).toBe('Couldn’t update just now. Updated 40 min ago');
-    // A read from moments ago needs no second sentence.
-    expect(statusLine(view({ lastSyncStatus: 'unreachable', lastSyncedAt: ago(1) }), now, tz)).toBe(
-      'Couldn’t update just now',
-    );
+      statusLine(view({ lastSyncStatus: 'unreachable', lastSyncedAt: ago(12) }), now, tz),
+    ).toBe('Couldn’t update just now · Last updated 12 min ago');
+    expect(
+      statusLine(
+        view({
+          lastSyncStatus: 'address_rejected',
+          lastSyncedAt: ago(60 * 24),
+          lastAttemptAt: ago(1),
+        }),
+        now,
+        tz,
+      ),
+    ).toBe('The Google Calendar address needs attention · Last updated yesterday, 09:40');
+    expect(
+      statusLine(
+        view({
+          lastSyncStatus: 'not_a_calendar',
+          lastSyncedAt: ago(60 * 24 * 9),
+          lastAttemptAt: ago(1),
+        }),
+        now,
+        tz,
+      ),
+    ).toMatch(/^HOME couldn’t read this calendar · Last updated /);
+    expect(
+      statusLine(view({ lastSyncStatus: 'too_large', lastSyncedAt: ago(60 * 24 * 9) }), now, tz),
+    ).toMatch(/^This calendar has more history than HOME can read at once · Last updated /);
+  });
+
+  it('a failure before any good read stands alone', () => {
+    for (const s of ['unreachable', 'address_rejected', 'not_a_calendar', 'too_large'] as const)
+      expect(statusLine(view({ lastSyncStatus: s, lastSyncedAt: null }), now, tz)).not.toMatch(
+        /Last updated|Updated/,
+      );
     expect(statusLine(view({ lastSyncStatus: 'unreachable', lastSyncedAt: null }), now, tz)).toBe(
       'Couldn’t update just now',
     );
@@ -44,14 +72,14 @@ describe('statusLine', () => {
 
   it('names what needs a person, without a code', () => {
     const lines = (['address_rejected', 'not_a_calendar', 'too_large'] as const).map((s) =>
-      statusLine(view({ lastSyncStatus: s }), now, tz),
+      statusLine(view({ lastSyncStatus: s, lastSyncedAt: null }), now, tz),
     );
     expect(lines).toEqual([
       'The Google Calendar address needs attention',
       'HOME couldn’t read this calendar',
       'This calendar has more history than HOME can read at once',
     ]);
-    for (const l of lines) expect(l).not.toMatch(/ics|feed|uid|hash|fingerprint|40\d|50\d/i);
+    for (const l of lines) expect(l).not.toMatch(/ics|feed|uid|hash|fingerprint|40\d|50\d|_/i);
   });
 
   it('reads Disconnected whatever else is recorded, and not-yet-updated before the first read', () => {

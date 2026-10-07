@@ -43,23 +43,23 @@ export default async function CalendarPage({
     },
   );
   const people = await peopleFor(actor);
-  const owner = people.ownerName(calendar);
+  // Whose it is reads from the service's own answer, never from whether a
+  // person record happens to be linked to the owner.
+  const ownerName = calendar.isOwner ? null : people.ownerName(calendar);
+  const whose = calendar.isOwner ? 'Yours' : ownerName ? `${ownerName}’s` : 'Someone at home';
   const disconnected = calendar.archivedAt !== null;
   const named = calendar.defaultPersonIds
     .map((pid) => people.byId.get(pid))
     .filter((p): p is NonNullable<typeof p> => Boolean(p));
   const just = Object.keys(JUST).find((k) => query[k] === '1');
-  const help = statusHelp(calendar);
+  // Help about the connection is the owner's to act on; the other adult sees the state only.
+  const help = calendar.isOwner ? statusHelp(calendar) : null;
   const here = `/settings/calendars/${calendar.id}`;
 
   return (
     <Page
       title={calendar.name}
-      intro={
-        <Quiet>
-          {[owner ? `${owner}’s` : 'Yours', VISIBILITY_LABEL[calendar.visibility]].join(' · ')}
-        </Quiet>
-      }
+      intro={<Quiet>{[whose, VISIBILITY_LABEL[calendar.visibility]].join(' · ')}</Quiet>}
     >
       {just ? (
         <p role="status" className="text-ink-2 mt-4">
@@ -81,7 +81,7 @@ export default async function CalendarPage({
         <>
           <p>{statusLine(calendar, now, env.HOME_TIMEZONE)}</p>
           {help ? <Quiet>{help}</Quiet> : null}
-          <ActionForm action={refreshCalendarAction} className="mt-3">
+          <ActionForm action={refreshCalendarAction} className="mt-3 -ml-1">
             <input type="hidden" name="id" value={calendar.id} />
             <Button variant="quiet">Refresh now</Button>
           </ActionForm>

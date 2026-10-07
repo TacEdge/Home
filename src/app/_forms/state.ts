@@ -14,6 +14,8 @@ export type FormState =
        * returned to the browser that sent them; never logged or audited.
        */
       values?: Record<string, string>;
+      /** Somewhere to go from the refusal (a HOME path and plain words), when one helps. */
+      link?: { href: string; label: string };
     };
 
 export const idle: FormState = { status: 'idle' };
