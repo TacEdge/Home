@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
+import { seedCalendar } from './calendar-feeds';
 import { withDb } from './helpers';
 
 // M3 acceptance (contract §4.5, §10 items 10 and 11): the accessibility and
@@ -30,6 +31,20 @@ async function screens(): Promise<string[]> {
   );
   for (const id of [person, event, project, task, capture, archivedPerson])
     expect(id, 'a seeded record for the sweep').toBeTruthy();
+  // M4 Package 5: a connected and a disconnected calendar of Sam's.
+  const calendar = await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar',
+    visibility: 'household',
+    fingerprintTag: 'sweepconnected',
+  });
+  const disconnected = await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'Sweep calendar (disconnected)',
+    visibility: 'household',
+    disconnected: true,
+    fingerprintTag: 'sweepdisconnected',
+  });
   return [
     '/today',
     '/forward',
@@ -53,6 +68,13 @@ async function screens(): Promise<string[]> {
     ...['task', 'event', 'project', 'note', 'know'].map((as) => `/sort/${capture}/${as}`),
     '/settings',
     '/settings/you',
+    '/settings/calendars',
+    '/settings/calendars/new',
+    `/settings/calendars/${calendar}`,
+    `/settings/calendars/${calendar}/edit`,
+    `/settings/calendars/${disconnected}`,
+    `/settings/calendars/${disconnected}/edit`,
+    `/settings/calendars/${disconnected}/reconnect`,
     '/settings/knows',
     '/settings/archived',
     '/settings/activity',
@@ -94,7 +116,7 @@ async function smallTargets(page: Page): Promise<string[]> {
 }
 
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {
-  test(`every M3 screen at ${name}: accessible, no horizontal scroll, 44px targets`, async ({
+  test(`every M3 and M4 screen at ${name}: accessible, no horizontal scroll, 44px targets`, async ({
     browser,
   }) => {
     test.setTimeout(300_000);
@@ -234,8 +256,40 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
     await expect(page.locator('[data-form-message]')).toBeFocused();
     expect(await focusUnobscured(page), `${name} person edit`).toBeNull();
 
+    // M4 Package 5: a field refusal on the connect form (a name that is an
+    // address), with the secret field cleared; and a refusal that names no
+    // field on the reconnect form (the wrong address), focusing the message.
+    const sam = await fixtureAdultContext(browser, 'sam', viewport);
+    await sam.page.goto('/settings/calendars/new');
+    await sam.page.getByLabel('Name', { exact: true }).fill('p10 https://refusal');
+    await sam.page
+      .getByLabel('Google Calendar address')
+      .fill(
+        'https://calendar.google.com/calendar/ical/synthetic%40example.test/private-p10refusal0000000000000000/basic.ics',
+      );
+    await sam.page.getByRole('button', { name: 'Connect' }).click();
+    await expect(sam.page.getByLabel('Name', { exact: true })).toBeFocused();
+    expect(await focusUnobscured(sam.page), `${name} /settings/calendars/new`).toBeNull();
+    await expect(sam.page.getByLabel('Google Calendar address')).toHaveValue('');
+    const disconnected = await seedCalendar({
+      owner: 'fixture-sam',
+      name: 'Sweep calendar (disconnected)',
+      visibility: 'household',
+      disconnected: true,
+      fingerprintTag: 'sweepdisconnected',
+    });
+    await sam.page.goto(`/settings/calendars/${disconnected}/reconnect`);
+    await sam.page
+      .getByLabel('Google Calendar address')
+      .fill(
+        'https://calendar.google.com/calendar/ical/synthetic%40example.test/private-p10wrong00000000000000000000/basic.ics',
+      );
+    await sam.page.getByRole('button', { name: 'Reconnect' }).click();
+    await expect(sam.page.locator('[data-form-message]')).toBeFocused();
+    expect(await focusUnobscured(sam.page), `${name} calendar reconnect`).toBeNull();
+    await sam.context.close();
+
     // The capture bar's own refusal keeps focus in the box, in view.
-    await page.goto('/today');
     await page.locator('#capture-text').fill('   ');
     await page.getByRole('button', { name: 'Keep' }).click();
     await expect(page.locator('#capture-text')).toBeFocused();

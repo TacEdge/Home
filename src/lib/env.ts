@@ -217,6 +217,26 @@ export function calendarKeyEnv(source: Record<string, string | undefined> = proc
   };
 }
 
+/**
+ * Where synthetic calendar feeds are read from in a local or CI run of the
+ * screens (src/integrations/calendar/test-feeds.ts), with what the guard
+ * there needs to refuse a deployed environment. Raw strings, read on each
+ * call. Never set on Vercel.
+ */
+export function testFeedEnv(source: Record<string, string | undefined> = process.env): {
+  HOME_TEST_CALENDAR_FEEDS?: string;
+  VERCEL_ENV?: string;
+  VERCEL?: string;
+  NODE_ENV?: string;
+} {
+  return {
+    HOME_TEST_CALENDAR_FEEDS: source.HOME_TEST_CALENDAR_FEEDS,
+    VERCEL_ENV: source.VERCEL_ENV,
+    VERCEL: source.VERCEL,
+    NODE_ENV: source.NODE_ENV,
+  };
+}
+
 let cached: Env | undefined;
 
 /** Validated environment. Parsed on first access; throws EnvError if invalid. */

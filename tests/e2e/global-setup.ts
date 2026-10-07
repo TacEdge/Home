@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises';
 import { assertTestDatabase } from '../db-guard';
 import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL, testEnv } from '../env';
 import { resetTestDatabase } from '../integration/global-setup';
+import { FEED_DIR } from './calendar-feeds';
 import { MAILBOX_PATH } from './mailbox';
 
 // Fresh database and empty mailbox before the e2e suite. The guard runs here
@@ -15,6 +16,7 @@ export default async function globalSetup() {
   assertTestDatabase(TEST_APP_DATABASE_URL);
   await resetTestDatabase();
   await rm(MAILBOX_PATH, { force: true });
+  await rm(FEED_DIR, { recursive: true, force: true });
   const seed = spawnSync('node', ['scripts/seed-fixtures.mts'], {
     stdio: 'inherit',
     env: { ...process.env, ...testEnv, DATABASE_URL: TEST_APP_DATABASE_URL },

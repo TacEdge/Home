@@ -20,7 +20,7 @@ import {
   type ReconnectCalendarInput,
   type UpdateCalendarInput,
 } from './inputs';
-import { calendarBoundary } from './errors';
+import { calendarBoundary, CalendarCanReconnectError } from './errors';
 import { calendarKeys } from './keys';
 
 // Calendar connections and their sources (M4 contract §3.2, §4.1, §4.4, §4.6;
@@ -309,8 +309,9 @@ export async function connectCalendar(
         // reconnecting. Nothing changes; reconnectCalendar restores it with its
         // own settings (ADR 0007 §42).
         const [mine] = await tx
-          .select({ id: calendarConnection.id })
+          .select({ id: calendarSource.id })
           .from(calendarConnection)
+          .innerJoin(calendarSource, eq(calendarSource.connectionId, calendarConnection.id))
           .where(
             and(
               eq(calendarConnection.ownerUserId, actor.userId),
@@ -319,7 +320,7 @@ export async function connectCalendar(
             ),
           )
           .limit(1);
-        if (mine) throw new NotPermittedError('calendar_can_reconnect');
+        if (mine) throw new CalendarCanReconnectError(mine.id);
 
         const connectionId = randomUUID();
         const sealed = sealCredential(keys.credentials, normalised, {

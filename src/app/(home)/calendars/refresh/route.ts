@@ -10,9 +10,10 @@ export const dynamic = 'force-dynamic';
 // refresh-on-use. The shell (Package 6) calls it without waiting when a
 // calendar the signed-in adult can see is older than 15 minutes; rendering
 // never writes. Same-origin only, never cached, and it answers only whether
-// anything changed, so the page knows to refresh itself: never a calendar's
-// name, address or events, never an error's detail. A refusal (the closed
-// gate in Production, Kev, missing keys) is simply "no change".
+// anything changed (a calendar was refreshed: its freshness or status moved,
+// whether or not its events did), so the page knows to re-read itself: never
+// a calendar's name, address or events, never an error's detail. A refusal
+// (the closed gate in Production, Kev, missing keys) is simply "no change".
 
 const noStore = { 'Cache-Control': 'no-store' };
 
@@ -33,11 +34,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!actor) return new Response(null, { status: 401, headers: noStore });
   try {
     const results = await refreshStaleCalendarsNow(actor);
-    const changed = results.some(
-      ({ outcome: o }) =>
-        'counts' in o &&
-        o.counts.added + o.counts.changed + o.counts.archived + o.counts.restored > 0,
-    );
+    const changed = results.some(({ outcome: o }) => 'counts' in o);
     return Response.json({ changed }, { status: 200, headers: noStore });
   } catch (e) {
     if (e instanceof NotPermittedError || e instanceof NotFoundError)

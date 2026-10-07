@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { formAction, toFormState } from '@/app/_forms/action';
+import { FormRefusal } from '@/app/_forms/errors';
 import { NOT_FOUND_COPY, NOT_PERMITTED_COPY, UNEXPECTED_COPY } from '@/app/_forms/error-copy';
 import { NotFoundError, NotPermittedError, type NotPermittedCode } from '@/domain/common/errors';
 import { NotSignedInError, type UserActor } from '@/trust/actor';
@@ -46,6 +47,26 @@ describe('toFormState', () => {
 
   it.each(Object.keys(NOT_PERMITTED_COPY) as NotPermittedCode[])('maps %s', (code) => {
     expect(toFormState(new NotPermittedError(code)).message).toBe(NOT_PERMITTED_COPY[code]);
+  });
+
+  it('shows an action’s own refusal with its link, and nothing else', () => {
+    const s = toFormState(
+      new FormRefusal('You’ve connected this calendar before.', {
+        href: '/settings/calendars/abc',
+        label: 'Go to Sam’s work',
+      }),
+    );
+    expect(s).toEqual({
+      status: 'error',
+      message: 'You’ve connected this calendar before.',
+      fields: {},
+      link: { href: '/settings/calendars/abc', label: 'Go to Sam’s work' },
+    });
+    expect(toFormState(new FormRefusal('No.'))).toEqual({
+      status: 'error',
+      message: 'No.',
+      fields: {},
+    });
   });
 
   it('never shows an unexpected error’s message', () => {

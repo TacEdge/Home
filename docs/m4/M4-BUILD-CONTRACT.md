@@ -1,6 +1,6 @@
 # M4 — Calendar Integration: Build Contract
 
-Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–4a merged; migration `0007` ran in Production and Preview; Package 4b (calendar and sync services, ADR 0007 §34–42) is in review, with the fixes from its Opus review.
+Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–4b merged; migration `0007` ran in Production and Preview; Package 5 (Settings › Calendars, ADR 0007 §43) is in review.
 Implementers: per package (§2.3). Reviewer: Opus reviews every package before the owner merges it.
 
 M4 brings the family's calendars into HOME. At the end of M4 an adult can connect a Google calendar by its secret iCal address, see its events on Today, Forward, a profile's *Coming up* and each event's page beside the events entered by hand, say who is going and who is responsible for a synced event, see how fresh each calendar is, refresh it, and disconnect it. A person's profile shows their regular week. A repeating manual event can be changed for one occurrence. **HOME never writes to a calendar, nothing runs in the background, and nothing here is intelligence:** no conflicts, insights, weather, free windows or Kev.
