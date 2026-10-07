@@ -27,6 +27,12 @@ export type LoadedAgenda = {
   days: AgendaDay[];
   /** People the adult can see, for names and colours beside items. */
   people: Map<string, Person>;
+  /**
+   * The events as the engine read them, with who each is for: what a
+   * profile's regular week is derived from (profile engine), so it reads
+   * exactly what the agenda read.
+   */
+  events: AgendaEventInput[];
 };
 
 /** Today in the home time zone. */
@@ -85,5 +91,6 @@ export async function loadAgenda(
       })),
     }),
     people: new Map(people.map((p) => [p.id, p])),
+    events: withPeople,
   };
 }
