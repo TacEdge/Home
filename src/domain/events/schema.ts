@@ -73,6 +73,26 @@ export type CreateEventInput = z.input<typeof createEventInput>;
 export const updateEventInput = z.object(fields).partial().strict();
 export type UpdateEventInput = z.input<typeof updateEventInput>;
 
+/**
+ * What one occurrence of a repeating manual event can change on its own
+ * (M4 contract §3.7): its title, details, kind, place and time (timed or
+ * all-day, in any zone the event rules allow). Its visibility, owner,
+ * domain and repetition are its series', so they are not inputs. At least
+ * one field.
+ */
+export const occurrenceChangeInput = z
+  .object({
+    title: fields.title,
+    description: fields.description,
+    location: fields.location,
+    kind: fields.kind,
+    time: fields.time,
+  })
+  .partial()
+  .strict()
+  .refine((p) => Object.keys(p).length > 0, { message: 'nothing to change' });
+export type OccurrenceChangeInput = z.input<typeof occurrenceChangeInput>;
+
 export const eventPersonInput = z
   .object({ eventId: recordId, personId: recordId, role: z.enum(EVENT_PERSON_ROLES) })
   .strict();

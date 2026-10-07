@@ -1,6 +1,6 @@
 # M4 — Calendar Integration: Build Contract
 
-Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–6 merged; migration `0007` ran in Production and Preview; Package 7 (the regular week, ADR 0007 §45) is in review.
+Status: **Approved** by the owner, 2026-10-05 (the M4 readiness plan and decisions 1–6, recorded in ADR 0007). This contract is Package 0; it changes no code. Progress: Packages 0–7 merged; migration `0007` ran in Production and Preview; Package 8a (single-occurrence edits, engine and service, ADR 0007 §46) is in review.
 Implementers: per package (§2.3). Reviewer: Opus reviews every package before the owner merges it.
 
 M4 brings the family's calendars into HOME. At the end of M4 an adult can connect a Google calendar by its secret iCal address, see its events on Today, Forward, a profile's *Coming up* and each event's page beside the events entered by hand, say who is going and who is responsible for a synced event, see how fresh each calendar is, refresh it, and disconnect it. A person's profile shows their regular week. A repeating manual event can be changed for one occurrence. **HOME never writes to a calendar, nothing runs in the background, and nothing here is intelligence:** no conflicts, insights, weather, free windows or Kev.
@@ -152,11 +152,11 @@ interface CalendarProvider {
 
 ### 3.6 Regular week (`profile`)
 
-- A pure derivation from the events a person attends or is responsible for (manual and synced, as the reader can see them): weekly and fortnightly series active in the coming weeks, shown on the profile as one quiet line ("Usually: Wednesday swimming 15:30, Saturday football 09:00"). Computed on read; nothing is stored; no inference about the person (CLAUDE.md rule 11). Not a per-person day, not getting-there (M5).
+- A pure derivation from the events a person attends or is responsible for (manual and synced, as the reader can see them): weekly and fortnightly series active in the coming weeks, shown on the profile as a small weekday timetable under **Usually** (each weekday that has something, then its rows in the agenda's own style, a fortnightly one saying "Every second Friday"; nothing at all when there is nothing regular). This supersedes the earlier "one quiet line" wording (owner's Package 7 brief, ADR 0007 §45). Computed on read; nothing is stored; no inference about the person (CLAUDE.md rule 11). Not a per-person day, not getting-there (M5).
 
 ### 3.7 Manual single-occurrence edits
 
-- A repeating **manual** event can be changed for one occurrence: its title, time, place, details or people. The change is an **override** row on the same model as an imported override (§7): it points at its series and records the original occurrence; the series gains the matching exdate in the same transaction. **Back to the series** archives the override and removes the exdate.
+- A repeating **manual** event can be changed for one occurrence: its title, time, place, details or people. The change is an **override** row on the same model as an imported override (§7): it points at its series and records the original occurrence. The series row itself is not changed: the original is suppressed by the live override (Package 6's identity rule, ADR 0007 §44), not by an exdate, so "skip this one" keeps its own meaning. **Back to the series** archives the override. (This supersedes the earlier wording that added and removed a series exdate; ADR 0007 §46.)
 - **Skip this one** (ADR 0006 §42) is unchanged. Whole-series edits keep each override whose original occurrence the new rule still reaches; an override the rule no longer reaches is archived with the series' change and shown under the series as no longer part of it. Package 8a records the exact rules in ADR 0007.
 - Synced events are never edited this way (they are read-only).
 
