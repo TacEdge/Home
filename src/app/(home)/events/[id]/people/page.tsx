@@ -24,6 +24,16 @@ export default async function EventPeoplePage({ params }: { params: Promise<{ id
   });
   const once = isOccurrenceChange(event);
   if (event.source === 'manual' && !once) redirect(`/events/${event.id}/edit`);
+  // A changed time put away with its series is read-only, as its page says.
+  if (once) {
+    const series = event.recurrenceParentId
+      ? await getEvent(actor, event.recurrenceParentId).catch((e: unknown) => {
+          if (e instanceof NotFoundError) return null;
+          throw e;
+        })
+      : null;
+    if (!series) redirect(`/events/${event.id}`);
+  }
   const [people, annotations] = await Promise.all([
     listPeople(actor),
     listEventPeople(actor, event.id),

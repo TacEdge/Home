@@ -26,7 +26,8 @@
     "test:e2e": "playwright test",
     "check:private-terms": "node scripts/check-private-terms.mts",
     "check:previous-schema": "node scripts/check-previous-schema.mts",
-    "verify": "node scripts/verify-local.mts"
+    "verify": "node scripts/verify-local.mts",
+    "verify:focused": "node scripts/verify-focused.mts"
   },
   "dependencies": {
     "better-auth": "^1.7.7",

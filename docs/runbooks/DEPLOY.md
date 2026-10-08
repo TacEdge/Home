@@ -168,7 +168,7 @@ Confirmed by the owner, 2026-10-02:
 - Postmark DKIM and Return-Path are verified for the sending subdomain.
 - A sign-in request from HOME reaches Postmark.
 
-**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. M4 (calendars, ADR 0007) is being built on synthetic data: no calendar credential exists in Production, and no real calendar is connected anywhere, until the gate opens and M4 is accepted. Preview may hold only a throwaway Google account's synthetic calendar (M4 contract §6.2). M4 adds its own rows here in its Package 9, and `HOME_CREDENTIALS_KEY` to the env table in its Package 2. The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
+**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. M4 (calendars, ADR 0007) is being built on synthetic data: no calendar credential exists in Production, and no real calendar is connected anywhere, until the gate opens and M4 is accepted. Preview may hold only a throwaway Google account's synthetic calendar (M4 contract §6.2). M4's own rows are items 12–15 below (added by its Package 9); its keys are in the env table (§A). The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
 
 Outstanding M1 acceptance items. Record the date and result of each here when it passes.
 
@@ -191,6 +191,15 @@ Real-data gate items (ADR 0006 §2, §7; M3 contract §6–7). Procedures: §D *
 | 10 | **Logging review** (ADR 0003 §8): runtime logs confirmed to carry no family data; error tracking stays off unless decided otherwise. | Real data does not leak into logs. |
 | 11 | **Open the gate**: only after items 1–10 are recorded, set `HOME_REAL_DATA` to exactly `open` in Vercel **Production** (never Preview) and redeploy. Until then every family-domain write in Production is refused. | Real household data may enter. |
 
+M4 (calendars) items. M4 is technically accepted on synthetic data (`docs/m4/M4-ACCEPTANCE.md`); these close its operational acceptance. Items 12 and 13 may be done while the gate is closed; 14 and 15 need it open (item 11) and come last. Never paste a secret calendar address or a key anywhere but the HOME form and the Vercel variable it belongs to.
+
+| # | Item | Proves |
+|---|---|---|
+| 12 | **Calendar keys in Production and Preview**: `HOME_CREDENTIALS_KEY` and `HOME_FINGERPRINT_KEY` generated separately for each environment (`openssl rand -base64 32`, four different values, never equal), set in Vercel and redeployed; the boot lines read `calendar credentials key: ready` and `calendar fingerprint key: ready` in each. | Calendars can be connected, and each environment's sealed addresses open only there. |
+| 13 | **Preview test calendar** (ADR 0007 §2, M4 contract §6.2): in a throwaway Google account holding synthetic events only, its secret iCal address connected in Preview; Refresh now brings its events onto Today and Forward; Settings › Calendars shows its freshness; disconnect, then reconnect with the same address restores it; Preview's runtime logs show no part of the address. | The real Google feed path works end to end on synthetic data, in a deployed environment. |
+| 14 | **First real calendar, after the gate opens**: an adult connects their own Google calendar's secret address in Production; it refreshes; events appear with the right times on Today and Forward; a private calendar is not visible to the other adult; Settings › Activity shows the connect and refresh rows with counts only. | M4 works on the family's real calendar. |
+| 15 | **Calendar logging review**: after item 14, Production's runtime logs reviewed for the calendar flow: no secret address, calendar id, event title or place appears. | Calendar data does not leak into logs. |
+
 **Evidence required before `HOME_REAL_DATA=open`.** Each item is recorded here with its date and the owner's initials, as counts and yes/no observations only, never record contents, credentials, hosts or addresses.
 
 | Item | Evidence to record |
@@ -202,5 +211,9 @@ Real-data gate items (ADR 0006 §2, §7; M3 contract §6–7). Procedures: §D *
 | 9 | For each adult, the date and the `node scripts/check-export.mts <file>` result line ("valid home-export v2, sensitive included: false") from Production. With the gate closed the file is nearly empty, which is expected; what is checked is that it downloads, validates and leaves sensitive items out by default. Delete the downloaded files afterwards. |
 | 10 | The date the Vercel runtime logs for Production and Preview were reviewed, and that no names, addresses, record text or captured words were found; the decision on error tracking (default: none). |
 | 11 | The date `HOME_REAL_DATA=open` was set in Production, and that Settings no longer shows "HOME isn't open for family data yet." |
+| 12 | The date; for each environment, that both boot lines read `ready` (yes/no). Never the key. |
+| 13 | The date; refresh worked (yes/no); events on Today and Forward (yes/no); disconnect and reconnect restored the calendar (yes/no); the address absent from Preview's logs (yes/no). |
+| 14 | The date; which adult (initials); refresh worked (yes/no); times correct on Today and Forward (yes/no); a private calendar not visible to the other adult (yes/no, if one was connected private). |
+| 15 | The date; no address, calendar id, title or place in the logs (yes/no). |
 
 Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.

@@ -6,7 +6,7 @@ This repository holds the product documentation, the M0 experience prototype (re
 
 - Start with [`CLAUDE.md`](./CLAUDE.md) — the operating rules for anyone (human or AI) working here.
 - Product and architecture: [`docs/`](./docs/).
-- Current milestone: **M4 — Calendar Integration**, in progress on synthetic data ([`docs/m4/M4-BUILD-CONTRACT.md`](./docs/m4/M4-BUILD-CONTRACT.md)). M3 is code complete and audited ([`docs/m3/M3-ACCEPTANCE.md`](./docs/m3/M3-ACCEPTANCE.md)); its owner acceptance waits on the restore rehearsal. M2 is complete; M1 is deployed with its acceptance items open (`docs/runbooks/DEPLOY.md` §E). The Production real-data gate is closed.
+- Current milestone: **M4 — Calendar Integration**, technically accepted on synthetic data ([`docs/m4/M4-ACCEPTANCE.md`](./docs/m4/M4-ACCEPTANCE.md)); its operational acceptance on real calendars waits on `docs/runbooks/DEPLOY.md` §E items 12–15. M3 is code complete and audited ([`docs/m3/M3-ACCEPTANCE.md`](./docs/m3/M3-ACCEPTANCE.md)); its owner acceptance waits on the restore rehearsal. M2 is complete; M1 is deployed with its acceptance items open (`docs/runbooks/DEPLOY.md` §E). The Production real-data gate is closed.
 
 ## Local development
 
