@@ -129,13 +129,13 @@ Never paste a secret calendar address or a key into chat, an issue, a PR, a comm
 
 ## 9. Verification performance
 
-Measured on this cloud container (one local Postgres, one Playwright worker), `pnpm verify` on `main` before this package and on this package's branch after it:
+Measured on this cloud container (one local Postgres, one Playwright worker), `pnpm verify` on `main` before this package and on this package's branch after it. One run each side: these are observations, not a controlled benchmark.
 
 | Step | Before (`main`, 94f52f8) | After (this branch) |
 |---|---|---|
-| Lint | 34s | 16s |
-| Typecheck | 14s | 3–12s |
-| Unit | 20s | 15s |
+| Lint | 34s¹ | 16s |
+| Typecheck | 14s, **failed**² | 3–12s |
+| Unit | 20s, **failed**² | 15s |
 | Integration | 65s | 52s |
 | Build | 33s | 21s |
 | Boot validation | 2s | 2s |
@@ -143,23 +143,29 @@ Measured on this cloud container (one local Postgres, one Playwright worker), `p
 | Browser suite (Playwright) | **1,127s** (147 tests) | **997s** (148 tests) |
 | of which test bodies | 819s | 708s |
 | of which setup, two dev servers, global seed, compile on first visit | ~308s | ~289s |
-| **Whole `pnpm verify`** | **1,301s (21.7 min)** | **1,107s (18.5 min)** |
+| **Whole `pnpm verify`** | **1,301s (21.7 min)** | **1,107s (18.5 min)**³ |
 
-The non-browser steps vary run to run by a few seconds (typecheck with or without a warm cache). The browser suite is 85–87% of the whole run in both; the slowest specs before were the shell sweep (87s), the privacy sweep (86s), the occurrence spec (81s), calendars (74s), tasks (72s) and capture (72s). The test bodies outside the occurrence spec fell from 738s to 626s (−15%), the session reuse's effect; the occurrence spec stayed level (81s → 82s) while gaining a test and the refusal-focus step at four viewports.
+1. Nothing in this package changed what lint checks or how. The drop from 34s to 16s is most likely machine variance (a cold or busy container), not an improvement.
+2. The baseline typecheck and unit runs **failed**: they ran while this package's development edits were being made in the same working tree, not because of a fault on `main`. Their elapsed times are not directly comparable with the passing runs after.
+3. The headline total is indicative only: it is one run each side, includes the two failed baseline steps and the lint variance, and was not taken under controlled conditions.
+
+What the logs do support is the browser suite: 1,127s → 997s, with the test bodies outside the occurrence spec falling from 738s to 626s (below). The non-browser steps vary run to run by a few seconds (typecheck with or without a warm cache). The browser suite is 85–87% of the whole run in both; the slowest specs before were the shell sweep (87s), the privacy sweep (86s), the occurrence spec (81s), calendars (74s), tasks (72s) and capture (72s). The test bodies outside the occurrence spec fell from 738s to 626s (−15%), the session reuse's effect; the occurrence spec stayed level (81s → 82s) while gaining a test and the refusal-focus step at four viewports.
 
 **Routine checks with `pnpm verify:focused`**, measured on this branch:
 
 | Change | Ran | Time |
 |---|---|---|
 | One event page and one browser spec (`--base HEAD~1`) | lint, typecheck, no unit or integration test reached, the events, occurrence-changes and synced-events specs | **222s (3.7 min)** |
-| The whole branch, no browser specs (`--no-e2e`) | lint, typecheck, all unit and integration tests (`package.json` changed, so vitest takes everything as reached) | **90s** |
+| The whole branch, no browser specs (`--no-e2e`) | lint, typecheck, all unit and integration tests (`package.json` changed, so vitest takes everything as reached) | **90s**⁴ |
+
+4. Measured before the high-risk escalation below. The whole branch now touches the browser-suite sign-in (`tests/e2e/fixture-adults.ts`) and `playwright.config.ts`, so `pnpm verify:focused` refuses it and asks for `pnpm verify`.
 
 So a routine change that touches screens checks in about 3–4 minutes instead of about 19, and a domain-only change in about 1–2 minutes; the full run stays the gate before a PR, and CI runs everything as before.
 
 **What was done** (ADR 0007 §48):
 
-- **`pnpm verify:focused`** for routine work: lint, typecheck, the unit and integration tests vitest reaches from the changed files, and the browser specs those paths map to (`scripts/verify-focused.mts`, tested by `tests/unit/verify-focused.test.ts`). It narrows; the full `pnpm verify` stays required before a PR and whenever a change touches visibility, authority, the gate, migrations, the CSP, the shell or shared UI (LOCAL-DEV.md). CI is unchanged and runs everything.
-- **Session reuse in the browser suite**: `signInAsFixtureAdult` reuses each adult's session within the worker while the server still accepts it, and falls back to the real magic-link flow (a test that signs out is followed by a real sign-in). Tests of sign-in itself use the real flow every time.
+- **`pnpm verify:focused`** for routine work: lint, typecheck, the unit and integration tests vitest reaches from the changed files, and the browser specs those paths map to (`scripts/verify-focused.mts`, tested by `tests/unit/verify-focused.test.ts`). Changed files are counted from the merge-base with `<base>` for both selections. It narrows; the full `pnpm verify` stays required before a PR. **A high-risk change fails it before anything runs**, with "High-risk files changed. Run pnpm verify." and the paths: `src/trust/**`, `src/domain/common/**`, `src/db/**` (schema and migrations), `src/integrations/**`, `src/proxy.ts`, `next.config.ts`, `src/lib/env.ts` (the real-data gate), the auth routes, and the browser suite's own sign-in, seeding and config. A changed path no browser spec maps to is named in a warning, and the result says browser coverage may be incomplete. CI is unchanged and runs everything.
+- **Session reuse in the browser suite**: `signInAsFixtureAdult` reuses each adult's session within the worker while the server still accepts it, checks that the restored session's token belongs to that adult (a mismatch fails the test; proved by caching each adult's session under the other), and falls back to the real magic-link flow (a test that signs out is followed by a real sign-in). Tests of sign-in itself use the real flow every time.
 - **Reliability**: `pnpm verify` and `pnpm verify:focused` clear the dev servers' stale caches first (they broke the typecheck and answered 404 for real routes twice during Packages 8a and 8b), and the Playwright config uses the container's provided Chromium when no path is set (the run that started with no browser at all). Date-dependent assertions met in Packages 7 and 8b were fixed at the time (#49's follow-up in #51); the calendar audit-order assertion that could fail when two rows share a timestamp has not recurred in any run since Package 7 and is left as reported on #49.
 
 **Investigated and not done:**

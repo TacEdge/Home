@@ -8,7 +8,10 @@
 // It narrows, it never replaces: `pnpm verify` (and CI) run everything, and
 // are required before a PR, and whenever a change touches visibility,
 // authority, the real-data gate, migrations, the shell, the CSP or shared
-// UI (the full privacy and device sweeps). Synthetic data only.
+// UI (the full privacy and device sweeps). A high-risk change (HIGH_RISK
+// below) fails this command outright, before anything runs: no focused
+// selection proves it. A changed path no spec maps to is named in a warning,
+// and the result says browser coverage may be incomplete. Synthetic data only.
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -50,6 +53,54 @@ export const SPEC_MAP: [RegExp, string[]][] = [
   [/^src\/ui\/|^src\/app\/(layout|globals)|^src\/app\/\(home\)\/layout/, ['shell']],
 ];
 
+/**
+ * Paths whose change needs the full run (`pnpm verify`): trust (auth,
+ * session, visibility, sensitivity, audit, the real-data gate), shared
+ * domain plumbing, the database and its migrations, integrations, the proxy
+ * (CSP, auth redirects) and the verification machinery itself.
+ */
+export const HIGH_RISK: RegExp[] = [
+  /^src\/trust\//,
+  /^src\/domain\/common\//,
+  /^src\/db\//,
+  /^drizzle\//,
+  /(^|\/)migrations?\//,
+  /\.sql$/,
+  /^drizzle\.config\./,
+  /^src\/integrations\//,
+  /^src\/proxy\.ts$/,
+  /^src\/lib\/env\.ts$/, // HOME_REAL_DATA and the environment's guards
+  /^next\.config\.ts$/,
+  /^src\/app\/api\//,
+  /^src\/app\/\(auth\)\//,
+  /^tests\/e2e\/(global-setup|helpers|fixture-adults|mailbox)\.ts$/,
+  /^tests\/fixtures\//,
+  /^playwright\.config\.ts$/,
+];
+
+/** Paths that never need a browser run. */
+const NO_BROWSER = /^docs\/|\.md$|^tests\/(unit|integration)\/|^scripts\/|^\.github\//;
+
+/**
+ * What a focused run can and cannot say about the changed paths: the
+ * high-risk ones (the run must not pass), and the ones no browser spec maps
+ * to (named, so coverage is never implied).
+ */
+export function classify(paths: readonly string[]): {
+  highRisk: string[];
+  unmapped: string[];
+} {
+  const highRisk = paths.filter((p) => HIGH_RISK.some((re) => re.test(p)));
+  const unmapped = paths.filter(
+    (p) =>
+      !highRisk.includes(p) &&
+      !NO_BROWSER.test(p) &&
+      !/^tests\/e2e\/.+\.spec\.ts$/.test(p) &&
+      !SPEC_MAP.some(([re]) => re.test(p)),
+  );
+  return { highRisk, unmapped };
+}
+
 export function specsFor(paths: readonly string[]): string[] {
   const out = new Set<string>();
   for (const p of paths) {
@@ -64,10 +115,11 @@ export function specsFor(paths: readonly string[]): string[] {
   return [...out].sort();
 }
 
-function changedPaths(base: string): string[] {
-  const git = (...a: string[]) =>
-    execFileSync('git', a, { encoding: 'utf8' }).split('\n').filter(Boolean);
-  const mergeBase = git('merge-base', base, 'HEAD')[0]!;
+const git = (...a: string[]) =>
+  execFileSync('git', a, { encoding: 'utf8' }).split('\n').filter(Boolean);
+
+/** Paths changed since the merge-base, plus uncommitted and untracked work. */
+function changedPaths(mergeBase: string): string[] {
   return [
     ...new Set([
       ...git('diff', '--name-only', mergeBase),
@@ -82,7 +134,19 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
     return i === -1 ? undefined : process.argv[i + 1];
   };
   const base = arg('--base') ?? 'origin/main';
-  const paths = changedPaths(base);
+  // Browser specs and vitest's import-graph selection both start from the
+  // merge-base, so work already on <base> is never counted as this change.
+  const mergeBase = git('merge-base', base, 'HEAD')[0]!;
+  const paths = changedPaths(mergeBase);
+  const { highRisk, unmapped } = classify(paths);
+  if (highRisk.length) {
+    console.log('✗ High-risk files changed. Run pnpm verify.');
+    for (const p of highRisk) console.log(`  · ${p}`);
+    console.log(
+      '  A focused run cannot prove these: they need the full privacy, device and gate sweeps.',
+    );
+    process.exit(1);
+  }
   const specs = process.argv.includes('--no-e2e')
     ? []
     : arg('--e2e')
@@ -91,7 +155,13 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
   const LOG_DIR = 'verify-logs';
   rmSync(LOG_DIR, { recursive: true, force: true });
   mkdirSync(LOG_DIR, { recursive: true });
-  console.log(`· ${paths.length} changed since ${base}`);
+  console.log(`· ${paths.length} changed since ${base} (merge-base ${mergeBase.slice(0, 7)})`);
+  if (unmapped.length) {
+    console.log(
+      '! No browser spec maps to these changed paths; browser coverage may be incomplete:',
+    );
+    for (const p of unmapped) console.log(`  · ${p}`);
+  }
   for (const note of prepareLocalRun()) console.log(`· ${note}`);
   const steps: [string, string[]][] = [
     ['lint', ['pnpm', 'lint']],
@@ -106,7 +176,7 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
         '--project',
         'unit',
         '--changed',
-        base,
+        mergeBase,
         '--passWithNoTests',
       ],
     ],
@@ -120,7 +190,7 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
         '--project',
         'integration',
         '--changed',
-        base,
+        mergeBase,
         '--passWithNoTests',
       ],
     ],
@@ -155,7 +225,9 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
   console.log(
     failed.length
       ? `verify:focused: failed: ${failed.join(', ')} (${total}s)`
-      : `verify:focused: passed (${total}s). Run \`pnpm verify\` before a PR.`,
+      : `verify:focused: passed (${total}s)${
+          unmapped.length ? ', with browser coverage incomplete (see above)' : ''
+        }. This is not full verification: run \`pnpm verify\` before a PR.`,
   );
   process.exit(failed.length ? 1 : 0);
 }

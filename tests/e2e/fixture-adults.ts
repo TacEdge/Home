@@ -32,7 +32,23 @@ export async function signInAsFixtureAdult(page: Page, adult: Adult): Promise<vo
     await page.context().clearCookies();
     await page.context().addCookies(saved);
     await page.goto('/today');
-    if (new URL(page.url()).pathname === '/today') return;
+    if (new URL(page.url()).pathname === '/today') {
+      // The restored session must be this adult's, never another's: the
+      // session cookie's token, looked up in the test database. (HOME's auth
+      // route answers only the sign-in paths, so there is no get-session.)
+      const cookie = saved.find((c) => c.name.endsWith('home.session_token'));
+      const token = decodeURIComponent(cookie?.value ?? '').split('.')[0];
+      const who = await withDb(async (pool) => {
+        const { rows } = await pool.query<{ email: string }>(
+          'select u.email from "session" s join "user" u on u.id = s.user_id where s.token = $1',
+          [token],
+        );
+        return rows[0]?.email;
+      });
+      if (who !== FIXTURE_ADULTS[adult].email)
+        throw new Error(`cached session for ${adult} belongs to ${who ?? 'nobody'}`);
+      return;
+    }
     sessions.delete(adult);
   }
   // A real sign-in; the per-IP link limit is a production control, reset
