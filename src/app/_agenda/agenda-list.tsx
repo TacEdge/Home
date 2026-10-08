@@ -1,6 +1,13 @@
 import type { AgendaDay, AgendaItem } from '@/domain/engines/agenda';
 import type { Person } from '@/domain/people/service';
-import { addDays, clockOf as clock, longDate, type IsoDate } from '@/lib/dates';
+import {
+  addDays,
+  clockOf as clock,
+  isoDateInZone,
+  longDate,
+  weekdayOf,
+  type IsoDate,
+} from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { Label } from '@/ui/page';
 import type { PersonColour } from '@/ui/person-dot';
@@ -14,6 +21,29 @@ export function dayLabel(date: IsoDate, today: IsoDate): string {
   if (date === today) return `Today · ${name}`;
   if (date === addDays(today, 1)) return `Tomorrow · ${name}`;
   return name;
+}
+
+const WEEKDAY = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const weekdayAt = (instant: Date, timeZone: string) =>
+  WEEKDAY[weekdayOf(isoDateInZone(instant, timeZone))]!;
+
+type Timed = Extract<AgendaItem, { kind: 'event'; allDay: false }>;
+
+/**
+ * A timed event's time and detail on one of the days it covers (ADR 0008
+ * §24): a same-day event as before; an overnight or longer one says where
+ * it runs to on its first day, which day it is in between, and where it
+ * began on its last.
+ */
+export function timedRow(item: Timed, timeZone: string): { time: string; detail: string } {
+  const start = clock(item.startsAt, timeZone);
+  const end = clock(item.endsAt, timeZone);
+  if (item.days === 1) return { time: start, detail: `until ${end}` };
+  if (item.day === 1)
+    return { time: start, detail: `until ${weekdayAt(item.endsAt, timeZone)} ${end}` };
+  if (item.day === item.days)
+    return { time: end, detail: `Ends · from ${weekdayAt(item.startsAt, timeZone)} ${start}` };
+  return { time: 'All day', detail: `Day ${item.day} of ${item.days}` };
 }
 
 function who(item: AgendaItem, people: Map<string, Person>) {
@@ -46,9 +76,8 @@ export function AgendaItemRow({
       ) : (
         <ItemRow
           href={`/events/${item.eventId}`}
-          time={clock(item.startsAt, timeZone)}
+          {...timedRow(item, timeZone)}
           title={item.title}
-          detail={`until ${clock(item.endsAt, timeZone)}`}
           who={who(item, people)}
         />
       );

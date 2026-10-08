@@ -230,6 +230,58 @@ test("the other adult's private event reads as not found; a person's Coming up u
   expect(await page.textContent('main')).not.toContain('Football'); // Isla's, not Milo's
 });
 
+test('an overnight event is one event on both days of Forward; a private one stays its owner’s (M5 Package 1)', async ({
+  browser,
+}) => {
+  const { start, next } = await withDb(
+    async (pool) =>
+      (
+        await pool.query(
+          `select to_char((now() at time zone 'Pacific/Auckland') + interval '3 days', 'YYYY-MM-DD') as start,
+                  to_char((now() at time zone 'Pacific/Auckland') + interval '4 days', 'YYYY-MM-DD') as next`,
+        )
+      ).rows[0] as { start: string; next: string },
+  );
+  const sam = await browser.newContext();
+  const page = await sam.newPage();
+  await signInAsFixtureAdult(page, 'sam');
+  await page.goto('/events/new');
+  await page.getByLabel('What', { exact: true }).fill('Late overnight P1');
+  await page.getByLabel('Date', { exact: true }).fill(start);
+  await page.getByLabel('From', { exact: true }).fill('23:00');
+  await page.getByLabel('To', { exact: true }).fill('01:00');
+  await page.getByLabel('Ends on a different day').fill(next);
+  await openSummary(page, 'More');
+  await page.getByLabel('Who can see this').selectOption('private');
+  await page.getByRole('button', { name: 'Add it' }).click();
+  await expect(page).toHaveURL(/\/events\/[0-9a-f-]{36}$/);
+  const id = page.url().split('/').pop()!;
+  try {
+    await page.goto('/forward');
+    const first = page.locator(`section[aria-labelledby="day-${start}"] a[href="/events/${id}"]`);
+    const second = page.locator(`section[aria-labelledby="day-${next}"] a[href="/events/${id}"]`);
+    await expect(first).toHaveCount(1);
+    await expect(first).toContainText('23:00');
+    await expect(first).toContainText(/until \w+day 01:00/);
+    await expect(second).toHaveCount(1);
+    await expect(second).toContainText('01:00');
+    await expect(second).toContainText(/Ends · from \w+day 23:00/);
+    await shot(page, 'p1-overnight-forward');
+
+    // The other adult sees it on neither day, and its page reads as not found.
+    const alex = await fixtureAdultContext(browser, 'alex', VIEWPORTS.desktop);
+    await alex.page.goto('/forward');
+    await expect(alex.page.getByRole('heading', { level: 1, name: 'Forward' })).toBeVisible();
+    expect(await alex.page.textContent('main')).not.toContain('Late overnight P1');
+    await alex.page.goto(`/events/${id}`);
+    await expect(alex.page.getByRole('heading', { name: 'Nothing here.' })).toBeVisible();
+    await alex.context.close();
+  } finally {
+    await withDb((pool) => pool.query('delete from event where id = $1', [id]));
+    await sam.close();
+  }
+});
+
 test('a crafted skip of a one-off event is refused, calmly', async ({ page }) => {
   await signInAsFixtureAdult(page, 'alex');
   const swim = await eventIdNamed('Swimming');

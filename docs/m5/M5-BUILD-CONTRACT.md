@@ -1,10 +1,10 @@
 # M5 — Intelligent Today: Build Contract
 
-Status: **Proposed**, 2026-10-08, and revised the same day after the owner's first review.
+Status: **Approved**, 2026-10-08 (Package 0, PR #53, merged by the owner).
 
 - **Approved:** ADR 0008 §20, §23, §24, §25 and §26. §22 is approved as provisional.
 - **Revised as the owner directed:** §21. There is no transport inference, so Getting everyone there is not built in M5.
-- **Not yet approved:** this contract (Package 0) and ADR 0008 as a whole. M5 implementation has **not started**, and Package 1 begins only after both are approved.
+- **Progress:** Package 0 merged. Package 1 (agenda groundwork, ADR 0008 §30) is in review. Packages 2–5 have not started.
 
 Implementers and reviewers: per package (§2).
 
@@ -600,4 +600,4 @@ Every M1–M4 test.
 | Decision | Why it matters | Recommended |
 |---|---|---|
 | **A structured transport record.** For example, a per-event "getting there" record saying someone needs taking or collecting, and who is doing it, distinct from event responsibility. | It is the only reliable basis for the roadmap's getting-there view, the **Who?** chip and `coordination_gap`. M6's "unassigned responsibilities" in the conflict engine has the same dependency. It needs a schema change (migration-first). | Decide before M6 is planned. M5 proceeds without it. |
-| **FAMILY-DATA-MODEL wording for `responsible`.** It currently reads "(e.g. doing drop-off/pickup)". | The example contradicts the owner's distinction between responsibility and transport. | Change the example to "the person responsible for the event; not, by itself, a record of transport (ADR 0008 §21)", in Package 1's docs, once approved. |
+| **FAMILY-DATA-MODEL wording for `responsible`.** | Resolved: changed in Package 1 to "the person responsible for the event; not, by itself, a record of transport". | — |

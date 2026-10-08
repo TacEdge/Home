@@ -232,10 +232,11 @@ export function nextTimes(
   timeZone: string,
 ): NextTime[] {
   const live = changes.filter((c) => isOccurrenceChange(c) && c.archivedAt === null);
-  const regular = expandEvent(
+  const regular = occurrencesAtHome(
     recurringWithOverrides(series, overriddenOriginals([series, ...live])),
     from,
     to,
+    timeZone,
   ).map((o): NextTime => ({ kind: 'regular', occurrence: o, identity: occurrenceIdentity(o) }));
   // A change is dated at home, so one moved to another day is read a day either side.
   const changed = live.flatMap((c) =>
@@ -251,6 +252,24 @@ export function nextTimes(
 
 const homeDateOf = (o: Occurrence, timeZone: string): IsoDate =>
   o.allDay ? o.date : isoDateInZone(o.startsAt, timeZone);
+
+/**
+ * A series' occurrences that start on a home date from `from` to `to` (M4
+ * m-6b, M5 Package 1): the same window Today and Forward use, whatever zone
+ * the series keeps. Expanded a day either side in its own zone, then kept by
+ * home date, in start order.
+ */
+export function occurrencesAtHome(
+  e: RecurringEvent,
+  from: IsoDate,
+  to: IsoDate,
+  timeZone: string,
+): Occurrence[] {
+  return expandEvent(e, addDays(from, -1), addDays(to, 1)).filter((o) => {
+    const home = homeDateOf(o, timeZone);
+    return home >= from && home <= to;
+  });
+}
 
 function compareNextTimes(series: Event, timeZone: string) {
   const title = (t: NextTime) => (t.kind === 'changed' ? t.change.title : series.title);

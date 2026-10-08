@@ -8,10 +8,12 @@ import {
   putAwayDetail,
   putAwayLine,
   usuallyLine,
+  zoneNote,
 } from '@/app/(home)/events/copy';
 import { expandEvent } from '@/domain/engines/recurrence';
 import {
   nextTimes,
+  occurrencesAtHome,
   originalDateOf,
   putAwayChanges,
   putAwayStatus,
@@ -127,6 +129,33 @@ describe('the next few times of a manual series', () => {
     expect(show(nextTimes(utc, [c], '2026-10-27', '2026-10-27', NZ))).toEqual([
       'changed c 2026-10-26T21:00:00.000Z',
     ]);
+  });
+});
+
+describe('a series kept in another zone (M4 m-6b)', () => {
+  // Mondays 20:00 UTC: Tuesday 09:00 at home (NZDT).
+  const utc = row('utc', '2026-10-19T20:00:00Z', {
+    rrule: 'FREQ=WEEKLY;BYDAY=MO',
+    timeZone: 'UTC',
+  });
+
+  it('its regular times are windowed by home date, like its changes and like Today', () => {
+    expect(show(nextTimes(utc, [], '2026-10-27', '2026-10-27', NZ))).toEqual([
+      'regular 2026-10-26T20:00:00Z',
+    ]);
+    // Its own date is the 26th, but at home it starts on the 27th: not in a window ending the 26th.
+    expect(nextTimes(utc, [], '2026-10-26', '2026-10-26', NZ)).toEqual([]);
+    expect(
+      occurrencesAtHome(recurringOf(utc), '2026-10-20', '2026-11-03', NZ).map((o) => o.date),
+    ).toEqual(['2026-10-19', '2026-10-26', '2026-11-02']);
+  });
+
+  it('its page says which zone its times are in, and says nothing for home or all-day events', () => {
+    expect(zoneNote({ allDay: false, timeZone: 'UTC' }, NZ)).toBe('UTC');
+    expect(zoneNote({ allDay: false, timeZone: 'America/New_York' }, NZ)).toBe('New York time');
+    expect(zoneNote({ allDay: false, timeZone: 'Europe/London' }, NZ)).toBe('London time');
+    expect(zoneNote({ allDay: false, timeZone: NZ }, NZ)).toBeNull();
+    expect(zoneNote({ allDay: true, timeZone: null }, NZ)).toBeNull();
   });
 });
 

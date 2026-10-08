@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
 import { event, eventPerson, person } from '@/db/schema';
@@ -558,6 +558,53 @@ export async function listEventPeople(
     .orderBy(asc(eventPerson.role), asc(eventPerson.createdAt), asc(eventPerson.id));
   return rows.map((r) => r.annotation);
 }
+
+/**
+ * Many events' annotations in one read (M5 Package 1, ADR 0008 §7): for each
+ * of these events the actor can read, its people the actor can see, exactly
+ * as `listEventPeople` returns them one event at a time and in the same
+ * order. An event the actor cannot read (private to the other adult,
+ * archived unless asked for, missing, or not an id) contributes nothing, as
+ * one that has no people: the result never says which. Events with no
+ * readable people are absent from the map.
+ */
+export async function listEventPeopleFor(
+  actor: UserActor,
+  eventIds: readonly string[],
+  opts: ReadOpts = {},
+  deps: Deps = {},
+): Promise<Map<string, EventPerson[]>> {
+  const ids = [...new Set(eventIds)].filter((id) => UUID.test(id));
+  const out = new Map<string, EventPerson[]>();
+  if (ids.length === 0) return out;
+  const db = deps.db ?? getDb();
+  const rows = await db
+    .select({ annotation: eventPerson })
+    .from(eventPerson)
+    .innerJoin(event, eq(event.id, eventPerson.eventId))
+    .innerJoin(person, eq(person.id, eventPerson.personId))
+    .where(
+      and(
+        inArray(eventPerson.eventId, ids),
+        R.readable(actor, opts.includeArchived ? 'include' : 'exclude'),
+        visibleTo(actor, person),
+      ),
+    )
+    .orderBy(
+      asc(eventPerson.eventId),
+      asc(eventPerson.role),
+      asc(eventPerson.createdAt),
+      asc(eventPerson.id),
+    );
+  for (const { annotation } of rows) {
+    const list = out.get(annotation.eventId);
+    if (list) list.push(annotation);
+    else out.set(annotation.eventId, [annotation]);
+  }
+  return out;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type EventPersonChoice = { personId: string; role: 'attending' | 'responsible' };
 
