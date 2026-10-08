@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import type { Browser, BrowserContext, Cookie, Page } from '@playwright/test';
 import { ALEX, SAM } from '../fixtures/users';
 import { signIn, withDb } from './helpers';
 
@@ -15,12 +15,31 @@ export const FIXTURE_ADULTS: Record<Adult, { name: string; email: string }> = {
   alex: ALEX,
 };
 
+/**
+ * Each adult's session from their last real sign-in in this worker (ADR 0007
+ * §48). Signing in through the magic link costs a mail round trip and a
+ * render of Today, and most tests only need to be signed in. The session is
+ * reused only while the server still accepts it: a test that signs out (or
+ * a session that ends) sends the next caller through the real flow again.
+ * Tests of sign-in itself use `signIn` directly and never touch this.
+ */
+const sessions = new Map<Adult, Cookie[]>();
+
 /** Signs a page in as a fixture adult. Lands on Today. */
 export async function signInAsFixtureAdult(page: Page, adult: Adult): Promise<void> {
-  // Each test signs in afresh; the per-IP link limit is a production control,
-  // reset here so a long suite never trips it.
+  const saved = sessions.get(adult);
+  if (saved) {
+    await page.context().clearCookies();
+    await page.context().addCookies(saved);
+    await page.goto('/today');
+    if (new URL(page.url()).pathname === '/today') return;
+    sessions.delete(adult);
+  }
+  // A real sign-in; the per-IP link limit is a production control, reset
+  // here so a long suite never trips it.
   await withDb((pool) => pool.query('delete from "rate_limit"'));
   await signIn(page, FIXTURE_ADULTS[adult].email);
+  sessions.set(adult, await page.context().cookies());
 }
 
 /** A fresh browser context, signed in as a fixture adult, at a given viewport. */
