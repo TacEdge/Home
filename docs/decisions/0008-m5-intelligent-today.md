@@ -5,7 +5,7 @@ Status: **Accepted**, 2026-10-08. The owner approved this ADR and the contract, 
 - **Approved:** §20, §23, §24, §25 and §26.
 - **Approved as provisional:** §22.
 - **Revised as the owner directed:** §21.
-- **Implementation:** Package 1 (agenda groundwork) is in review; its decisions are recorded in §30.
+- **Implementation:** Package 1 (agenda groundwork) merged (PR #54; §30). Package 2 (the Today and insights engines) is in review; its decisions are recorded in §31.
 
 ## Context
 
@@ -250,6 +250,31 @@ Four items are carried forward to M5:
 
       The composition the app loader did is now the domain's `readAgendaInputs(actor, deps)` (`src/domain/events/agenda-inputs.ts`), unchanged in meaning: own annotations replace calendar defaults, and a changed occurrence with no people of its own shows its series' people. Measured on synthetic data, the composition's queries were 4 + 2 per event before (8 events: 20; 38 events: 80) and are now a constant 7.
     - **Unchanged.** There is no schema change and no migration. The export service still reads annotations per event (`listEventPeople`); it is not on Today's path and is left for a later package.
+
+31. **Package 2: the Today and insights engines.**
+
+    - **Shape.** `src/domain/engines/today.ts` (`today()`), `src/domain/engines/insights/` (`insights()`) and their shared `day-facts.ts`. Both are pure functions of authorised records, the agenda engine's own output, the home zone and an injected `now`. They do no database access, never read the clock (a test scans their source for `Date.now`, `new Date()` and `Math.random`), import nothing from `app`, `kev`, `ui`, `integrations`, `trust` or the database client, and expand no recurrence of their own. Every statement is `{ rule, text, facts }`. Facts are structural (ids and dates only, never text), so nothing a person wrote travels with a fact. The engines are not yet wired to the screen; Package 3 does that.
+    - **Routine (§14).** An item is routine when its event is a plain weekly or fortnightly series (`weeklyCadence`, the regular week's own test) of kind `school` or `work`, with a household person on it. This is the same test as the regular week, decided from the recorded rule and kind without expanding anything. A changed occurrence is its own row with no rule, so it is never routine and is said in full.
+    - **Headline (§15).** The closed set is first run, evening, **listed**, counted, usual and nothing, plus the late-evening second sentence and the "as far as HOME knows" qualifier.
+
+      `headline.listed` is new: one or two non-routine events today, all timed and starting today, are named with their times ("Swimming at 15:30, then Pilates at 18:15."). It applies the brief's factual-wording example within the contract's latitude for final copy, and is documented in contract §5.3. A carried-over or all-day item uses `headline.counted`.
+
+      First run means no live calendar *and* no events at all. A household with a calendar but nothing on is a quiet day, and a household with events but no calendar is an ordinary day.
+    - **Evening (§17).** Evening applies only when there was something timed today and all of it is over, so a day with nothing timed is never "evening" at any hour. In the day view, past items fold into Earlier once more than one has passed. Tasks due tomorrow under *Before then* carry their own rule, `todo.due_tomorrow`.
+    - **Everyone's day (§14).** A household person's own birthday is on their line ("Birthday"); one outside the household goes under Also today. A carried-over item reads "{title} until 01:00", or "{title}, all day" on a middle day. Tasks are not put on person lines: they are said once, under To do.
+    - **To do.** Order is scheduled today (by time), then due today (by title), then carried over (oldest due date, then title, then id). Three are shown and the rest are counted. The full selection is returned, so nothing is silently dropped; tasks with no date or a later date are not Today's.
+    - **Detectors (§16).**
+      - `data_health`: at most one per calendar. `failed` (last refresh status other than ok or partial) wins over `stale` (last success more than 24 hours ago, strictly). Archived calendars and calendars never refreshed say nothing.
+      - `preparation.birthday`: covers today through seven days ahead, and today's is marked as already on its item.
+      - `preparation.project_target`: active projects with at least one recorded open task only.
+      - `busy_day.count` and `busy_day.late`: computed for today (marked as already said by the headline) and tomorrow. "After 18:00" means ending strictly after 18:00, or running into the next day. Only household adults (`role = parent`) count.
+      - Keys are `{rule}:{subject ids}:{date}` (`busy_day.count` includes the count), are valid `insightKey`s, and are stable across input order.
+    - **Ranking (§16).** By kind (`data_health`, `preparation`, `busy_day`), then date, then key: a total order. Up to three are shown. "+ N more" counts only eligible insights: not already said on their item and not dismissed by this reader (the engine takes the reader's dismissed keys).
+    - **Evidence.**
+      - The non-interference invariant runs through the real services as `home_app`. Alex's whole Today model (at 07:03 and 22:00) and insight list are identical before and after Sam adds a private late evening, six private events tomorrow, a private person with a birthday, a private project with a task, a private task due today, a private stale calendar and a capture. The same records do change Sam's.
+      - Mutation checks: removing calendar visibility, adding an "easy" headline, removing the ordering tie-breaks, and counting insights already said on their item each fail the tests.
+      - Performance: 300 events over the week (agenda included) take about 90 ms per run on the development container.
+    - **Unchanged.** No schema, no new dependency, no screen, no Dismiss write, no transport, no Kev.
 
 ## Consequences
 

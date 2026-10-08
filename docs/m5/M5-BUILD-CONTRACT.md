@@ -4,7 +4,7 @@ Status: **Approved**, 2026-10-08 (Package 0, PR #53, merged by the owner).
 
 - **Approved:** ADR 0008 §20, §23, §24, §25 and §26. §22 is approved as provisional.
 - **Revised as the owner directed:** §21. There is no transport inference, so Getting everyone there is not built in M5.
-- **Progress:** Package 0 merged. Package 1 (agenda groundwork, ADR 0008 §30) is in review. Packages 2–5 have not started.
+- **Progress:** Packages 0 and 1 merged (PRs #53, #54). Package 2 (the Today and insights engines, ADR 0008 §31) is in review. Packages 3–5 have not started.
 
 Implementers and reviewers: per package (§2).
 
@@ -428,7 +428,8 @@ They are shown in the agenda's own row style, so no item is lost.
 |---|---|---|
 | `headline.first_run` | No calendars and no events at all | "HOME is quiet because it doesn't know your calendars yet." |
 | `headline.evening` | Evening state (§5.6) | "Nothing else on today." |
-| `headline.counted` | Non-routine events today | "{N} things on today{, besides the usual}." |
+| `headline.listed` | One or two non-routine events today, all timed and starting today (added in Package 2, ADR 0008 §31) | "Swimming at 15:30." / "Swimming at 15:30, then Pilates at 18:15." |
+| `headline.counted` | Any other non-routine events today (three or more, or any all-day or carried-over one) | "{N} things on today{, besides the usual}." |
 | `headline.usual` | Only routine events today | "Just the usual today." |
 | `headline.nothing` | No events today | "Nothing on today." |
 | `headline.late` (second sentence) | `busy_day.late` holds today | "Sam and Alex both have something on after 6." |
