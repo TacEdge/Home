@@ -130,7 +130,12 @@ if (process.argv[1]?.endsWith('verify-focused.mts')) {
       'e2e',
       ['pnpm', 'exec', 'playwright', 'test', ...specs.map((s) => `tests/e2e/${s}.spec.ts`)],
     ]);
-  else console.log('· e2e: no browser spec maps to this change');
+  else
+    console.log(
+      process.argv.includes('--no-e2e')
+        ? '· e2e: skipped (--no-e2e)'
+        : '· e2e: no browser spec maps to this change',
+    );
   const started = Date.now();
   const failed: string[] = [];
   for (const [step, command] of steps) {
