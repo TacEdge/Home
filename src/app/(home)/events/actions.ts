@@ -123,11 +123,14 @@ export async function setEventPeopleAction(
 }
 
 /**
- * "Change this one" (M4 contract §5.3, ADR 0007 §46). The series and the
- * occurrence are bound by the page that offered the form, from what the
- * server itself read and proved; the form carries only the new details.
- * The service proves the occurrence again against the rule, and updates
- * the one live change of it or makes it. Lands on the changed time's page.
+ * "Change this one" (M4 contract §5.3, ADR 0007 §46, §48). The page binds
+ * the series and the occurrence it proved into this action with `.bind`.
+ * Next encodes bound arguments into the page and they come back with the
+ * request; they are not encrypted, so they are input like any field. The
+ * guard is the service: it re-reads the series as the signed-in adult,
+ * proves the occurrence against the current rule and refuses anything
+ * else, then updates the one live change of it or makes it. Lands on the
+ * changed time's page.
  */
 export async function changeOccurrenceAction(
   seriesId: string,

@@ -6,9 +6,11 @@
 // printed, with the log's path. Steps: lint, typecheck, unit, integration,
 // build, boot, csp, e2e. Needs the local Postgres (LOCAL-DEV.md). Synthetic
 // data only; prints no secret (the test database URL is local and fixed).
+// For routine work, `pnpm verify:focused` (scripts/verify-focused.mts) runs
+// the checks a change affects; this full run is required before a PR.
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEST_APP_DATABASE_URL } from '../tests/env.ts';
 
@@ -32,6 +34,30 @@ for (const s of skip)
     process.exit(2);
   }
 
+/**
+ * The known causes of a failed run that are not the code (ADR 0007 §48):
+ * the dev servers' caches (`.next`, `.next-narrow`) left by an earlier or
+ * aborted run, whose stale route types break the typecheck and whose stale
+ * compiled routes answer 404; and a Playwright browser path the container
+ * provides but the shell did not export. Cleared and defaulted before
+ * every run; CI starts clean and installs its own browser.
+ */
+export function prepareLocalRun(): string[] {
+  const notes: string[] = [];
+  for (const dir of ['.next', '.next-narrow']) {
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+      notes.push(`cleared ${dir}`);
+    }
+  }
+  const provided = '/opt/pw-browsers/chromium';
+  if (!process.env.PLAYWRIGHT_CHROMIUM_PATH && existsSync(provided)) {
+    process.env.PLAYWRIGHT_CHROMIUM_PATH = provided;
+    notes.push(`PLAYWRIGHT_CHROMIUM_PATH=${provided}`);
+  }
+  return notes;
+}
+
 /** Lines worth printing from a failed step: failing tests and errors, then the end of the log. */
 export function failureExcerpt(log: string, tail = 80): string {
   const lines = log.replace(/\x1b\[[0-9;]*m/g, '').split('\n');
@@ -45,7 +71,7 @@ export function failureExcerpt(log: string, tail = 80): string {
   return [...head, '…', ...lines.slice(-tail)].join('\n');
 }
 
-function run(step: string, [cmd, ...args]: string[]): Promise<number> {
+export function run(step: string, [cmd, ...args]: string[]): Promise<number> {
   const path = join(LOG_DIR, `${step}.log`);
   const out = createWriteStream(path);
   out.write(`$ ${step} — started ${new Date().toISOString()}\n`);
@@ -66,6 +92,8 @@ function run(step: string, [cmd, ...args]: string[]): Promise<number> {
 if (process.argv[1]?.endsWith('verify-local.mts')) {
   rmSync(LOG_DIR, { recursive: true, force: true });
   mkdirSync(LOG_DIR, { recursive: true });
+  for (const note of prepareLocalRun()) console.log(`· ${note}`);
+  const started = Date.now();
   const failed: string[] = [];
   for (const [step, command] of Object.entries(STEPS)) {
     if (skip.has(step)) {
@@ -84,6 +112,11 @@ if (process.argv[1]?.endsWith('verify-local.mts')) {
     console.log(`✗ ${step} (${secs}s, exit ${code}) — full output in ${path}`);
     console.log(failureExcerpt(readFileSync(path, 'utf8')));
   }
-  console.log(failed.length ? `verify: failed: ${failed.join(', ')}` : 'verify: all steps passed');
+  const total = Math.round((Date.now() - started) / 1000);
+  console.log(
+    failed.length
+      ? `verify: failed: ${failed.join(', ')} (${total}s)`
+      : `verify: all steps passed (${total}s)`,
+  );
   process.exit(failed.length ? 1 : 0);
 }

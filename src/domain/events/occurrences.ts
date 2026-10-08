@@ -280,14 +280,57 @@ export function originalDateOf(series: Event, change: Pick<Event, 'recurrenceOri
 }
 
 /**
- * A series' changes that were put away (archived) and whose original
- * occurrence is still ahead: shown under the series as no longer part of
- * it (contract §3.7), newest original last. A change the rule reaches
- * can be brought back; one it no longer reaches is history.
+ * Why a put-away (archived) change of a series can or cannot come back,
+ * judged from the series as it is now (ADR 0007 §46, §48):
+ *   - `restorable`: the rule still reaches its time, that time is not
+ *     skipped and has no other live change; Bring it back would work.
+ *   - `no_longer`: the series' rule no longer reaches its time (a whole-
+ *     series edit put it away), so it is no longer part of the series.
+ *   - `skipped`: the series skips that time now; put it back first.
+ *   - `replaced`: that time has another live change.
+ * The same order as the service's own refusals, so the screen never
+ * offers what the service would refuse.
  */
-export function putAwayChanges(series: Event, changes: readonly Event[], from: IsoDate): Event[] {
-  return changes
-    .filter((c) => isOccurrenceChange(c) && c.archivedAt !== null)
-    .filter((c) => originalDateOf(series, c) >= from)
-    .sort((a, b) => (a.recurrenceOriginal! < b.recurrenceOriginal! ? -1 : 1));
+export type PutAwayStatus = 'restorable' | 'no_longer' | 'skipped' | 'replaced';
+
+export function putAwayStatus(
+  series: Event,
+  change: Pick<Event, 'id' | 'recurrenceOriginal'>,
+  changes: readonly Pick<Event, 'id' | 'recurrenceOriginal' | 'archivedAt'>[],
+): PutAwayStatus {
+  const o = occurrenceOf(series, change.recurrenceOriginal ?? '');
+  if (!o) return 'no_longer';
+  if (isSkippedOccurrence(series, o)) return 'skipped';
+  const live = changes.some(
+    (c) =>
+      c.id !== change.id &&
+      c.archivedAt === null &&
+      c.recurrenceOriginal === change.recurrenceOriginal,
+  );
+  return live ? 'replaced' : 'restorable';
+}
+
+/**
+ * A series' changes that were put away (archived) and whose original
+ * occurrence is still ahead, for the series' page (contract §3.7): one per
+ * time (the most recently put away), none for a time that has a live
+ * change now (that one is shown with the next few times), ordered by time,
+ * each with why it can or cannot come back.
+ */
+export function putAwayChanges(
+  series: Event,
+  changes: readonly Event[],
+  from: IsoDate,
+): { change: Event; status: PutAwayStatus }[] {
+  const latest = new Map<string, Event>();
+  for (const c of changes) {
+    if (!isOccurrenceChange(c) || c.archivedAt === null) continue;
+    if (originalDateOf(series, c) < from) continue;
+    const prior = latest.get(c.recurrenceOriginal!);
+    if (!prior || prior.archivedAt! < c.archivedAt) latest.set(c.recurrenceOriginal!, c);
+  }
+  return [...latest.values()]
+    .map((change) => ({ change, status: putAwayStatus(series, change, changes) }))
+    .filter((p) => p.status !== 'replaced')
+    .sort((a, b) => (a.change.recurrenceOriginal! < b.change.recurrenceOriginal! ? -1 : 1));
 }

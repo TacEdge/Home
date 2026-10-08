@@ -15,6 +15,7 @@ import {
   originalDateOf,
   overriddenOriginals,
   putAwayChanges,
+  putAwayStatus,
   recurringWithOverrides,
   startOf,
   upcomingSkips,
@@ -47,6 +48,8 @@ import {
 import {
   backToSeriesQuestion,
   changedFromUsual,
+  putAwayDetail,
+  putAwayLine,
   KIND_LABEL,
   occurrenceWhen,
   ownedElsewhereLine,
@@ -95,8 +98,16 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       : Promise.resolve(null),
     // A synced series' live overrides, so its next few times skip what they replace.
     synced && event.rrule ? listEvents(actor) : Promise.resolve([]),
-    // A manual series' own one-off changes, live and put away.
-    manualSeries ? listOccurrenceChanges(actor, event.id) : Promise.resolve([] as Event[]),
+    // A manual series' own one-off changes, live and put away; for a put-away
+    // change, its series' changes, to say whether it can come back.
+    manualSeries
+      ? listOccurrenceChanges(actor, event.id)
+      : change && event.archivedAt !== null && event.recurrenceParentId
+        ? listOccurrenceChanges(actor, event.recurrenceParentId).catch((e: unknown) => {
+            if (e instanceof NotFoundError) return [] as Event[];
+            throw e;
+          })
+        : Promise.resolve([] as Event[]),
     // The series one changed time belongs to, as this adult may read it.
     change && event.recurrenceParentId
       ? getEvent(actor, event.recurrenceParentId, { includeArchived: true }).catch((e: unknown) => {
@@ -149,6 +160,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   // or one the rule no longer reaches, is not something to put back.
   const skipped = editable ? upcomingSkips(event, today) : [];
   const putAway = manualSeries ? putAwayChanges(event, changes, today) : [];
+  // Whether a put-away change could come back, as the service would judge it.
+  const status =
+    change && archived && series && !seriesGone ? putAwayStatus(series, event, changes) : null;
   const going = names('attending');
   const responsible = names('responsible');
   const now = new Date();
@@ -342,12 +356,12 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             <>
               <Label>Put away</Label>
               <List>
-                {putAway.map((c) => (
+                {putAway.map(({ change: c, status: why }) => (
                   <ItemRow
                     key={c.id}
                     href={`/events/${c.id}`}
                     title={longDate(originalDateOf(event, c))}
-                    detail="A one-off change, put away"
+                    detail={putAwayDetail(why, event.title)}
                   />
                 ))}
               </List>
@@ -378,11 +392,18 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               ? `${series.title} is archived, so this one-off change is put away with it.`
               : 'The repeating event this belonged to is gone, so this one-off change is put away.'}
           </Quiet>
+        ) : archived && status !== 'restorable' ? (
+          <>
+            <Quiet>{putAwayLine(status!, series!.title)}</Quiet>
+            <p className="mt-1">
+              <Link href={`/events/${series!.id}`} className={link}>
+                Every time it happens ›
+              </Link>
+            </p>
+          </>
         ) : archived ? (
           <>
-            <Quiet>
-              This one-off change was put away. {series!.title} happens as usual that day.
-            </Quiet>
+            <Quiet>{putAwayLine('restorable', series!.title)}</Quiet>
             <ConfirmAction
               action={restoreEventAction}
               hidden={{ id: event.id }}

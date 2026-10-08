@@ -1,4 +1,5 @@
 import type { Occurrence, ReadRecurrence } from '@/domain/engines/recurrence';
+import type { PutAwayStatus } from '@/domain/events/occurrences';
 import type { Event } from '@/domain/events/service';
 import {
   addDays,
@@ -144,3 +145,29 @@ export const backToSeriesQuestion = (seriesTitle: string, usual: Occurrence | nu
   usual
     ? `Put this one-off change away? ${seriesTitle} goes back to the usual: ${occurrenceWhen(usual)}. Nothing is deleted.`
     : `Put this one-off change away? ${seriesTitle} goes back to the usual. Nothing is deleted.`;
+
+/** Under Put away on the series' page: why each one-off change is there. */
+export function putAwayDetail(status: PutAwayStatus, seriesTitle: string): string {
+  switch (status) {
+    case 'no_longer':
+      return `No longer part of ${seriesTitle}`;
+    case 'skipped':
+      return 'A one-off change, put away; that time is skipped';
+    default:
+      return 'A one-off change, put away';
+  }
+}
+
+/** On a put-away change's own page: what is true now, never a usual time that is not happening. */
+export function putAwayLine(status: PutAwayStatus, seriesTitle: string): string {
+  switch (status) {
+    case 'no_longer':
+      return `No longer part of ${seriesTitle}: it no longer happens at that time, so this one-off change stays put away.`;
+    case 'skipped':
+      return `This one-off change was put away, and that time of ${seriesTitle} is skipped. Put the time back on ${seriesTitle}’s page first to bring the change back.`;
+    case 'replaced':
+      return `This one-off change was put away, and that time of ${seriesTitle} has been changed again since.`;
+    case 'restorable':
+      return `This one-off change was put away. ${seriesTitle} happens as usual that day.`;
+  }
+}

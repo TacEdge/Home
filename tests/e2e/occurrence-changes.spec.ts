@@ -506,6 +506,72 @@ test('an archived series puts its changes away with it; restoring brings them ba
   expect(await liveChangesOf(ids.choir)).toHaveLength(0);
 });
 
+test('a put-away change says what is true: no longer part of the series, or its time skipped; it offers Bring back only when it can', async ({
+  page,
+}) => {
+  await signInAsFixtureAdult(page, 'sam');
+  const drama = await series({ by: 'fixture-sam', title: 'Drama club' });
+  const [d7, d14] = [await day(7), await day(14)];
+  for (const d of [d7, d14]) {
+    await page.goto(`/events/${drama}`);
+    await changeLink(page, d).click();
+    await page.getByLabel('From', { exact: true }).fill('17:30');
+    await page.getByLabel('To', { exact: true }).fill('18:30');
+    await page.getByRole('button', { name: 'Change this one' }).click();
+    await expect(page.getByText('One time of Drama club, changed from the usual.')).toBeVisible();
+  }
+  const changes = await liveChangesOf(drama);
+  const byOriginal = async (d: Day) =>
+    (
+      await q(`select id from event where recurrence_parent_id = $1 and recurrence_original = $2`, [
+        drama,
+        d.at16,
+      ])
+    )[0]!.id!;
+  expect(changes).toHaveLength(2);
+
+  // Skipped: put the 14th's change away, then skip that time.
+  const c14 = await byOriginal(d14);
+  await page.goto(`/events/${drama}`);
+  await page.getByRole('button', { name: `Back to the series: ${d14.long}` }).click();
+  await skipButton(page, d14).click();
+  await expect(page.getByRole('link', { name: new RegExp(d14.long) })).toContainText(
+    'that time is skipped',
+  );
+  await page.goto(`/events/${c14}`);
+  await expect(
+    page.getByText('that time of Drama club is skipped', { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByText('happens as usual')).toHaveCount(0);
+  await expect(page.locator('summary', { hasText: 'Bring this change back' })).toHaveCount(0);
+
+  // No longer part of it: the whole series moves to another weekday, which
+  // puts the 7th's live change away (it is never re-keyed).
+  const c7 = await byOriginal(d7);
+  const other = (
+    await q(
+      `select upper(left(to_char((now() at time zone 'Pacific/Auckland')::date + 1, 'Dy'), 3)) as d`,
+    )
+  )[0]!.d!;
+  const label = other.charAt(0) + other.slice(1).toLowerCase();
+  await page.goto(`/events/${drama}/edit`);
+  const on = page.getByRole('group', { name: 'On' });
+  for (const box of await on.getByRole('checkbox').all()) await box.uncheck();
+  await on.getByLabel(label, { exact: true }).check();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(new RegExp(`/events/${drama}$`));
+  expect(await liveChangesOf(drama)).toHaveLength(0);
+  await expect(page.getByRole('link', { name: /No longer part of Drama club/ })).toBeVisible();
+  await page.goto(`/events/${c7}`);
+  await expect(page.getByText(/^No longer part of Drama club/)).toBeVisible();
+  await expect(page.getByText('happens as usual')).toHaveCount(0);
+  await expect(page.locator('summary', { hasText: 'Bring this change back' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Every time it happens ›' })).toBeVisible();
+  await q(`update event set archived_at = now() where id = $1 or recurrence_parent_id = $1`, [
+    drama,
+  ]);
+});
+
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {
   test(`accessibility, targets, keyboard and no horizontal scroll: ${name}`, async ({
     browser,
@@ -530,6 +596,22 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       ))
         expect(box, `${name} ${path} target height`).toBeGreaterThanOrEqual(44);
     }
+    // A refused save focuses the field, in view and not under the capture
+    // bar or header (ADR 0007 §48, M3's refusal-focus rule).
+    await page.goto(`/events/${ids.band}/change/${encodeURIComponent(d17.at16)}`, {
+      waitUntil: 'networkidle',
+    });
+    await page.getByLabel('What', { exact: true }).fill('   ');
+    await page.getByRole('button', { name: 'Change this one' }).click();
+    const what = page.getByLabel('What', { exact: true });
+    await expect(what).toBeFocused();
+    const unobscured = await what.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.top < 0 || r.bottom > window.innerHeight) return false;
+      const hit = document.elementFromPoint(r.left + 10, r.top + r.height / 2);
+      return hit === el || el.contains(hit);
+    });
+    expect(unobscured, `${name} refused field in view and unobscured`).toBe(true);
     // Keyboard: the first Change this one link takes focus and stays in view.
     await page.goto(`/events/${ids.band}`);
     const first = page.getByRole('link', { name: /Change this one: / }).first();

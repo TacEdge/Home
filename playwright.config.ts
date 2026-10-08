@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 import { assertTestDatabase } from './tests/db-guard';
 import { FEED_DIR } from './tests/e2e/calendar-feeds';
@@ -31,7 +32,12 @@ const serverEnv = (port: number, allowed: string) => ({
   HOME_ALLOWED_EMAILS: allowed,
 });
 
-const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+// A browser the environment provides (cloud containers ship one here) when
+// the shell did not say; CI installs its own and has neither.
+const PROVIDED_CHROMIUM = '/opt/pw-browsers/chromium';
+const chromiumPath =
+  process.env.PLAYWRIGHT_CHROMIUM_PATH ??
+  (existsSync(PROVIDED_CHROMIUM) ? PROVIDED_CHROMIUM : undefined);
 
 export default defineConfig({
   testDir: 'tests/e2e',

@@ -5,6 +5,8 @@ import {
   backToSeriesQuestion,
   changedFromUsual,
   occurrenceWhen,
+  putAwayDetail,
+  putAwayLine,
   usuallyLine,
 } from '@/app/(home)/events/copy';
 import { expandEvent } from '@/domain/engines/recurrence';
@@ -12,6 +14,7 @@ import {
   nextTimes,
   originalDateOf,
   putAwayChanges,
+  putAwayStatus,
   recurringOf,
 } from '@/domain/events/occurrences';
 import type { Event } from '@/domain/events/service';
@@ -128,19 +131,54 @@ describe('the next few times of a manual series', () => {
 });
 
 describe('put-away changes', () => {
-  it('lists archived changes whose original is still ahead, by original', () => {
-    const a = change('a', WED_28, '2026-10-28T04:00:00Z', { archivedAt: new Date() });
-    const b = change('b', WED_21, '2026-10-21T04:00:00Z', { archivedAt: new Date() });
-    const past = change('p', '2026-10-14T02:30:00Z', '2026-10-14T04:00:00Z', {
-      archivedAt: new Date(),
-    });
+  const at = (iso: string) => ({ archivedAt: new Date(iso) });
+
+  it('lists archived changes whose original is still ahead, one per time, by original', () => {
+    const a = change('a', WED_28, '2026-10-28T04:00:00Z', at('2026-10-10T00:00:00Z'));
+    const b = change('b', WED_21, '2026-10-21T04:00:00Z', at('2026-10-10T00:00:00Z'));
+    const bLater = change('b2', WED_21, '2026-10-21T05:00:00Z', at('2026-10-12T00:00:00Z'));
+    const past = change(
+      'p',
+      '2026-10-14T02:30:00Z',
+      '2026-10-14T04:00:00Z',
+      at('2026-10-10T00:00:00Z'),
+    );
     const live = change('l', '2026-11-04T02:30:00Z', '2026-11-04T04:00:00Z');
-    expect(putAwayChanges(swim, [a, b, past, live], '2026-10-20').map((c) => c.id)).toEqual([
-      'b',
-      'a',
+    const rows = putAwayChanges(swim, [a, b, bLater, past, live], '2026-10-20');
+    expect(rows.map((r) => [r.change.id, r.status])).toEqual([
+      ['b2', 'restorable'], // the most recently put away for the 21st, once
+      ['a', 'restorable'],
     ]);
     expect(originalDateOf(swim, b)).toBe('2026-10-21');
     expect(originalDateOf(swim, { recurrenceOriginal: '2026-10-21' })).toBe('2026-10-21');
+  });
+
+  it('leaves out a time that has a live change now', () => {
+    const old = change('old', WED_21, '2026-10-21T04:00:00Z', at('2026-10-10T00:00:00Z'));
+    const now = change('now', WED_21, '2026-10-21T05:00:00Z');
+    expect(putAwayChanges(swim, [old, now], '2026-10-20')).toEqual([]);
+    expect(putAwayStatus(swim, old, [old, now])).toBe('replaced');
+  });
+
+  it('says why one cannot come back: no longer reached, or skipped', () => {
+    const c = change('c', WED_21, '2026-10-21T04:00:00Z', at('2026-10-10T00:00:00Z'));
+    const thursdays = { ...swim, rrule: 'FREQ=WEEKLY;BYDAY=TH' } as Event;
+    expect(putAwayStatus(thursdays, c, [c])).toBe('no_longer');
+    expect(putAwayChanges(thursdays, [c], '2026-10-20').map((r) => r.status)).toEqual([
+      'no_longer',
+    ]);
+    const skipping = { ...swim, exdates: ['2026-10-21'] } as Event;
+    expect(putAwayStatus(skipping, c, [c])).toBe('skipped');
+    expect(putAwayStatus(swim, c, [c])).toBe('restorable');
+  });
+
+  it('never claims the usual time is happening when it is not', () => {
+    expect(putAwayDetail('no_longer', 'Swimming')).toBe('No longer part of Swimming');
+    expect(putAwayLine('no_longer', 'Swimming')).toMatch(/^No longer part of Swimming/);
+    expect(putAwayLine('skipped', 'Swimming')).toContain('that time of Swimming is skipped');
+    for (const s of ['no_longer', 'skipped', 'replaced'] as const)
+      expect(putAwayLine(s, 'Swimming')).not.toContain('happens as usual');
+    expect(putAwayLine('restorable', 'Swimming')).toContain('happens as usual that day');
   });
 });
 
