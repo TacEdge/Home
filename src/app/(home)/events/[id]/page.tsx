@@ -395,11 +395,6 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         ) : archived && status !== 'restorable' ? (
           <>
             <Quiet>{putAwayLine(status!, series!.title)}</Quiet>
-            <p className="mt-1">
-              <Link href={`/events/${series!.id}`} className={link}>
-                Every time it happens ›
-              </Link>
-            </p>
           </>
         ) : archived ? (
           <>

@@ -78,7 +78,8 @@ test.beforeAll(async () => {
   ids.run = await series({ by: 'fixture-alex', title: 'Alex only run', visibility: 'private' });
   ids.band = await series({ by: 'fixture-sam', title: 'Band rehearsal', person: milo });
   // A standing change of Band rehearsal in ten days, an hour later, for the device sweep.
-  const d10 = await day(10);
+  // A real occurrence of Band rehearsal (it repeats on today's weekday).
+  const d10 = await day(7);
   const standing = (
     await q(
       `update event set archived_at = null where recurrence_parent_id = $1 and recurrence_original = $2 returning id`,
@@ -535,9 +536,7 @@ test('a put-away change says what is true: no longer part of the series, or its 
   await page.goto(`/events/${drama}`);
   await page.getByRole('button', { name: `Back to the series: ${d14.long}` }).click();
   await skipButton(page, d14).click();
-  await expect(page.getByRole('link', { name: new RegExp(d14.long) })).toContainText(
-    'that time is skipped',
-  );
+  await expect(page.getByRole('link', { name: /that time is skipped/ })).toContainText(d14.long);
   await page.goto(`/events/${c14}`);
   await expect(
     page.getByText('that time of Drama club is skipped', { exact: false }),
@@ -561,7 +560,10 @@ test('a put-away change says what is true: no longer part of the series, or its 
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(new RegExp(`/events/${drama}$`));
   expect(await liveChangesOf(drama)).toHaveLength(0);
-  await expect(page.getByRole('link', { name: /No longer part of Drama club/ })).toBeVisible();
+  // Both put-away times now fall on a day the rule no longer reaches.
+  const gone = page.getByRole('link', { name: /No longer part of Drama club/ });
+  await expect(gone).toHaveCount(2);
+  await expect(gone.filter({ hasText: d7.long })).toHaveCount(1);
   await page.goto(`/events/${c7}`);
   await expect(page.getByText(/^No longer part of Drama club/)).toBeVisible();
   await expect(page.getByText('happens as usual')).toHaveCount(0);
@@ -577,7 +579,8 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
     browser,
   }) => {
     const { context, page } = await fixtureAdultContext(browser, 'sam', viewport);
-    const d17 = await day(17);
+    // A real occurrence with no change: the form itself, not a not-found page.
+    const d17 = await day(14);
     const paths = [
       `/events/${ids.band}`,
       `/events/${ids.band}/change/${encodeURIComponent(d17.at16)}`,
@@ -586,6 +589,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
     ];
     for (const path of paths) {
       await page.goto(path);
+      await expect(page.getByRole('heading', { name: 'Nothing here.' }), path).toHaveCount(0);
       await expectNoHorizontalScroll(page, `${name} ${path}`);
       await expectAccessible(page, `${name} ${path}`);
       const targets = page.locator(
