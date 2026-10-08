@@ -90,6 +90,7 @@ Concentrated on the joins between packages, reusing each package's evidence.
 | m-3 | Two archived changes of one time listed twice | **Fixed.** One per time, the most recently put away; none for a time with a live change. Unit test. |
 | m-4 | Documentation called the bound occurrence identity server-bound | **Fixed.** ADR 0007 §47 is corrected and §48 records that bound arguments are encoded, not encrypted; the service is the guard. Comments in the action and the route say the same. |
 | m-5 | A changed time's people page reachable by address while its series is archived | **Fixed.** It now sends the person to the change's page, read-only. |
+| — | **Found here:** Package 8b's viewport test addressed the Change this one form at a date that is not an occurrence, so at four viewports it checked the not-found page, not the form; its seeded standing change had the same flaw | **Fixed.** Both use real occurrences, and every page in that loop must not read "Nothing here.". The form, a series with a changed time and a changed time's own form now pass axe, scroll and 44px at all four viewports for real, with refusal focus. |
 | m-6a | The occurrence form's audit row lists all five fields | **Left.** Field names only, never content; listing only the changed ones needs the form to know the occurrence's stored values. Not an acceptance defect. |
 | m-6b | A series in another zone is listed in its own zone's date and time but ordered by home date | **Left.** Pre-existing presentation shared with Package 6; rare for manual series here. Carried forward to M5's Today work, which owns agenda presentation. |
 
@@ -130,7 +131,30 @@ Never paste a secret calendar address or a key into chat, an issue, a PR, a comm
 
 Measured on this cloud container (one local Postgres, one Playwright worker), `pnpm verify` on `main` before this package and on this package's branch after it:
 
-TIMINGS
+| Step | Before (`main`, 94f52f8) | After (this branch) |
+|---|---|---|
+| Lint | 34s | 16s |
+| Typecheck | 14s | 3–12s |
+| Unit | 20s | 15s |
+| Integration | 65s | 52s |
+| Build | 33s | 21s |
+| Boot validation | 2s | 2s |
+| Production CSP check | 2s | 1s |
+| Browser suite (Playwright) | **1,127s** (147 tests) | **997s** (148 tests) |
+| of which test bodies | 819s | 708s |
+| of which setup, two dev servers, global seed, compile on first visit | ~308s | ~289s |
+| **Whole `pnpm verify`** | **1,301s (21.7 min)** | **1,107s (18.5 min)** |
+
+The non-browser steps vary run to run by a few seconds (typecheck with or without a warm cache). The browser suite is 85–87% of the whole run in both; the slowest specs before were the shell sweep (87s), the privacy sweep (86s), the occurrence spec (81s), calendars (74s), tasks (72s) and capture (72s). The test bodies outside the occurrence spec fell from 738s to 626s (−15%), the session reuse's effect; the occurrence spec stayed level (81s → 82s) while gaining a test and the refusal-focus step at four viewports.
+
+**Routine checks with `pnpm verify:focused`**, measured on this branch:
+
+| Change | Ran | Time |
+|---|---|---|
+| One event page and one browser spec (`--base HEAD~1`) | lint, typecheck, no unit or integration test reached, the events, occurrence-changes and synced-events specs | **222s (3.7 min)** |
+| The whole branch, no browser specs (`--no-e2e`) | lint, typecheck, all unit and integration tests (`package.json` changed, so vitest takes everything as reached) | **90s** |
+
+So a routine change that touches screens checks in about 3–4 minutes instead of about 19, and a domain-only change in about 1–2 minutes; the full run stays the gate before a PR, and CI runs everything as before.
 
 **What was done** (ADR 0007 §48):
 
