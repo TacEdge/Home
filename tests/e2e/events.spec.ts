@@ -220,7 +220,11 @@ test("the other adult's private event reads as not found; a person's Coming up u
   );
   await page.goto(`/people/${milo}`);
   await expect(page.locator('section[aria-labelledby^="day-"]').first()).toBeVisible();
-  const swim = page.getByRole('link', { name: /Swimming/ }).first();
+  // Coming up's row (Usually, above it, carries no people).
+  const swim = page
+    .locator('section[aria-labelledby^="day-"]')
+    .getByRole('link', { name: /Swimming/ })
+    .first();
   await expect(swim).toBeVisible();
   await expect(swim).toContainText('Sam'); // the same people as Forward shows
   expect(await page.textContent('main')).not.toContain('Football'); // Isla's, not Milo's

@@ -1,4 +1,4 @@
-import { defaultWeekdays } from '@/domain/engines/recurrence';
+import { defaultWeekdays, type Occurrence } from '@/domain/engines/recurrence';
 import { startOf } from '@/domain/events/occurrences';
 import type { Event, EventPerson } from '@/domain/events/service';
 import { addDays, clockOf, isoDateInZone, type IsoDate } from '@/lib/dates';
@@ -62,5 +62,39 @@ export function existingEventDefaults(e: Event, annotations: EventPerson[]): Eve
     responsible: new Set(
       annotations.filter((a) => a.role === 'responsible').map((a) => a.personId),
     ),
+  };
+}
+
+/** "Change this one" before anyone types: that occurrence's own date and time, nothing repeating. */
+export function occurrenceDefaults(o: Occurrence): EventFormDefaults {
+  const none = {
+    repeat: 'none',
+    weekdays: new Set<string>(),
+    ends: 'never',
+    endsOn: '',
+    endsAfter: '',
+    attending: new Set<string>(),
+    responsible: new Set<string>(),
+  };
+  if (o.allDay) {
+    const last = addDays(o.endDate, -1);
+    return {
+      ...none,
+      allDay: true,
+      startDate: o.startDate,
+      endDate: last === o.startDate ? '' : last,
+      startTime: '09:00',
+      endTime: '10:00',
+    };
+  }
+  const startDate = isoDateInZone(o.startsAt, o.timeZone);
+  const endDate = isoDateInZone(o.endsAt, o.timeZone);
+  return {
+    ...none,
+    allDay: false,
+    startDate,
+    startTime: clockOf(o.startsAt, o.timeZone),
+    endDate: endDate === startDate ? '' : endDate,
+    endTime: clockOf(o.endsAt, o.timeZone),
   };
 }

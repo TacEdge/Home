@@ -9,7 +9,11 @@ import {
   type RecurrenceEnd,
 } from '@/domain/engines/recurrence';
 import type { EventPersonChoice, Event } from '@/domain/events/service';
-import type { CreateEventInput, UpdateEventInput } from '@/domain/events/schema';
+import type {
+  CreateEventInput,
+  OccurrenceChangeInput,
+  UpdateEventInput,
+} from '@/domain/events/schema';
 import { addDays, instantFromWallClock, isValidIsoDate, parseIsoDate } from '@/lib/dates';
 
 // The event form, read into the shared Zod schema's shape (M3 contract
@@ -154,6 +158,24 @@ export function readEventForm(
         ? { ...base, rrule: null, exdates: null }
         : { ...base, rrule };
   return { input, people: readPeople(form, opts.peopleIds) };
+}
+
+/**
+ * The "Change this one" form (M4 contract §5.3, ADR 0007 §46): what one
+ * occurrence may change on its own. The occurrence it changes is never in
+ * the form: the page binds it from the series, and the service proves it.
+ */
+export function readOccurrenceForm(
+  form: FormData,
+  opts: { timeZone: string },
+): OccurrenceChangeInput {
+  return {
+    title: requiredTextOf(form, 'title'),
+    kind: (choiceOf(form, 'kind') ?? 'other') as OccurrenceChangeInput['kind'],
+    location: textOf(form, 'location') ?? null,
+    description: textOf(form, 'description') ?? null,
+    time: readTime(form, opts.timeZone),
+  };
 }
 
 /** The repeat controls' values for an existing event, from its stored rule. */

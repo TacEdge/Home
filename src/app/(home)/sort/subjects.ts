@@ -1,4 +1,5 @@
 import 'server-only';
+import { hiddenOccurrenceChanges } from '@/domain/events/occurrences';
 import { listEvents } from '@/domain/events/service';
 import { listPeople } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';
@@ -15,5 +16,7 @@ export async function subjectsFor(actor: UserActor, withEvents: boolean) {
     listProjects(actor),
     withEvents ? listEvents(actor) : Promise.resolve([]),
   ]);
-  return { people, projects, events };
+  // A changed time whose series is put away is not offered as an event of its own.
+  const hidden = hiddenOccurrenceChanges(events);
+  return { people, projects, events: events.filter((e) => !hidden.has(e.id)) };
 }

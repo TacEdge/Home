@@ -16,7 +16,10 @@ import { KIND_LABEL, WEEKDAY_SHORT } from './copy';
 // zone (an existing event keeps its own zone). Recurrence is the approved
 // model only; a custom rule from elsewhere is shown, kept and never
 // rewritten. A refused save shows what was typed (shown()) and focuses
-// where to look.
+// where to look. In `occurrence` mode (M4 contract §5.3, "Change this one")
+// the form is one time of a repeating event: its words, kind, place and
+// time; nothing about repeating, who, part of or who can see it, which
+// stay the series'.
 
 export type FormPerson = { id: string; name: string; colour: PersonColour | null };
 
@@ -68,9 +71,12 @@ export function EventForm({
   defaults,
   submitLabel,
   initialTitle,
+  occurrence = false,
 }: {
   action: FormAction;
   event?: Event;
+  /** One occurrence of a repeating event: no repeat, people, part-of or visibility fields. */
+  occurrence?: boolean;
   /** A new event's title before anyone types (from a capture's words). */
   initialTitle?: string;
   people: FormPerson[];
@@ -158,7 +164,7 @@ export function EventForm({
         error={fieldError('endDate', 'time.endDate')}
       />
 
-      {custom ? (
+      {occurrence ? null : custom ? (
         <div className="mt-5">
           <p className="text-ink-2 text-[15px] font-medium">Repeats</p>
           <p className="text-ink">Repeats (custom)</p>
@@ -236,7 +242,7 @@ export function EventForm({
         </>
       )}
 
-      {people.length > 0 ? (
+      {people.length > 0 && !occurrence ? (
         <>
           <Choices
             name="attending"
@@ -286,24 +292,28 @@ export function EventForm({
           hint="Anything worth knowing about it. Notes on it live on its page."
           error={errors.description}
         />
-        <Field
-          name="domain"
-          label="Part of"
-          type="select"
-          options={DOMAINS}
-          defaultValue={v('domain', event?.domain ?? '')}
-          error={errors.domain}
-        />
-        <Field
-          name="visibility"
-          label="Who can see this"
-          type="select"
-          required
-          options={VISIBILITY}
-          defaultValue={v('visibility', event?.visibility ?? 'household')}
-          hint="Just me keeps this out of the other adult's HOME. Someone private can only be on a private event."
-          error={errors.visibility}
-        />
+        {occurrence ? null : (
+          <>
+            <Field
+              name="domain"
+              label="Part of"
+              type="select"
+              options={DOMAINS}
+              defaultValue={v('domain', event?.domain ?? '')}
+              error={errors.domain}
+            />
+            <Field
+              name="visibility"
+              label="Who can see this"
+              type="select"
+              required
+              options={VISIBILITY}
+              defaultValue={v('visibility', event?.visibility ?? 'household')}
+              hint="Just me keeps this out of the other adult's HOME. Someone private can only be on a private event."
+              error={errors.visibility}
+            />
+          </>
+        )}
       </More>
 
       <FormMessage state={state} />

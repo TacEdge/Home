@@ -1,16 +1,22 @@
 import { notFound, redirect } from 'next/navigation';
 import { NotFoundError } from '@/domain/common/errors';
+import { isOccurrenceChange, occurrenceOf } from '@/domain/events/occurrences';
 import { getEvent, listEventPeople } from '@/domain/events/service';
 import { listPeople } from '@/domain/people/service';
 import { requireActor } from '@/trust/session';
 import { Page } from '@/ui/page';
 import type { PersonColour } from '@/ui/person-dot';
-import { updateEventAction } from '../../actions';
+import { changeOccurrenceAction, updateEventAction } from '../../actions';
+import { usuallyLine } from '../../copy';
 import { EventForm } from '../../event-form';
 import { existingEventDefaults } from '../../form-defaults';
 
 export const dynamic = 'force-dynamic';
 
+// Edit an event: the whole series for a repeating one. A changed time of a
+// series (M4 contract §5.3) is edited as that one time again: the same
+// occurrence form, bound to its series and the time it changes, so a second
+// edit updates the same change rather than making another.
 export default async function EditEventPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor();
   const { id } = await params;
@@ -20,6 +26,34 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
   });
   // A synced event is read-only here (ADR 0005 §25): its page says so.
   if (event.source !== 'manual') redirect(`/events/${event.id}`);
+  if (isOccurrenceChange(event)) {
+    const series = event.recurrenceParentId
+      ? await getEvent(actor, event.recurrenceParentId, { includeArchived: true }).catch(
+          (e: unknown) => {
+            if (e instanceof NotFoundError) return null;
+            throw e;
+          },
+        )
+      : null;
+    // Put away with its series, or without one: its page says so.
+    if (!series || series.archivedAt !== null) redirect(`/events/${event.id}`);
+    const usual = occurrenceOf(series, event.recurrenceOriginal!);
+    return (
+      <Page
+        title="Change this one again"
+        intro={`One time of ${series.title}. ${usual ? usuallyLine(usual) : ''} Just this once; every other time stays as it is.`}
+      >
+        <EventForm
+          action={changeOccurrenceAction.bind(null, series.id, event.recurrenceOriginal!)}
+          event={event}
+          occurrence
+          people={[]}
+          defaults={existingEventDefaults(event, [])}
+          submitLabel="Save"
+        />
+      </Page>
+    );
+  }
   const [people, annotations] = await Promise.all([
     listPeople(actor),
     listEventPeople(actor, event.id),
