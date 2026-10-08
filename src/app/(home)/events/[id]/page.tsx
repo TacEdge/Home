@@ -6,10 +6,11 @@ import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotesSection } from '@/app/_notes/notes-section';
 import { getCalendar } from '@/domain/calendar/service';
 import { NotFoundError } from '@/domain/common/errors';
-import { expandEvent, readRRule, startDateOf } from '@/domain/engines/recurrence';
+import { readRRule, startDateOf } from '@/domain/engines/recurrence';
 import {
   isOccurrenceChange,
   nextTimes,
+  occurrencesAtHome,
   occurrenceIdentity,
   occurrenceOf,
   originalDateOf,
@@ -58,6 +59,7 @@ import {
   sourceLine,
   usuallyLine,
   whenLabel,
+  zoneNote,
 } from '../copy';
 
 export const dynamic = 'force-dynamic';
@@ -150,10 +152,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     ? []
     : manualSeries
       ? nextTimes(event, changes, today, to, env.HOME_TIMEZONE)
-      : expandEvent(
+      : occurrencesAtHome(
           recurringWithOverrides(event, overriddenOriginals([event, ...siblings])),
           today,
           to,
+          env.HOME_TIMEZONE,
         ).map((o) => ({ kind: 'regular', occurrence: o, identity: occurrenceIdentity(o) }));
   const upcoming = times.slice(0, UPCOMING_MAX);
   // Skipped dates still ahead that the rule would put it on: a past skip,
@@ -175,6 +178,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <Quiet>
           {[
             whenLabel(event),
+            zoneNote(event, env.HOME_TIMEZONE),
             repeats,
             KIND_LABEL[event.kind] ?? event.kind,
             change && (archived || seriesGone) ? 'put away' : archived ? 'archived' : null,

@@ -1,3 +1,4 @@
+import type { EventKind } from '@/db/schema/event';
 import { birthdayInYear } from './profile';
 import { expandEvent, type RecurringEvent } from './recurrence';
 import { addDays, daysBetween, isoDateInZone, parseIsoDate, type IsoDate } from '@/lib/dates';
@@ -12,10 +13,21 @@ import { addDays, daysBetween, isoDateInZone, parseIsoDate, type IsoDate } from 
 // project target dates, then tasks due), then timed events by start
 // (ADR 0005 §27). Ties break by title, then id, so the order never depends
 // on the order the inputs arrived in.
+//
+// Placement and order (ADR 0008 §24, M5 Package 1): a timed occurrence is on
+// every day it covers in the home zone, from the day it starts to the day
+// before it ends (an end exactly at midnight does not reach the next day),
+// so an event from 23:00 Tuesday to 01:00 Wednesday is on both days. It is
+// still one occurrence of one event: the same eventId, occurrenceDate and
+// instants on each day, with `day` of `days` saying which. Timed items are
+// ordered by their actual start instant, whatever zone the event keeps, so a
+// carried-over item comes first on its later days.
 
 export type AgendaEventInput = RecurringEvent & {
   id: string;
   title: string;
+  /** The event's recorded kind (ADR 0008 §7); null when the caller has none to give. */
+  kind?: EventKind | null;
   /** People attending or responsible, as the caller resolved them. */
   people?: readonly AgendaPersonRef[];
 };
@@ -46,6 +58,7 @@ export type AgendaItem =
       /** For an all-day event over several days: which day of how many this is. */
       day: number;
       days: number;
+      eventKind: EventKind | null;
       people: readonly AgendaPersonRef[];
     }
   | {
@@ -58,6 +71,14 @@ export type AgendaItem =
       startsAt: Date;
       endsAt: Date;
       timeZone: string;
+      /**
+       * Which home day of how many this occurrence covers: 1 of 1 for a
+       * same-day event; an overnight one is 1 of 2 on its first day and 2 of
+       * 2 on the next.
+       */
+      day: number;
+      days: number;
+      eventKind: EventKind | null;
       people: readonly AgendaPersonRef[];
     }
   | { kind: 'birthday'; date: IsoDate; personId: string; name: string; age: number }
@@ -82,6 +103,7 @@ export type AgendaInput = {
 export const MAX_AGENDA_DAYS = 400;
 
 const OPEN_TASK = 'open';
+const DAY_MS = 24 * 60 * 60 * 1000;
 const DONE_PROJECT = 'done';
 
 /** All-day kinds in their order within a day. */
@@ -95,7 +117,7 @@ const ALL_DAY_RANK: Record<AgendaItem['kind'], number> = {
 const titleOf = (i: AgendaItem) => (i.kind === 'birthday' ? i.name : i.title);
 const idOf = (i: AgendaItem) =>
   i.kind === 'event'
-    ? `${i.eventId}:${i.occurrenceDate}`
+    ? `${i.eventId}:${i.occurrenceDate}:${i.day}`
     : i.kind === 'birthday'
       ? i.personId
       : i.kind === 'project_target'
@@ -127,8 +149,8 @@ export function compareAgendaItems(a: AgendaItem, b: AgendaItem): number {
  * The agenda for a range of days: one entry per day that has anything, in
  * date order, each with its items in agenda order. Empty days are left out.
  * Tasks count only while open; projects only until done. An all-day event
- * appears on every day it covers; a timed event on the day it starts in
- * the home zone.
+ * appears on every day it covers; a timed event on every day it covers in
+ * the home zone, from its start up to (not including) its end.
  */
 export function agenda(input: AgendaInput): AgendaDay[] {
   const { from, to, timeZone } = input;
@@ -142,6 +164,7 @@ export function agenda(input: AgendaInput): AgendaDay[] {
 
   for (const e of input.events ?? []) {
     const people = e.people ?? [];
+    const eventKind = e.kind ?? null;
     if (e.allDay) {
       // An occurrence covering any day in range: start up to its length before `from`.
       const length = Math.max(1, daysOf(e.startDate, e.endDate));
@@ -160,29 +183,41 @@ export function agenda(input: AgendaInput): AgendaDay[] {
               occurrenceDate: o.date,
               day: k + 1,
               days,
+              eventKind,
               people,
             });
         }
       }
     } else {
-      // Expand a day either side in the event's zone, then place each start
-      // on its date in the home zone, which may differ.
-      for (const o of expandEvent(e, addDays(from, -1), addDays(to, 1))) {
+      // Expand in the event's zone from early enough that an occurrence
+      // still running on `from` is found (its length, plus a day for the
+      // difference between zones), then place it on each home day it covers.
+      const reach = Math.ceil((e.endsAt.getTime() - e.startsAt.getTime()) / DAY_MS) + 1;
+      for (const o of expandEvent(e, addDays(from, -reach), addDays(to, 1))) {
         if (o.allDay) continue;
-        const date = isoDateInZone(o.startsAt, timeZone);
-        if (inRange(date))
-          items.push({
-            kind: 'event',
-            allDay: false,
-            date,
-            eventId: e.id,
-            title: e.title,
-            occurrenceDate: o.date,
-            startsAt: o.startsAt,
-            endsAt: o.endsAt,
-            timeZone: o.timeZone,
-            people,
-          });
+        const first = isoDateInZone(o.startsAt, timeZone);
+        const last =
+          o.endsAt > o.startsAt ? isoDateInZone(new Date(o.endsAt.getTime() - 1), timeZone) : first;
+        const days = daysBetween(first, last) + 1;
+        for (let k = 0; k < days; k++) {
+          const date = addDays(first, k);
+          if (inRange(date))
+            items.push({
+              kind: 'event',
+              allDay: false,
+              date,
+              eventId: e.id,
+              title: e.title,
+              occurrenceDate: o.date,
+              startsAt: o.startsAt,
+              endsAt: o.endsAt,
+              timeZone: o.timeZone,
+              day: k + 1,
+              days,
+              eventKind,
+              people,
+            });
+        }
       }
     }
   }

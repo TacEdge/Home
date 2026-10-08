@@ -62,6 +62,20 @@ export const WEEKDAY_LABEL = [
 ] as const;
 export const WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
+/**
+ * The zone a timed event keeps, when it is not home's (M4 m-6b, M5 Package
+ * 1): "New York time", "UTC". Its own page gives its times in that zone,
+ * while Today and Forward give them at home, so the page says which.
+ */
+export function zoneNote(
+  e: { allDay: boolean; timeZone: string | null },
+  homeZone: string,
+): string | null {
+  if (e.allDay || !e.timeZone || e.timeZone === homeZone) return null;
+  if (e.timeZone === 'UTC' || e.timeZone === 'Etc/UTC') return 'UTC';
+  return `${e.timeZone.split('/').pop()!.replaceAll('_', ' ')} time`;
+}
+
 /** "Wednesday 14 October · 15:30–16:15", or the date range for all-day events. */
 export function whenLabel(e: Event): string {
   if (e.allDay) {

@@ -5,17 +5,15 @@ import {
   connectCalendar,
   disconnectCalendar,
   getCalendar,
-  listCalendars,
   reconnectCalendar,
 } from '@/domain/calendar/service';
 import { refreshCalendar } from '@/domain/calendar/sync';
 import { NotFoundError } from '@/domain/common/errors';
-import { agenda, type AgendaEventInput, type AgendaItem } from '@/domain/engines/agenda';
-import { overriddenOriginals, recurringWithOverrides } from '@/domain/events/occurrences';
+import { agenda, type AgendaItem } from '@/domain/engines/agenda';
+import { readAgendaInputs } from '@/domain/events/agenda-inputs';
 import { getEvent, listEventPeople, listEvents, setEventPerson } from '@/domain/events/service';
-import { effectivePeople } from '@/domain/events/who';
 import { createNote, listNotes } from '@/domain/notes/service';
-import { createPerson, listPeople } from '@/domain/people/service';
+import { createPerson } from '@/domain/people/service';
 import type { UserActor } from '@/trust/actor';
 import { fakeProvider, type FakeStep } from '@/integrations/calendar/fake';
 import {
@@ -79,36 +77,24 @@ const refresh = (id: string, p: ReturnType<typeof provider>, actor: UserActor = 
 
 /**
  * The loader's composition, as the actor: what Today, Forward and Coming up
- * would show. Narrowed to one calendar's events when asked, since every test
+ * would show (readAgendaInputs, the domain's own composition since M5
+ * Package 1). Narrowed to one calendar's events when asked, since every test
  * here connects a calendar of its own in the same household.
  */
 async function agendaFor(actor: UserActor, from: string, to: string, calendarId?: string) {
-  const [events, people, calendars] = await Promise.all([
-    listEvents(actor, {}, deps).then((es) =>
-      calendarId ? es.filter((e) => e.calendarSourceId === calendarId) : es,
-    ),
-    listPeople(actor, {}, deps),
-    listCalendars(actor, {}, deps),
+  const [inputs, events] = await Promise.all([
+    readAgendaInputs(actor, deps),
+    listEvents(actor, {}, deps),
   ]);
-  const visible = new Set(people.map((p) => p.id));
-  const defaults = new Map(calendars.map((c) => [c.id, c.defaultPersonIds]));
-  const overridden = overriddenOriginals(events);
-  const inputs: AgendaEventInput[] = await Promise.all(
-    events.map(async (e) => ({
-      ...recurringWithOverrides(e, overridden),
-      id: e.id,
-      title: e.title,
-      people: effectivePeople(
-        (await listEventPeople(actor, e.id, {}, deps)).map((a) => ({
-          personId: a.personId,
-          role: a.role as 'attending' | 'responsible',
-        })),
-        e.calendarSourceId ? defaults.get(e.calendarSourceId) : undefined,
-        visible,
-      ).people,
-    })),
+  const mine = new Set(
+    events.filter((e) => !calendarId || e.calendarSourceId === calendarId).map((e) => e.id),
   );
-  return agenda({ from, to, timeZone: ZONE, events: inputs });
+  return agenda({
+    from,
+    to,
+    timeZone: ZONE,
+    events: inputs.events.filter((e) => mine.has(e.id)),
+  });
 }
 const eventsOn = async (actor: UserActor, date: string, calendarId?: string) =>
   (await agendaFor(actor, date, date, calendarId))

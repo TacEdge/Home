@@ -139,7 +139,7 @@ Who is involved and how. Works for manual and synced events.
 | Field | Notes |
 |---|---|
 | `event_id`, `person_id` | synced events keep their row across refreshes (ADR 0007 §13), so an annotation on a synced series or occurrence is an ordinary `event_id` |
-| `role` | `attending` \| `responsible` (e.g. doing drop-off/pickup) |
+| `role` | `attending` \| `responsible`: the person responsible for the event; not, by itself, a record of transport (ADR 0008 §21) |
 
 Implementation (`0004`): `event_person` has its own uuid id, a unique `(event_id, person_id, role)`, and cascades with its event and its person. It has no visibility column.
 

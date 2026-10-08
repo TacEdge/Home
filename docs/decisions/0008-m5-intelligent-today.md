@@ -1,11 +1,11 @@
 # ADR 0008 — M5 Intelligent Today: scope, architecture and decisions
 
-Status: **Proposed**, 2026-10-08, and revised the same day after the owner's first review.
+Status: **Accepted**, 2026-10-08. The owner approved this ADR and the contract, `docs/m5/M5-BUILD-CONTRACT.md`, by merging Package 0 (PR #53) and starting Package 1.
 
-- **Approved by the owner:** §20, §23, §24, §25 and §26.
+- **Approved:** §20, §23, §24, §25 and §26.
 - **Approved as provisional:** §22.
 - **Revised as the owner directed:** §21.
-- **Awaiting the owner:** overall approval of this ADR and the contract, `docs/m5/M5-BUILD-CONTRACT.md` (Package 0). No M5 code is written until both are approved.
+- **Implementation:** Package 1 (agenda groundwork) is in review; its decisions are recorded in §30.
 
 ## Context
 
@@ -236,11 +236,26 @@ Four items are carried forward to M5:
 
 29. **Production.** M5 is built and accepted on synthetic data, and `HOME_REAL_DATA` stays closed. M5 adds no migration and no Production setting. Its acceptance is technical acceptance on synthetic data; usefulness to the household is proven in the M10 trial, after the gate opens.
 
+### Implementation
+
+30. **Package 1: agenda groundwork.**
+
+    - **Overnight placement (§24).** The agenda engine places a timed occurrence on every home day from the day it starts to the day before it ends. An end exactly at midnight does not reach the next day. Each placement is the same occurrence: the same `eventId`, `occurrenceDate` and instants, with `day` of `days`, as all-day items already had. The engine expands far enough back (the event's length plus a day) to find an occurrence still running on the first day of a range. Recurring, skipped and overridden occurrences follow the same rule, because placement happens after expansion. All-day handling is unchanged. Today, Forward and Coming up get this from the shared engine; none of them filters or places anything itself.
+    - **Ordering and zones (m-6b).** The agenda already placed timed items by home date and ordered them by their actual start instant. Package 1 keeps that and tests it across Pacific/Auckland, UTC, London and New York, including each zone's clock changes. The remaining gap was a series page's *Next few times*: it windowed regular occurrences by the series' own date, but changed ones by home date. Both now use `occurrencesAtHome`, so a series page shows exactly the times Today and Forward show for those days.
+
+      The page keeps giving times in the event's own zone, as its form does, and now says which zone that is ("New York time", "UTC") when it is not home's. No new time-zone rules were added.
+    - **Rows.** A carried-over row says where it runs to on its first day ("until Wednesday 01:00"), which day it is in between ("Day 2 of 3"), and where it began on its last day ("Ends · from Tuesday 23:00"). This is shared presentation (`timedRow`) that Package 3 may restyle.
+    - **Event kind.** Event items carry the recorded `kind` as `eventKind`, or `null` when a caller gives none. The loader always gives it. No classification is added.
+    - **Batched people (ADR 0008 §7).** `listEventPeopleFor(actor, eventIds)` in the events service reads every event's annotations in one query. It joins the event under the same readable-records predicate as `getEvent` (visible to the actor, archived only when asked for) and each person under `visibleTo`, in the same order as `listEventPeople`. Ids the actor cannot read contribute nothing, indistinguishably from events with no people. Privacy stays in the domain query; nothing is filtered in the loader or the UI.
+
+      The composition the app loader did is now the domain's `readAgendaInputs(actor, deps)` (`src/domain/events/agenda-inputs.ts`), unchanged in meaning: own annotations replace calendar defaults, and a changed occurrence with no people of its own shows its series' people. Measured on synthetic data, the composition's queries were 4 + 2 per event before (8 events: 20; 38 events: 80) and are now a constant 7.
+    - **Unchanged.** There is no schema change and no migration. The export service still reads annotations per event (`listEventPeople`); it is not on Today's path and is left for a later package.
+
 ## Consequences
 
 - **ROADMAP.** The M5 row records the approved boundary changes (§20, §23, §25) and the narrowing in §21.
 - **V0.1-SCOPE.** Its Today line ("who's doing drop-off/pickup") is not met in M5, for the reason in §21.
-- **Data-model wording.** FAMILY-DATA-MODEL's example for `responsible` ("e.g. doing drop-off/pickup") conflicts with §21. A wording change is proposed for the owner's decision (contract §12) and is not made here.
+- **Data-model wording.** FAMILY-DATA-MODEL's example for `responsible` ("e.g. doing drop-off/pickup") conflicted with §21. Package 1 changed it, as the owner approved, to "the person responsible for the event; not, by itself, a record of transport".
 - **SYSTEM-ARCHITECTURE.** §2.6's `coordination_gap` row stays as the long-term design. Its prerequisite is a structured transport record.
 - **Other rules.** CLAUDE.md and the rest of SYSTEM-ARCHITECTURE are unchanged. M5 follows their existing rules.
 - **Prototype.** `/prototype` stays as reference until M6 deletes it.
