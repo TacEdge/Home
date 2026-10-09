@@ -154,6 +154,78 @@ describe('the families', () => {
   });
 });
 
+describe('a failed calendar’s insight lasts one failure episode (ADR 0008 §33)', () => {
+  // A calendar last refreshed successfully on Monday 12 October at 09:00, then failing.
+  const lastGood = at('2026-10-12T09:00:00+13:00');
+  const failing = (now: Date, lastSyncedAt: Date | null = lastGood) =>
+    fresh(now, {
+      id: 'c-1',
+      name: 'One',
+      lastSyncedAt,
+      lastAttemptAt: new Date(now.getTime() - 10 * 60 * 1000),
+      lastSyncStatus: 'unreachable',
+    });
+  const failedKey = (now: Date, lastSyncedAt: Date | null = lastGood) =>
+    run({ events: [], calendars: [failing(now, lastSyncedAt)] }, now).insights.all.find(
+      (i) => i.rule === 'data_health.failed',
+    )?.key;
+
+  it('the first failure is an insight, with a key from the last success', () => {
+    const now = at('2026-10-13T07:00:00+13:00');
+    expect(failedKey(now)).toBe(`data_health.failed:c-1:s${lastGood.getTime()}`);
+  });
+
+  it('dismissed, it stays dismissed while the calendar keeps failing, day after day', () => {
+    const first = failedKey(at('2026-10-13T07:00:00+13:00'))!;
+    const dismissed = new Set([first]);
+    for (const day of ['13', '14', '15', '16', '19']) {
+      const now = at(`2026-10-${day}T18:00:00+13:00`);
+      expect(failedKey(now), day).toBe(first);
+      const r = run({ events: [], calendars: [failing(now)], dismissed }, now).insights;
+      expect(
+        r.shown.some((i) => i.rule === 'data_health.failed'),
+        day,
+      ).toBe(false);
+      expect(r.more, day).toBe(0);
+    }
+  });
+
+  it('a success ends the episode: no failed insight while it is healthy', () => {
+    const now = at('2026-10-16T07:00:00+13:00');
+    const healthy = fresh(now, { id: 'c-1', name: 'One', lastSyncStatus: 'ok' });
+    const r = run({ events: [], calendars: [healthy] }, now).insights;
+    expect(r.all.some((i) => i.kind === 'data_health')).toBe(false);
+  });
+
+  it('a failure after a success is a new episode: a new key, shown even though the last was dismissed', () => {
+    const first = failedKey(at('2026-10-13T07:00:00+13:00'))!;
+    const recovered = at('2026-10-16T08:00:00+13:00');
+    const now = at('2026-10-17T07:00:00+13:00');
+    const next = failedKey(now, recovered)!;
+    expect(next).not.toBe(first);
+    const r = run(
+      { events: [], calendars: [failing(now, recovered)], dismissed: new Set([first]) },
+      now,
+    ).insights;
+    expect(r.shown.map((i) => i.key)).toContain(next);
+  });
+
+  it('a calendar that has never succeeded is one episode until it does', () => {
+    const a = failedKey(at('2026-10-13T07:00:00+13:00'), null);
+    const b = failedKey(at('2026-10-18T07:00:00+13:00'), null);
+    expect(a).toBe('data_health.failed:c-1:never');
+    expect(b).toBe(a);
+  });
+
+  it('a dismissal hides only the insight: the calendar is still failing in its own facts', () => {
+    const now = at('2026-10-14T07:00:00+13:00');
+    const dismissed = new Set([failedKey(now)!]);
+    const r = run({ events: [], calendars: [failing(now)], dismissed }, now);
+    expect(r.today.headline.qualified).toBe(true);
+    expect(r.today.incomplete).toEqual([{ kind: 'calendar', id: 'c-1' }]);
+  });
+});
+
 describe('ranking, the count of more, dismissals', () => {
   // Saturday 17th: two failing calendars, the fence today (on object), Nana Jo Tuesday, tomorrow busy.
   const now = at('2026-10-17T07:00:00+13:00');
@@ -182,7 +254,9 @@ describe('ranking, the count of more, dismissals', () => {
   });
 
   it('a dismissed insight is neither shown nor counted, and the next one moves up', () => {
-    const dismissed = new Set([`data_health.failed:c-1:2026-10-17`]);
+    const dismissed = new Set([
+      `data_health.failed:c-1:s${new Date(now.getTime() - 60 * 60 * 1000).getTime()}`,
+    ]);
     const r = run({ ...h, dismissed }, now).insights;
     expect(r.shown.map((i) => i.key)).not.toContain([...dismissed][0]);
     expect(r.shown.map((i) => i.rule)).toEqual([

@@ -469,7 +469,7 @@ They are shown in the agenda's own row style, so no item is lost.
 - **Carry-overs in counts** (review fix, ADR 0008 §31): a timed occurrence carried over from an earlier day counts towards the headline and `busy_day.count` only while it is still running at `now`. One that has already ended is no longer counted, but it stays on the day's agenda and on its person's line. Everything that begins on the day counts, whether it has happened yet or not.
 - **Ranking:** `data_health`, then `preparation`, then `busy_day`; then by date; then by key.
 - **Display:** Worth knowing shows the top 3 not dismissed and not `onObject`. "+ N more" counts only those.
-- **Keys:** `{kind}:{ids}:{date}`. Changed facts produce a new key.
+- **Keys:** `{kind}:{ids}:{date}`. Changed facts produce a new key. `data_health.failed` is keyed by its failure episode (the calendar's last successful refresh), so a dismissal holds until the calendar succeeds and fails again (ADR 0008 §33).
 - **Provisional thresholds:** §22's thresholds are code constants, evaluated during the M10 family trial and changed only by an ADR amendment.
 
 ### 5.5 To do (`todo`)

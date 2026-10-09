@@ -1,7 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
-import { insightResponse } from '@/db/schema';
+import { calendarSource, insightResponse } from '@/db/schema';
+import { connectCalendar } from '@/domain/calendar/service';
+import { SYNTHETIC_ADDRESS } from '../fixtures/calendars/google';
 import { NotPermittedError } from '@/domain/common/errors';
 import { createEventWithPeople } from '@/domain/events/service';
 import { dismissInsight, insightsFor, insightsInput, readInsights } from '@/domain/insights/today';
@@ -273,5 +275,118 @@ describe('what it costs', () => {
     expect(r.all.length).toBeGreaterThanOrEqual(3);
     expect(queries - before).toBe(1);
     console.info(`Worth knowing: ${queries - before} query for ${r.all.length} insights`);
+  });
+});
+
+// The decision on PR #57: a dismissed data_health.failed insight stays dismissed for the
+// whole of one failure episode; only a success then a failure starts a new one. The
+// recorded sync state is set directly (a refresh writes these same columns: a success
+// moves last_synced_at, a failure only last_attempt_at and the status).
+describe('a failed calendar, one failure episode at a time', () => {
+  let calendar = '';
+  const at = (iso: string) => new Date(iso);
+  const lastGood = at('2026-10-12T09:00:00+13:00');
+  const failedAt = async (attempt: Date, lastSyncedAt: Date) =>
+    admin.db
+      .update(calendarSource)
+      .set({ lastAttemptAt: attempt, lastSyncedAt, lastSyncStatus: 'unreachable' })
+      .where(eq(calendarSource.id, calendar));
+  const failed = async (who: UserActor, now: Date) =>
+    (await readInsights(who, now, ZONE, deps)).all.find(
+      (i) =>
+        i.rule === 'data_health.failed' &&
+        i.facts.some((f) => f.kind === 'calendar' && f.id === calendar),
+    );
+  const listed = async (who: UserActor, now: Date, k: string) =>
+    keysOf(await readInsights(who, now, ZONE, deps)).listed.includes(k);
+
+  beforeAll(async () => {
+    calendar = (
+      await connectCalendar(
+        h.sam,
+        {
+          address: SYNTHETIC_ADDRESS.replace('synthetic.family', 'episode.family').replace(
+            '0123456789abcdef0123456789abcdef',
+            'abcdef0123456789abcdef0123456789',
+          ),
+          name: 'Episode calendar WK',
+          visibility: 'household',
+        },
+        deps,
+      )
+    ).calendarId;
+  });
+
+  it('a first failure is an insight for both adults, keyed by the last success', async () => {
+    const now = at('2026-10-13T07:03:00+13:00');
+    await failedAt(at('2026-10-13T06:00:00+13:00'), lastGood);
+    const sam = await failed(h.sam, now);
+    expect(sam?.key).toBe(`data_health.failed:${calendar}:s${lastGood.getTime()}`);
+    expect(await listed(h.sam, now, sam!.key)).toBe(true);
+    expect(await listed(h.alex, now, sam!.key)).toBe(true);
+  });
+
+  it('dismissed by Sam, it stays dismissed for Sam across days of failing, and stays for Alex', async () => {
+    const k = `data_health.failed:${calendar}:s${lastGood.getTime()}`;
+    await dismissInsight(h.sam, k, at('2026-10-13T07:03:00+13:00'), ZONE, deps);
+    for (const day of ['14', '15', '16']) {
+      const now = at(`2026-10-${day}T07:03:00+13:00`);
+      await failedAt(at(`2026-10-${day}T06:00:00+13:00`), lastGood);
+      expect((await failed(h.sam, now))?.key, day).toBe(k);
+      expect(await listed(h.sam, now, k), day).toBe(false);
+      expect(await listed(h.alex, now, k), day).toBe(true);
+    }
+    // Dismissal never hides the calendar's state: the headline still cannot vouch for it.
+    const { records } = await readAgendaInputs(h.sam, deps);
+    expect(records.calendars.find((c) => c.id === calendar)?.lastSyncStatus).toBe('unreachable');
+    expect(await rowsFor(h.sam.userId, k)).toHaveLength(1);
+  });
+
+  it('Alex dismisses the same episode independently', async () => {
+    const k = `data_health.failed:${calendar}:s${lastGood.getTime()}`;
+    const now = at('2026-10-16T07:03:00+13:00');
+    await dismissInsight(h.alex, k, now, ZONE, deps);
+    expect(await listed(h.alex, now, k)).toBe(false);
+    expect(await rowsFor(h.alex.userId, k)).toHaveLength(1);
+    expect(await rowsFor(h.sam.userId, k)).toHaveLength(1);
+  });
+
+  it('a success ends the episode; the next failure is a new insight for both, dismissed by neither', async () => {
+    const recovered = at('2026-10-17T08:00:00+13:00');
+    await admin.db
+      .update(calendarSource)
+      .set({ lastAttemptAt: recovered, lastSyncedAt: recovered, lastSyncStatus: 'ok' })
+      .where(eq(calendarSource.id, calendar));
+    expect(await failed(h.sam, at('2026-10-17T09:00:00+13:00'))).toBeUndefined();
+
+    const now = at('2026-10-18T07:03:00+13:00');
+    await failedAt(at('2026-10-18T06:00:00+13:00'), recovered);
+    const next = await failed(h.sam, now);
+    expect(next?.key).toBe(`data_health.failed:${calendar}:s${recovered.getTime()}`);
+    expect(await listed(h.sam, now, next!.key)).toBe(true);
+    expect(await listed(h.alex, now, next!.key)).toBe(true);
+  });
+
+  it('with the gate closed, dismissing the episode is refused and nothing is written', async () => {
+    const recovered = at('2026-10-17T08:00:00+13:00');
+    const k = `data_health.failed:${calendar}:s${recovered.getTime()}`;
+    const saved = {
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      HOME_REAL_DATA: process.env.HOME_REAL_DATA,
+    };
+    void env.HOME_TIMEZONE;
+    process.env.VERCEL_ENV = 'production';
+    delete process.env.HOME_REAL_DATA;
+    try {
+      expect(
+        await outcome(dismissInsight(h.sam, k, at('2026-10-18T07:03:00+13:00'), ZONE, deps)),
+      ).toBe('real_data_closed');
+    } finally {
+      for (const [n, v] of Object.entries(saved))
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+    }
+    expect(await rowsFor(h.sam.userId, k)).toHaveLength(0);
+    expect(await listed(h.sam, at('2026-10-18T07:03:00+13:00'), k)).toBe(true);
   });
 });

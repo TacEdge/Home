@@ -149,7 +149,14 @@ export function insights(input: InsightsInput): Insights {
     const stale = rule === 'data_health.stale';
     const at = stale ? c.lastSyncedAt! : (c.lastAttemptAt ?? now);
     add({
-      key: `${rule}:${c.id}:${homeDate(at, timeZone)}`,
+      // stale: until the calendar next succeeds and goes stale again (its last success's date).
+      // failed: one key per failure episode (ADR 0008 §33). A refresh that fails leaves
+      // lastSyncedAt as it was and only a success moves it, so the last success identifies the
+      // episode: repeated failures keep the key, a success ends the episode, and the next
+      // failure has a new key. A calendar that has never succeeded is in its first episode.
+      key: stale
+        ? `${rule}:${c.id}:${homeDate(at, timeZone)}`
+        : `${rule}:${c.id}:${c.lastSyncedAt ? `s${c.lastSyncedAt.getTime()}` : 'never'}`,
       kind: 'data_health',
       rule,
       when: today,
