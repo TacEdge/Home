@@ -49,6 +49,19 @@ const schema = z.object({
   // key material, never rotated with HOME_CREDENTIALS_KEY. The same rules:
   // any string here, validated by credentials.ts, never logged.
   HOME_FINGERPRINT_KEY: z.string().optional(),
+  // A test-only time source (M5 contract §8.4): with \`allow\`, a request may
+  // carry an \`x-home-test-now\` header and Today will read that instant as
+  // now. Only the local and CI end-to-end servers set it; production and
+  // Vercel deployments refuse it (parseEnv), so it can never move a real clock.
+  HOME_TEST_TIME: z.enum(['allow']).optional(),
+  // With the test time source on, the home-zone clock Today reads on the real
+  // date when a request carries no header ("07:03"): the end-to-end suite's
+  // steady morning, so a screen built from records dated today does not
+  // change with the hour the suite happens to run.
+  HOME_TEST_CLOCK: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -78,6 +91,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // Production-only refusals (contract §5.3, §5.10).
   if (env.NODE_ENV === 'production') {
     const bad: string[] = [];
+    if (env.HOME_TEST_TIME || env.HOME_TEST_CLOCK)
+      bad.push('HOME_TEST_TIME (the test time source is not allowed in production)');
     if (env.HOME_MAIL_TRANSPORT === 'test')
       bad.push('HOME_MAIL_TRANSPORT (test transport is not allowed in production)');
     if (!env.BETTER_AUTH_URL.startsWith('https://'))
@@ -90,6 +105,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         bad.join('; '),
       );
   }
+  if ((env.HOME_TEST_TIME || env.HOME_TEST_CLOCK) && env.VERCEL_ENV)
+    throw new EnvError(
+      ['HOME_TEST_TIME'],
+      'HOME_TEST_TIME (the test time source is not allowed on a Vercel deployment)',
+    );
   // Preview/production database isolation (contract §1.4). Preview and
   // production are separate Neon projects; this is the backstop against a
   // production credential ending up in the preview environment, or vice versa.

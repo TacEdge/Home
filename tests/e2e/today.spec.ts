@@ -1,11 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import { CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
+import { seedCalendar } from './calendar-feeds';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
 import { withDb } from './helpers';
 
-// Today, factual (M3 contract §3.2), over the seeded synthetic family plus
-// a few records made for the day the suite runs. Screenshots land in
+// What Today shows of the records of the day the suite runs (M3 contract
+// §3.2, kept under M5 Package 3): nothing of the household's is lost, the
+// other adult's private records and everything archived are absent, and a
+// quiet day says so. The servers read the clock as 07:03 on the real date
+// (HOME_TEST_CLOCK), so none of this depends on the hour. The screen's own
+// scenarios are in today-screen.spec.ts. Screenshots land in
 // test-results/screenshots (never committed).
 
 const SHOTS = 'test-results/screenshots';
@@ -126,8 +131,8 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   await page.goto('/today');
   await expect(page.getByRole('heading', { level: 1, name: DAY })).toHaveText(t.long!);
 
-  // On today: all-day first, then by time, the same rows as Forward's Today section.
-  const on = page.locator('section[aria-labelledby="today-on"]');
+  // Nobody is recorded on these, so they are in Also today: all-day first, then by time.
+  const on = page.locator('section[aria-labelledby="today-also"]');
   const rows = await on.getByRole('link').allTextContents();
   const allDayEnd = rows.findIndex((r) => !r.startsWith('All day'));
   expect(rows.slice(0, allDayEnd).every((r) => r.startsWith('All day'))).toBe(true);
@@ -137,26 +142,29 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   expect(walk).toBeGreaterThan(-1);
   expect(dentist).toBeGreaterThan(walk);
   expect(rows.some((r) => r.startsWith('All day') && r.includes('Teacher-only day'))).toBe(true);
+  // Forward's Today section has the same rows, in the same order (and whatever else the family has on).
   await page.goto('/forward');
   const forwardToday = await page
     .locator('section[aria-labelledby="day-' + t.d + '"]')
     .getByRole('link')
     .allTextContents();
-  expect(forwardToday.filter((r) => !r.includes('Due'))).toEqual(rows);
+  expect(forwardToday.filter((r) => rows.includes(r))).toEqual(rows);
   await page.goto('/today');
   await on.getByRole('link', { name: /Dentist/ }).click();
   await expect(page).toHaveURL(/\/events\/[0-9a-f-]{36}$/);
   await page.goBack();
 
-  // To do: overdue first in words, then due today; future, done and dropped absent.
+  // To do: what is due today first, then what is carried over, oldest first, in words; future, done and dropped absent.
   const todo = page.locator('section[aria-labelledby="today-todo"]');
   const tasks = await todo.getByRole('link').allTextContents();
-  expect(tasks[0]).toContain('Return the library books');
-  expect(tasks[0]).toContain(`From ${t.ew}`);
-  expect(tasks[1]).toContain('Book the car in');
-  expect(tasks[1]).toContain('From yesterday');
-  expect(tasks[2]).toContain('Pay the power bill');
-  expect(tasks[2]).toContain('Due today');
+  expect(tasks).toHaveLength(3);
+  expect(tasks[0]).toContain('Pay the power bill');
+  expect(tasks[0]).toContain('Due today');
+  expect(tasks[1]).toContain('Return the library books');
+  expect(tasks[1]).toContain(`From ${t.ew}`);
+  expect(tasks[2]).toContain('Book the car in');
+  expect(tasks[2]).toContain('From yesterday');
+  await expect(todo.getByRole('link', { name: /more to do/ })).toHaveCount(0);
   const main = (await page.textContent('main')) ?? '';
   expect(main).not.toContain('Next week thing');
   expect(main).not.toContain('Already done');
@@ -177,7 +185,8 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   await sort.click();
   await expect(page).toHaveURL(/\/sort$/);
   await page.goto('/today');
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText(['On today', 'To do']);
+  const headings = await page.getByRole('heading', { level: 2 }).allTextContents();
+  expect(headings).toEqual(expect.arrayContaining(['Also today', 'To do']));
   await expect(page.getByRole('link', { name: 'The next 30 days ›' })).toHaveCount(1);
   await shot(page, 'today-busy');
 
@@ -188,17 +197,19 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   try {
     await signInAsFixtureAdult(alex, 'alex');
     await alex.goto('/today');
-    const alexOn = alex.locator('section[aria-labelledby="today-on"]');
+    const alexOn = alex.locator('section[aria-labelledby="today-also"]');
     await expect(
       alexOn.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} event`) }),
     ).toBeVisible();
+    // Alex sees five tasks, three shown: their own private ones among them.
     const alexTodo = alex.locator('section[aria-labelledby="today-todo"]');
-    await expect(
-      alexTodo.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} task overdue`) }),
-    ).toContainText('From yesterday');
     await expect(
       alexTodo.getByRole('link', { name: new RegExp(`${ALEX_PRIVATE} task due today`) }),
     ).toContainText('Due today');
+    await expect(alexTodo.getByRole('link', { name: 'Two more to do ›' })).toHaveAttribute(
+      'href',
+      '/tasks',
+    );
     await expect(alex.getByRole('link', { name: /things? to sort ›$/ })).toHaveText(
       toSortWords(alexWaiting),
     );
@@ -215,6 +226,13 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
   page,
 }) => {
   const t = await homeToday();
+  // A calendar is connected, so this is a quiet day and not a first run.
+  await seedCalendar({
+    owner: 'fixture-sam',
+    name: 'p9 quiet-day calendar',
+    visibility: 'household',
+    fingerprintTag: 'p9quietday',
+  });
   // Everything Alex could see today is put away for a moment. A capture is
   // left waiting: captures don't make a day busy.
   const held = await q(`select id from event where archived_at is null`);
@@ -271,6 +289,7 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
     await page.getByRole('link', { name: 'Which one is you? ›' }).click();
     await expect(page).toHaveURL(/\/settings\/you$/);
   } finally {
+    await q(`update calendar_source set archived_at = now() where name = 'p9 quiet-day calendar'`);
     await q(`update person set user_id = 'fixture-alex' where id = $1`, [me!.id]);
     await q(`update event set archived_at = null where id = any($1::uuid[])`, [
       held.map((r) => r.id),

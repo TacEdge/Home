@@ -4,7 +4,7 @@ Status: **Approved**, 2026-10-08 (Package 0, PR #53, merged by the owner).
 
 - **Approved:** ADR 0008 §20, §23, §24, §25 and §26. §22 is approved as provisional.
 - **Revised as the owner directed:** §21. There is no transport inference, so Getting everyone there is not built in M5.
-- **Progress:** Packages 0 and 1 merged (PRs #53, #54). Package 2 (the Today and insights engines, ADR 0008 §31) is in review. Packages 3–5 have not started.
+- **Progress:** Packages 0, 1 and 2 merged (PRs #53, #54, #55). Package 3 (the Today screen, ADR 0008 §32) is in review. Packages 4–5 have not started.
 
 Implementers and reviewers: per package (§2).
 
@@ -397,6 +397,14 @@ Desktop keeps the same layout. The Kev panel is M8.
 | Tap the headline or an insight | Expands in place to its facts (no JavaScript) |
 | **Dismiss** | Gone for this adult, for this insight key |
 | Tick a to-do | Unchanged from M3 (task page) |
+
+### 4.5 As built in Package 3 (ADR 0008 §32)
+
+- **Order.** Date, headline, (Worth knowing: Package 4), Everyone's day, *Also today*, To do, To sort, "Which one is you?", Forward. Empty sections are absent.
+- **Headline facts.** A labelled "What this is based on ›" disclosure under the headline, not a tap on the headline itself, so it can be found and used by keyboard. It opens without JavaScript.
+- **Everyone's day.** The engine's lines and order; "+ N more" opens the rest in place. Routine entries are one word with nobody beside them; one-offs show the other people recorded. Tablet and desktop: cards on the right, with no time-of-day words (§4.3 deferred).
+- **Evening.** All day today (when an all-day event is recorded), Tomorrow morning, Before then (or "Due tomorrow"), To do, To sort, and Earlier today folded. "Tonight" is the headline.
+- **Not built.** Folding or fading past items in the day view.
 
 ---
 

@@ -28,6 +28,10 @@ const serverEnv = (port: number, allowed: string) => ({
   NODE_ENV: 'development',
   // Synthetic calendar feeds for Settings › Calendars (tests/e2e/calendar-feeds.ts).
   HOME_TEST_CALENDAR_FEEDS: FEED_DIR,
+  // Today at a frozen time (src/app/_agenda/now.ts): a steady 07:03 on the real date,
+  // or whatever a request's x-home-test-now says (evening mode).
+  HOME_TEST_TIME: 'allow',
+  HOME_TEST_CLOCK: '07:03',
   BETTER_AUTH_URL: `http://localhost:${port}`,
   HOME_ALLOWED_EMAILS: allowed,
 });

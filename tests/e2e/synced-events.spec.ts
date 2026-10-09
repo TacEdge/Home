@@ -181,7 +181,8 @@ test('Today and Forward: synced events sit among the manual ones, in agenda orde
   await expect(page.getByText(/^Updated just now/)).toBeVisible();
 
   await page.goto('/today');
-  const onToday = page.locator('section[aria-labelledby="today-on"]');
+  // Nobody is recorded on them, so both are in Also today, in the agenda's order.
+  const onToday = page.locator('section[aria-labelledby="today-also"]');
   await expect(onToday.getByRole('link', { name: /Recycling out/ })).toBeVisible();
   await expect(onToday.getByRole('link', { name: /Swim squad/ })).toContainText('15:30');
   // All-day first: Bins out above Swimming, whatever else the family has on.
@@ -273,9 +274,13 @@ test('who’s going and the notes are HOME’s: changed from the event page, see
   await page.goto('/forward');
   await expect(page.getByRole('link', { name: /Swim squad/ }).first()).toContainText('Milo');
   await page.goto('/today');
+  // Milo is recorded on it now, so it is on Milo's line.
   await expect(
-    page.locator('section[aria-labelledby="today-on"]').getByRole('link', { name: /Swim squad/ }),
-  ).toContainText('Milo');
+    page
+      .locator('section[aria-labelledby="today-day"] li')
+      .filter({ has: page.getByRole('link', { name: 'Milo', exact: true }) })
+      .getByRole('link', { name: /Swim squad/ }),
+  ).toBeVisible();
   const milo = (await q(`select id from person where name = 'Milo'`))[0]!.id;
   await page.goto(`/people/${milo}`);
   await expect(page.getByRole('link', { name: /Swim squad/ }).first()).toBeVisible();
@@ -428,7 +433,10 @@ test('refresh on use: Today asks for a refresh after it has rendered when a cale
   );
   await page.goto('/today');
   await expect(
-    page.locator('section[aria-labelledby="today-on"]').getByRole('link', { name: /Swim squad/ }),
+    page
+      .locator('main')
+      .getByRole('link', { name: /Swim squad/ })
+      .first(),
   ).toBeVisible(); // shown at once, from what HOME had
   expect((await refreshed).status()).toBe(200);
   await page.goto(`/settings/calendars/${id}`);

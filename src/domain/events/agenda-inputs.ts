@@ -1,10 +1,10 @@
 import 'server-only';
-import { listCalendars } from '../calendar/service';
+import { listCalendars, type CalendarView } from '../calendar/service';
 import type { Deps } from '../common/write';
 import type { AgendaEventInput, AgendaProjectInput, AgendaTaskInput } from '../engines/agenda';
 import { listPeople, type Person } from '../people/service';
-import { listProjects } from '../projects/service';
-import { listTasks } from '../tasks/service';
+import { listProjects, type Project } from '../projects/service';
+import { listTasks, type Task } from '../tasks/service';
 import {
   hiddenOccurrenceChanges,
   isOccurrenceChange,
@@ -33,6 +33,12 @@ export type AgendaInputs = {
   people: Person[];
   tasks: AgendaTaskInput[];
   projects: AgendaProjectInput[];
+  /**
+   * The same reads, whole, for the screens that need more than the engine
+   * does (Today's tasks with their schedule and project, its calendars'
+   * freshness). Nothing is read twice for them (M5 Package 3, ADR 0008 §32).
+   */
+  records: { tasks: Task[]; projects: Project[]; calendars: CalendarView[] };
 };
 
 type Role = 'attending' | 'responsible';
@@ -79,5 +85,6 @@ export async function readAgendaInputs(actor: UserActor, deps: Deps = {}): Promi
       status: p.status,
       targetDate: p.targetDate,
     })),
+    records: { tasks, projects, calendars },
   };
 }

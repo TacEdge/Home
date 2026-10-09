@@ -1,6 +1,6 @@
 import 'server-only';
 import { agenda, type AgendaDay, type AgendaEventInput } from '@/domain/engines/agenda';
-import { readAgendaInputs } from '@/domain/events/agenda-inputs';
+import { readAgendaInputs, type AgendaInputs } from '@/domain/events/agenda-inputs';
 import type { Person } from '@/domain/people/service';
 import { addDays, isoDateInZone, type IsoDate } from '@/lib/dates';
 import { env } from '@/lib/env';
@@ -27,6 +27,8 @@ export type LoadedAgenda = {
    * exactly what the agenda read.
    */
   events: AgendaEventInput[];
+  /** The whole records the agenda was composed from, for Today's tasks and calendars (one read, shared). */
+  records: AgendaInputs['records'];
 };
 
 /** Today in the home time zone. */
@@ -41,7 +43,7 @@ export async function loadAgenda(
   days: number,
 ): Promise<LoadedAgenda> {
   const to = addDays(from, days - 1);
-  const { events, people, tasks, projects } = await readAgendaInputs(actor);
+  const { events, people, tasks, projects, records } = await readAgendaInputs(actor);
   return {
     today: todayInHomeZone(),
     from,
@@ -57,5 +59,6 @@ export async function loadAgenda(
     }),
     people: new Map(people.map((p) => [p.id, p])),
     events,
+    records,
   };
 }

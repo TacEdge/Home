@@ -13,6 +13,43 @@ const valid = {
 };
 
 describe('parseEnv', () => {
+  describe('the test time source (M5 contract §8.4)', () => {
+    it('is allowed locally and in CI', () => {
+      expect(parseEnv({ ...valid, HOME_TEST_TIME: 'allow' }).HOME_TEST_TIME).toBe('allow');
+    });
+
+    it('is refused in production, and on any Vercel deployment', () => {
+      const prod = {
+        ...valid,
+        NODE_ENV: 'production',
+        HOME_MAIL_TRANSPORT: 'provider',
+        MAIL_API_KEY: 'k',
+        MAIL_FROM: 'home@example.test',
+        BETTER_AUTH_URL: 'https://home.example.test',
+      };
+      expect(() => parseEnv({ ...prod, HOME_TEST_TIME: 'allow' })).toThrow(/HOME_TEST_TIME/);
+      expect(() => parseEnv({ ...valid, VERCEL_ENV: 'preview', HOME_TEST_TIME: 'allow' })).toThrow(
+        /HOME_TEST_TIME/,
+      );
+    });
+
+    it('takes a steady home clock for the end-to-end suite, refused where the source is', () => {
+      expect(
+        parseEnv({ ...valid, HOME_TEST_TIME: 'allow', HOME_TEST_CLOCK: '07:03' }),
+      ).toMatchObject({
+        HOME_TEST_CLOCK: '07:03',
+      });
+      expect(() => parseEnv({ ...valid, HOME_TEST_CLOCK: '7:03' })).toThrow(EnvError);
+      expect(() => parseEnv({ ...valid, VERCEL_ENV: 'preview', HOME_TEST_CLOCK: '07:03' })).toThrow(
+        /HOME_TEST_TIME/,
+      );
+    });
+
+    it('accepts only the value allow', () => {
+      expect(() => parseEnv({ ...valid, HOME_TEST_TIME: 'yes' })).toThrow(EnvError);
+    });
+  });
+
   it('parses a valid development environment', () => {
     const env = parseEnv(valid);
     expect(env.DATABASE_URL).toBe(valid.DATABASE_URL);

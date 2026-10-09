@@ -6,7 +6,9 @@ import { Wordmark } from './wordmark';
 
 // The HOME shell (docs/concepts/README.md, docs/BRAND.md §07, M3 contract
 // §3.1): the wordmark, the Today/Forward switch, the ⌂ menu, the page, and a
-// slot for the capture bar at the foot of every place (M3 Package 7).
+// slot for the capture bar at the foot of every place (M3 Package 7). A page
+// that holds a `data-wide` element (Today's second column, M5 Package 3) lets
+// the page grow from 720px to 960px at tablet width; no other page does.
 
 export function Shell({
   children,
@@ -31,7 +33,10 @@ export function Shell({
         <NavSwitch places={primaryPlaces()} />
         <PlacesMenu places={menuPlaces()} />
       </header>
-      <main id="content" className="mx-auto w-full max-w-[720px] flex-1 px-5 pt-2 pb-10">
+      <main
+        id="content"
+        className="mx-auto w-full max-w-[720px] flex-1 px-5 pt-2 pb-10 md:has-[[data-wide]]:max-w-[960px]"
+      >
         {children}
       </main>
       {capture ? (
