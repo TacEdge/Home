@@ -369,6 +369,9 @@ Earlier decisions already settle much of the shape:
       - The insights engine takes an optional last day (`through`, default today + 7), so Today is unchanged.
       - The Forward page reads the test time source (`requestNow`), and `loadAgenda` takes the screen's today.
       - The audit-log scan in `proposals.test.ts` has an explicit 30-second timeout (M5-ACCEPTANCE §9).
+      - Two more test-reliability fixes, from this package's first full verify (both passed when rerun alone, and neither touches the code under test):
+        - `calendar-sync.test.ts` ordered audit rows by `at` alone. Rows written in one transaction share that instant, and audit ids are random, so their order was the database's choice. It now breaks the tie by `event`.
+        - The Activity test in `people-privacy.test.ts`, which reads the whole shared audit log four times, took over vitest's 5-second default once. Its timeout is explicit, as for `proposals.test.ts`.
     - **Prototype retired.**
       - **Before deleting:** the tag `m0.6-prototype` was confirmed on `origin` at `3d58390`, and no route, source file or test referred to `/prototype`; only the build, lint, format and deploy exclusions named it.
       - **What was removed:** the directory and those exclusions. CLAUDE.md rule 14 now records the retirement; README, LOCAL-DEV and DEPLOY say how the tag restores a local copy for reference.

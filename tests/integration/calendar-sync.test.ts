@@ -1118,7 +1118,10 @@ describe('audit', () => {
         meta: unknown;
         summary: string | null;
       }>(
-        sql`select event, subject_type, meta, summary from audit_log order by at offset ${before.n}`,
+        // Rows written in one transaction share its instant, and audit ids are random, so
+        // `at` alone leaves their order to the database: `event` breaks the tie (connect,
+        // then its source, as the expectation lists them).
+        sql`select event, subject_type, meta, summary from audit_log order by at, event offset ${before.n}`,
       )
     ).rows;
     expect(rows.map((r) => r.event)).toEqual([

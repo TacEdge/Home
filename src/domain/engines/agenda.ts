@@ -137,8 +137,7 @@ const idOf = (i: AgendaItem) =>
         ? i.projectId
         : i.taskId;
 type TimedAgendaItem =
-  | Extract<AgendaItem, { allDay: false }>
-  | Extract<AgendaItem, { kind: 'task_scheduled' }>;
+  Extract<AgendaItem, { allDay: false }> | Extract<AgendaItem, { kind: 'task_scheduled' }>;
 const isTimed = (i: AgendaItem): i is TimedAgendaItem =>
   (i.kind === 'event' && i.allDay === false) || i.kind === 'task_scheduled';
 
