@@ -5,7 +5,7 @@ Status: **Accepted**, 2026-10-08. The owner approved this ADR and the contract, 
 - **Approved:** §20, §23, §24, §25 and §26.
 - **Approved as provisional:** §22.
 - **Revised as the owner directed:** §21.
-- **Implementation:** Packages 1–4 merged (PRs #54–#57; §30–§33). Package 5 (acceptance) is in review (§34): M5 is technically accepted on synthetic data (`docs/m5/M5-ACCEPTANCE.md`); operational acceptance waits on DEPLOY.md §E.
+- **Implementation:** Packages 1–5 merged (PRs #54–#58; §30–§34). M5 is technically accepted on synthetic data (`docs/m5/M5-ACCEPTANCE.md`); operational acceptance waits on DEPLOY.md §E items 16–17. M6 is proposed in ADR 0009.
 
 ## Context
 
