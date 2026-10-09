@@ -39,17 +39,13 @@ function render(now: Date, h: Parameters<typeof run>[0] = { events: WED }, linke
       calendars.map((c) => [c.id, { ...c, stale: false } as unknown as CalendarView]),
     ),
     tasks: taskRecords,
+    projects: new Map(PROJECTS.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }])),
     timeZone: NZ,
   };
   const html = renderToStaticMarkup(
-    <TodayView
-      model={r.today}
-      lookup={lookup}
-      linked={linked}
-      projects={new Map(PROJECTS.map((p) => [p.id, p.title]))}
-    />,
+    <TodayView model={r.today} lookup={lookup} linked={linked} worth={r.insights} />,
   );
-  return { html, model: r.today };
+  return { html, model: r.today, worth: r.insights };
 }
 
 const text = (html: string) =>
@@ -73,10 +69,14 @@ describe('the day', () => {
   });
 
   it('puts the sections in the contract’s order, and drops the empty ones', () => {
-    expect(headings(html, 2)).toEqual(['Everyone’s day', 'To do']);
-    const order = ['Everyone’s day', 'To do', 'things to sort', 'The next 30 days'].map((s) =>
-      text(html).indexOf(s),
-    );
+    expect(headings(html, 2)).toEqual(['Worth knowing', 'Everyone’s day', 'To do']);
+    const order = [
+      'Worth knowing',
+      'Everyone’s day',
+      'To do',
+      'things to sort',
+      'The next 30 days',
+    ].map((s) => text(html).indexOf(s));
     expect(order.filter((i) => i >= 0)).toEqual(order.filter((i) => i >= 0).sort((a, b) => a - b));
   });
 
@@ -133,7 +133,9 @@ describe('the other states', () => {
     });
     expect(quiet.model.headline.rule).toBe('headline.usual');
     // Only the usual: the words, and everyone's day as the routine words, nothing to do.
-    expect(headings(quiet.html, 2)).toEqual(['Everyone’s day']);
+    expect(headings(quiet.html, 2).filter((h) => h !== 'Worth knowing')).toEqual([
+      'Everyone’s day',
+    ]);
     expect(html).toContain('Connect a calendar ›');
     expect(html).toContain('href="/settings/calendars"');
   });
@@ -153,13 +155,14 @@ describe('the other states', () => {
     expect(model.state).toBe('evening');
     expect(html).toContain(model.headline.text);
     expect(headings(html, 2)).toEqual([
+      'Worth knowing',
       'All day today',
       'Tomorrow morning',
       'Before then',
       'To do',
     ]);
     expect(html).toMatch(/<details[^>]*>(?:(?!<\/details>)[\s\S])*Earlier today/);
-    expect(html).not.toMatch(/<details[^>]* open/);
+    expect(html).not.toMatch(/<details[^>]*\sopen(=|\s|>)/);
     expect(html).not.toContain('Everyone’s day');
   });
 
@@ -170,8 +173,11 @@ describe('the other states', () => {
       calendars: [fresh(now, { lastSyncedAt: at('2026-10-12T09:05:00+13:00') })],
     });
     expect(model.headline.qualified).toBe(true);
-    expect(text(html)).toContain('as far as HOME knows');
-    expect(text(html)).toContain('Sam’s work · last updated Monday 12 October, 09:05');
+    // The qualifier is its own quiet line; the calendar is said once, in Worth knowing, with its facts.
+    expect(text(html)).toContain(`${model.headline.sentence} As far as HOME knows.`);
+    expect(text(html)).toContain('Sam’s work hasn’t updated since Monday.');
+    expect(text(html)).toContain('Sam’s work Last updated Monday 12 October, 09:05');
+    expect(text(html)).not.toContain('Sam’s work · last updated');
   });
 
   it('asks an unlinked adult which one they are, only then', () => {

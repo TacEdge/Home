@@ -92,6 +92,8 @@ export type Insights = {
   all: Insight[];
   /** The top eligible ones (not on an object, not dismissed). */
   shown: Insight[];
+  /** The eligible ones after the first three, in order: what "+ N more" holds. */
+  rest: Insight[];
   /** How many more eligible ones there are: genuine insights only. */
   more: number;
 };
@@ -244,6 +246,7 @@ export function insights(input: InsightsInput): Insights {
   return {
     all,
     shown: eligible.slice(0, SHOWN),
+    rest: eligible.slice(SHOWN),
     more: Math.max(0, eligible.length - SHOWN),
   };
 }

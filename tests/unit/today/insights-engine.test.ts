@@ -172,6 +172,9 @@ describe('ranking, the count of more, dismissals', () => {
     ]);
     expect(r.shown.map((i) => i.key.split(':')[1])).toEqual(['c-1', 'c-2', ID.nana]);
     expect(r.more).toBe(1); // tomorrow's busy day; the fence (today, on object) is not counted
+    // "+ N more" holds exactly the eligible ones after the first three, in order (Package 4).
+    expect(r.rest.map((i) => i.rule)).toEqual(['busy_day.count']);
+    expect(r.rest).toHaveLength(r.more);
     expect(r.all.find((i) => i.rule === 'preparation.project_target')).toMatchObject({
       onObject: true,
     });
@@ -188,6 +191,7 @@ describe('ranking, the count of more, dismissals', () => {
       'busy_day.count',
     ]);
     expect(r.more).toBe(0);
+    expect(r.rest).toEqual([]);
     expect(r.all).toHaveLength(5); // still known, marked by the caller's set, never deleted
   });
 

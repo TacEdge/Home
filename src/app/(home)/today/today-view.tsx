@@ -11,6 +11,9 @@ import { toSortLine } from '../sort/copy';
 import { Disclosure } from './disclosure';
 import { FactsInPlace, type FactLookup } from './facts';
 import { moreToDoLine, todayHeadline, todoDetail } from './copy';
+import { WorthKnowing } from './worth-knowing';
+import type { Insights } from '@/domain/engines/insights';
+import type { Fact } from '@/domain/engines/day-facts';
 
 // The Today screen (M5 contract §4, ADR 0008 §32): presentation of what the
 // Today engine decided. It orders nothing, counts nothing and words nothing
@@ -25,15 +28,25 @@ export type TodayViewProps = {
   lookup: FactLookup;
   /** Whether to point an unlinked adult at "Which one is you?". */
   linked: boolean;
-  /** Task id → project title, for the to-do rows. */
-  projects: Map<string, string>;
+  /** The reader's insights, own dismissals applied (Package 4). */
+  worth: Pick<Insights, 'shown' | 'rest'>;
 };
 
-export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
+export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
   const { headline, state } = model;
   const day = state === 'day';
   const twoColumns = day && (model.personLines.length > 0 || model.alsoToday.length > 0);
   const toSort = toSortLine(model.toSort);
+  // A calendar Worth knowing already speaks about is not listed again under
+  // the headline's facts (ADR 0008 §33): its health is said once. The list of
+  // calendars looked at for "Nothing on today" stays whole.
+  const saidBelow = new Set(
+    [...worth.shown, ...worth.rest]
+      .filter((i) => i.kind === 'data_health')
+      .flatMap((i) => i.facts)
+      .filter((f): f is Extract<Fact, { kind: 'calendar' }> => f.kind === 'calendar')
+      .map((f) => f.id),
+  );
 
   const header = (
     <header className="md:row-start-1 md:col-start-1">
@@ -42,8 +55,13 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
         data-testid="headline"
         className="font-display mt-2 text-[27px] leading-[1.18] font-normal tracking-[-0.015em] text-balance break-words md:text-[34px]"
       >
-        {headline.text}
+        {headline.sentence}
       </p>
+      {headline.qualified ? (
+        <p data-testid="qualifier" className="text-ink-2 mt-1 text-[17px]">
+          As far as HOME knows.
+        </p>
+      ) : null}
       {headline.late ? (
         <p className="font-display text-ink-2 mt-2 text-[20px] leading-[1.3] text-balance break-words">
           {headline.late.text}
@@ -57,7 +75,14 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
         </p>
       ) : (
         <FactsInPlace
-          facts={[...headline.facts, ...(headline.late?.facts ?? [])]}
+          facts={[...headline.facts, ...(headline.late?.facts ?? [])].filter(
+            (f) =>
+              !(
+                f.kind === 'calendar' &&
+                saidBelow.has(f.id) &&
+                headline.rule !== 'headline.nothing'
+              ),
+          )}
           lookup={lookup}
         />
       )}
@@ -90,11 +115,11 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
 
   const todo =
     model.todo.shown.length > 0 ? (
-      <section aria-labelledby="today-todo" className="md:col-start-1 md:row-start-2">
+      <section aria-labelledby="today-todo" className="md:col-start-1 md:row-start-3">
         <Label id="today-todo">To do</Label>
         <List>
           {model.todo.shown.map((e) => (
-            <TodoRow key={e.task.id} entry={e} model={model} lookup={lookup} projects={projects} />
+            <TodoRow key={e.task.id} entry={e} model={model} lookup={lookup} />
           ))}
         </List>
         {model.todo.more > 0 ? (
@@ -108,7 +133,7 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
     ) : null;
 
   const sort = toSort ? (
-    <p className="mt-6 md:col-start-1 md:row-start-3">
+    <p className="mt-6 md:col-start-1 md:row-start-4">
       <Link href="/sort" className={link}>
         {toSort} ›
       </Link>
@@ -116,7 +141,7 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
   ) : null;
 
   const footer = (
-    <div className="mt-6 md:col-start-1 md:row-start-4">
+    <div className="mt-6 md:col-start-1 md:row-start-5">
       {linked ? null : (
         <p>
           <Link href="/settings/you" className={link}>
@@ -133,21 +158,27 @@ export function TodayView({ model, lookup, linked, projects }: TodayViewProps) {
   );
 
   // Worth knowing sits between the headline and Everyone's day (contract
-  // §4.1). It is Package 4's: until then the slot is simply absent, as every
-  // empty section is, and nothing here stands in for it.
+  // §4.1); on a tablet it stays in the left column, under the headline.
+  const worthKnowing =
+    state === 'first_run' ? null : (
+      <div className="md:col-start-1 md:row-start-2">
+        <WorthKnowing shown={worth.shown} rest={worth.rest} lookup={lookup} />
+      </div>
+    );
 
   return (
     <div
       data-wide=""
       className={
         twoColumns
-          ? 'md:grid md:grid-cols-2 md:grid-rows-[auto_auto_auto_1fr] md:gap-x-10'
+          ? 'md:grid md:grid-cols-2 md:grid-rows-[auto_auto_auto_auto_1fr] md:gap-x-10'
           : 'md:max-w-[720px]'
       }
     >
       {header}
+      {worthKnowing}
       {twoColumns ? (
-        <div className="md:col-start-2 md:row-span-4 md:row-start-1">
+        <div className="md:col-start-2 md:row-span-5 md:row-start-1">
           {everyone}
           {also}
         </div>
@@ -238,12 +269,10 @@ function TodoRow({
   entry,
   model,
   lookup,
-  projects,
 }: {
   entry: TodoEntry;
   model: TodayModel;
   lookup: FactLookup;
-  projects: Map<string, string>;
 }) {
   const record = lookup.tasks.get(entry.task.id);
   const who = record?.assigneePersonId ? lookup.people.get(record.assigneePersonId) : undefined;
@@ -261,7 +290,7 @@ function TodoRow({
         reason,
         entry.task.dueDate,
         model.date,
-        record?.projectId ? projects.get(record.projectId) : undefined,
+        record?.projectId ? lookup.projects.get(record.projectId)?.title : undefined,
       )}
       who={who ? [{ name: who.name, colour: colour(who) }] : undefined}
     />
