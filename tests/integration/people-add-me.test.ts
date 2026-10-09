@@ -50,7 +50,9 @@ describe('createAndLinkSelf', () => {
       .from(auditLog)
       .where(eq(auditLog.subjectId, p.id))
       .orderBy(auditLog.at);
-    expect(rows.map((r) => r.event)).toEqual(['person.create', 'person.link_self']);
+    // Both rows are written in one transaction, so they share `at` (now() is fixed for a
+    // transaction) and their order is undefined: assert both are recorded, not their order.
+    expect(rows.map((r) => r.event).sort()).toEqual(['person.create', 'person.link_self']);
   });
 
   it('is one transaction: a refused link leaves no person behind', async () => {
