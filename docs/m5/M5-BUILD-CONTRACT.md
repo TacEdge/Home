@@ -427,9 +427,10 @@ They are shown in the agenda's own row style, so no item is lost.
 | Rule | Condition | Template (indicative; final copy approved in Package 3) |
 |---|---|---|
 | `headline.first_run` | No calendars and no events at all | "HOME is quiet because it doesn't know your calendars yet." |
-| `headline.evening` | Evening state (§5.6) | "Nothing else on today." |
+| `headline.evening_all_day` | Evening state (§5.6) while an all-day event is recorded for today (review fix, ADR 0008 §31) | "Today’s timed events have finished." |
+| `headline.evening` | Evening state (§5.6), no all-day event today | "Nothing else on today." |
 | `headline.listed` | One or two non-routine events today, all timed and starting today (added in Package 2, ADR 0008 §31) | "Swimming at 15:30." / "Swimming at 15:30, then Pilates at 18:15." |
-| `headline.counted` | Any other non-routine events today (three or more, or any all-day or carried-over one) | "{N} things on today{, besides the usual}." |
+| `headline.counted` | Any other non-routine events today (three or more, or any all-day or still-running carried-over one) | "{N} things on today{, besides the usual}." |
 | `headline.usual` | Only routine events today | "Just the usual today." |
 | `headline.nothing` | No events today | "Nothing on today." |
 | `headline.late` (second sentence) | `busy_day.late` holds today | "Sam and Alex both have something on after 6." |
@@ -451,6 +452,7 @@ They are shown in the agenda's own row style, so no item is lost.
 | `data_health.failed` | A visible calendar's last refresh failed | "Alex's calendar didn't update last time it was checked." | The calendar and its last attempt |
 
 - **Today's `busy_day`** is carried by the headline, so it is marked `onObject` and excluded from the list and its count.
+- **Carry-overs in counts** (review fix, ADR 0008 §31): a timed occurrence carried over from an earlier day counts towards the headline and `busy_day.count` only while it is still running at `now`. One that has already ended is no longer counted, but it stays on the day's agenda and on its person's line. Everything that begins on the day counts, whether it has happened yet or not.
 - **Ranking:** `data_health`, then `preparation`, then `busy_day`; then by date; then by key.
 - **Display:** Worth knowing shows the top 3 not dismissed and not `onObject`. "+ N more" counts only those.
 - **Keys:** `{kind}:{ids}:{date}`. Changed facts produce a new key.
@@ -464,7 +466,7 @@ They are shown in the agenda's own row style, so no item is lost.
 
 ### 5.6 Evening state (`evening`)
 
-The evening state applies when, at `now`, no timed item today still has its start or end to come. Today then leads with "Nothing else on today.", then **Tomorrow morning** (tomorrow's items starting before 12:00, then *Before then*: tasks due tomorrow), and **Earlier today** collapsed (`<details>`). Otherwise the day view stays, and past items fold into *Earlier today* once more than one has passed.
+The evening state applies when, at `now`, at least one timed item **began today** (`day === 1`) and every timed item on today, carry-overs included, has ended. A carry-over from last night can therefore never bring evening on by itself, and an overnight event still running (begun today or earlier) holds it off. Today then leads with "Nothing else on today." (or, while an all-day event is recorded for today, "Today’s timed events have finished.": the all-day event is not said to be over), then **Tomorrow morning** (tomorrow's items starting before 12:00, then *Before then*: tasks due tomorrow), and **Earlier today** collapsed (`<details>`). Otherwise the day view stays, and past items fold into *Earlier today* once more than one has passed.
 
 ---
 

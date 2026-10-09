@@ -7,6 +7,7 @@ import {
   numberWord,
   occurrenceKey,
   routineEvents,
+  stillCounts,
   WEEKDAYS,
   type DayPerson,
   type EventItem,
@@ -202,7 +203,8 @@ export function insights(input: InsightsInput): Insights {
     const isToday = date === today;
     const once = new Map<string, EventItem>();
     for (const i of eventsOn(days, date))
-      if (!routine.has(i.eventId) && !once.has(occurrenceKey(i))) once.set(occurrenceKey(i), i);
+      if (!routine.has(i.eventId) && stillCounts(i, now) && !once.has(occurrenceKey(i)))
+        once.set(occurrenceKey(i), i);
     const counted = [...once.values()];
     if (counted.length >= BUSY_DAY_COUNT)
       add({

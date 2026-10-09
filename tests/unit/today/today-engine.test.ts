@@ -284,7 +284,11 @@ describe('evening and earlier', () => {
   it('once everything timed today is over: nothing else on, tomorrow morning, before then', () => {
     const r = run({ events: WED }, at('2026-10-14T22:00:00+13:00')).today;
     expect(r.state).toBe('evening');
-    expect(r.headline).toMatchObject({ rule: 'headline.evening', text: 'Nothing else on today.' });
+    // Sam's all-day Client site is still today's, so only the timed ones are said to be over.
+    expect(r.headline).toMatchObject({
+      rule: 'headline.evening_all_day',
+      text: 'Today’s timed events have finished.',
+    });
     expect(r.headline.late).toBeNull();
     expect(r.evening!.tomorrowMorning.map((i) => i.eventId)).toEqual(['e-school', 'e-work-alex']);
     expect(r.evening!.beforeThen.map((t) => [t.rule, t.task.id])).toEqual([
@@ -299,6 +303,150 @@ describe('evening and earlier', () => {
     const r = run({ events: WED }, at('2026-10-18T23:00:00+13:00')).today;
     expect(r.state).toBe('day');
     expect(r.headline.rule).toBe('headline.nothing');
+  });
+});
+
+describe('evening transition and carry-overs (review fixes, ADR 0008 §31)', () => {
+  const sam = [{ personId: ID.sam, role: 'attending' as const }];
+  const isla = [{ personId: ID.isla, role: 'attending' as const }];
+  // Tuesday 22:00 to Wednesday 01:00.
+  const shift = timed(
+    'e-shift',
+    'Late shift',
+    '2026-10-13T22:00:00+13:00',
+    '2026-10-14T01:00:00+13:00',
+    {
+      people: sam,
+    },
+  );
+  const trip = allDay('e-trip', 'School trip', '2026-10-14', '2026-10-15', { people: isla });
+  // Wednesday 15:00 to 17:00.
+  const dentist = timed(
+    'e-dentist',
+    'Dentist',
+    '2026-10-14T15:00:00+13:00',
+    '2026-10-14T17:00:00+13:00',
+    {
+      people: sam,
+    },
+  );
+
+  it('A: a carry-over that ended at 01:00 does not bring evening at 07:03', () => {
+    const r = run({ events: [shift] }, at('2026-10-14T07:03:00+13:00')).today;
+    expect(r.state).toBe('day');
+    expect(r.evening).toBeNull();
+    expect(r.headline.rule).not.toMatch(/^headline\.evening/);
+  });
+
+  it('B: nor with an all-day school trip, at 07:03 or 13:00', () => {
+    for (const t of ['07:03', '13:00']) {
+      const r = run({ events: [shift, trip] }, at(`2026-10-14T${t}:00+13:00`)).today;
+      expect(r.state, t).toBe('day');
+      expect(r.headline, t).toMatchObject({
+        rule: 'headline.counted',
+        text: 'One thing on today.',
+      });
+    }
+  });
+
+  it('C: something timed that began today and ended at 17:00 makes 18:00 evening', () => {
+    const r = run({ events: [shift, dentist] }, at('2026-10-14T18:00:00+13:00')).today;
+    expect(r.state).toBe('evening');
+    expect(r.headline).toMatchObject({ rule: 'headline.evening', text: 'Nothing else on today.' });
+    expect(run({ events: [dentist] }, at('2026-10-14T16:59:00+13:00')).today.state).toBe('day');
+  });
+
+  it('D: with an all-day event today, evening says only that the timed ones have finished', () => {
+    const r = run({ events: [dentist, trip] }, at('2026-10-14T18:00:00+13:00')).today;
+    expect(r.state).toBe('evening');
+    expect(r.headline).toMatchObject({
+      rule: 'headline.evening_all_day',
+      text: 'Today’s timed events have finished.',
+    });
+    expect(r.headline.text).not.toMatch(/nothing else/i);
+    expect(r.headline.facts).toEqual(
+      expect.arrayContaining([
+        { kind: 'event', id: 'e-dentist', occurrenceDate: '2026-10-14' },
+        { kind: 'event', id: 'e-trip', occurrenceDate: '2026-10-14' },
+      ]),
+    );
+  });
+
+  it('E: an overnight event still running at 00:30 is not over, and counts', () => {
+    const r = run({ events: [shift, dentist] }, at('2026-10-14T00:30:00+13:00')).today;
+    expect(r.state).toBe('day');
+    expect(r.headline).toMatchObject({ rule: 'headline.counted', text: 'Two things on today.' });
+    expect(r.personLines.map((l) => l.entries.map((e) => e.text))).toEqual([
+      ['Late shift until 01:00', '15:00 Dentist'],
+    ]);
+  });
+
+  it('F: a carry-over that ended at 01:00 is not counted at 07:03, but stays on the day', () => {
+    const r = run({ events: [shift, dentist] }, at('2026-10-14T07:03:00+13:00'));
+    expect(r.today.headline).toMatchObject({ rule: 'headline.listed', text: 'Dentist at 15:00.' });
+    expect(r.today.headline.facts).toEqual([
+      { kind: 'event', id: 'e-dentist', occurrenceDate: '2026-10-14' },
+    ]);
+    expect(r.today.personLines[0]!.entries.map((e) => e.text)).toEqual([
+      'Late shift until 01:00',
+      '15:00 Dentist',
+    ]);
+    // Alone, it leaves nothing on today: it is over, and nothing else is recorded.
+    expect(run({ events: [shift] }, at('2026-10-14T07:03:00+13:00')).today.headline.rule).toBe(
+      'headline.nothing',
+    );
+    // busy_day.count: six one-offs tomorrow plus tonight's overnight carry-over into it.
+    const into = timed(
+      'e-into',
+      'Night out',
+      '2026-10-14T22:00:00+13:00',
+      '2026-10-15T01:00:00+13:00',
+      {
+        people: sam,
+      },
+    );
+    const five = Array.from({ length: 5 }, (_, k) =>
+      timed(`e-t${k}`, `T${k}`, `2026-10-15T1${k}:00:00+13:00`, `2026-10-15T1${k}:30:00+13:00`, {
+        people: sam,
+      }),
+    );
+    // Seen on Wednesday morning, the carry-over into Thursday has not happened yet: it counts.
+    const wed = run({ events: [into, ...five] }, at('2026-10-14T07:03:00+13:00')).insights;
+    expect(wed.all.find((i) => i.rule === 'busy_day.count')?.basis).toEqual({
+      count: 6,
+      threshold: 6,
+    });
+    // Seen on Thursday at 07:03 it is over: five things on today, below the threshold.
+    const thu = run({ events: [into, ...five] }, at('2026-10-15T07:03:00+13:00'));
+    expect(thu.insights.all.some((i) => i.rule === 'busy_day.count')).toBe(false);
+    expect(thu.today.headline.text).toBe('Five things on today.');
+  });
+
+  it('G: an overnight event that starts tonight is not finished tonight', () => {
+    const tonight = timed(
+      'e-night',
+      'Night out',
+      '2026-10-14T21:00:00+13:00',
+      '2026-10-15T02:00:00+13:00',
+      {
+        people: sam,
+      },
+    );
+    for (const t of ['2026-10-14T23:30:00+13:00', '2026-10-15T00:30:00+13:00']) {
+      const r = run({ events: [dentist, tonight] }, at(t)).today;
+      expect(r.state, t).toBe('day');
+      expect(r.headline.rule, t).not.toMatch(/^headline\.evening/);
+    }
+    // Once it is over, Thursday's own day begins: a carry-over alone never makes evening.
+    expect(run({ events: [tonight] }, at('2026-10-15T03:00:00+13:00')).today.state).toBe('day');
+  });
+
+  it('H: an ordinary evening is unchanged', () => {
+    const noSite = WED.filter((e) => e.id !== 'e-site');
+    const r = run({ events: noSite }, at('2026-10-14T22:00:00+13:00')).today;
+    expect(r.state).toBe('evening');
+    expect(r.headline).toMatchObject({ rule: 'headline.evening', text: 'Nothing else on today.' });
+    expect(r.evening!.tomorrowMorning.map((i) => i.eventId)).toEqual(['e-school', 'e-work-alex']);
   });
 });
 

@@ -10,6 +10,7 @@ import {
   numberWord,
   occurrenceKey,
   routineEvents,
+  stillCounts,
   type DayPerson,
   type EventItem,
   type Fact,
@@ -34,6 +35,7 @@ import { addDays, compareIsoDates, type IsoDate } from '@/lib/dates';
 export const HEADLINE_RULES = [
   'headline.first_run',
   'headline.evening',
+  'headline.evening_all_day',
   'headline.listed',
   'headline.counted',
   'headline.usual',
@@ -219,8 +221,12 @@ export function today(input: TodayInput): TodayModel {
   const qualified = incomplete.length > 0;
   const liveCalendars = input.calendars.filter((c) => c.archivedAt === null);
 
-  // Evening (§5.6): there was something timed today and all of it is over.
-  const evening = timed.length > 0 && timed.every((i) => i.endsAt.getTime() <= now.getTime());
+  // Evening (§5.6): something timed began today, and everything timed on
+  // today (carry-overs included) is over. A carry-over from last night can
+  // never bring evening on by itself, and one still running holds it off.
+  const over = (i: TimedItem) => i.endsAt.getTime() <= now.getTime();
+  const evening = timed.some((i) => i.day === 1) && timed.every(over);
+  const allDayToday = events.filter((i) => i.allDay);
   const firstRun = liveCalendars.length === 0 && input.events.length === 0;
   const state: TodayModel['state'] = firstRun ? 'first_run' : evening ? 'evening' : 'day';
 
@@ -228,7 +234,8 @@ export function today(input: TodayInput): TodayModel {
   const qualify = (sentence: string) =>
     qualified ? `${sentence.slice(0, -1)}, as far as HOME knows.` : sentence;
   const once = new Map<string, EventItem>();
-  for (const i of events) if (!once.has(occurrenceKey(i))) once.set(occurrenceKey(i), i);
+  for (const i of events)
+    if (stillCounts(i, now) && !once.has(occurrenceKey(i))) once.set(occurrenceKey(i), i);
   const occurrences = [...once.values()];
   const counted = occurrences.filter((i) => !isRoutine(i));
   const usual = occurrences.some(isRoutine);
@@ -240,6 +247,13 @@ export function today(input: TodayInput): TodayModel {
       rule: 'headline.first_run',
       text: 'HOME is quiet because it doesn’t know your calendars yet.',
       facts: [range],
+    };
+  else if (state === 'evening' && allDayToday.length > 0)
+    // An all-day event is still today's: say only what is true of the timed ones.
+    headline = {
+      rule: 'headline.evening_all_day',
+      text: qualify('Today’s timed events have finished.'),
+      facts: [...timed.map(eventFact), ...allDayToday.map(eventFact), ...incomplete],
     };
   else if (state === 'evening')
     headline = {

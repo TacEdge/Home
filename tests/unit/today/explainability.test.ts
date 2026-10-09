@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { AgendaItem } from '@/domain/engines/agenda';
 import { INSIGHT_RULES } from '@/domain/engines/insights';
 import { HEADLINE_RULES } from '@/domain/engines/today';
 import {
+  allDay,
   at,
   fresh,
   ID,
@@ -20,7 +22,21 @@ import {
 // records, matches its rule's wording, and never claims a need, an
 // arrangement, availability, character or reassurance. The engines are pure.
 
-const WED = [...ROUTINE, ...WEDNESDAY];
+// The fixture week, plus an overnight shift, a weekend camp and an all-day trip, so
+// every line shape (carried over, middle day, all-day) is said somewhere.
+const WED = [
+  ...ROUTINE,
+  ...WEDNESDAY,
+  timed('e-shift', 'Late shift', '2026-10-13T22:00:00+13:00', '2026-10-14T01:00:00+13:00', {
+    people: [{ personId: ID.sam, role: 'attending' }],
+  }),
+  timed('e-camp', 'Camp', '2026-10-16T18:00:00+13:00', '2026-10-18T14:00:00+13:00', {
+    people: [{ personId: ID.milo, role: 'attending' }],
+  }),
+  allDay('e-trip', 'School trip', '2026-10-15', '2026-10-16', {
+    people: [{ personId: ID.isla, role: 'attending' }],
+  }),
+];
 const TITLES = [
   ...new Set([
     ...WED.map((e) => e.title),
@@ -32,7 +48,13 @@ const NAMES = PEOPLE.map((p) => p.name);
 
 /** Every sentence across the week, each time of day, with and without stale calendars. */
 function everything() {
-  const out: { rule: string; text: string; facts: { kind: string }[]; stale: boolean }[] = [];
+  const out: {
+    rule: string;
+    text: string;
+    facts: { kind: string }[];
+    stale: boolean;
+    item?: AgendaItem;
+  }[] = [];
   for (let d = 12; d <= 21; d++)
     for (const t of ['00:30', '07:03', '12:00', '15:20', '20:40', '23:30'])
       for (const stale of [false, true]) {
@@ -42,8 +64,12 @@ function everything() {
           : [fresh(now)];
         const r = run({ events: WED, calendars }, now);
         const m = r.today;
-        const add = (x: { rule: string; text: string; facts: { kind: string }[] }) =>
-          out.push({ rule: x.rule, text: x.text, facts: x.facts, stale });
+        const add = (x: {
+          rule: string;
+          text: string;
+          facts: { kind: string }[];
+          item?: AgendaItem;
+        }) => out.push({ rule: x.rule, text: x.text, facts: x.facts, stale, item: x.item });
         add(m.headline);
         if (m.headline.late) add(m.headline.late);
         for (const l of m.personLines) for (const e of l.entries) add(e);
@@ -120,14 +146,13 @@ describe('wording matches its rule', () => {
   const pattern: Record<string, RegExp> = {
     'headline.first_run': /^HOME is quiet because it doesn’t know your calendars yet\.$/,
     'headline.evening': /^Nothing else on today(, as far as HOME knows)?\.$/,
+    'headline.evening_all_day': /^Today’s timed events have finished(, as far as HOME knows)?\.$/,
     'headline.listed': /^.+ at \d\d:\d\d(, then .+ at \d\d:\d\d)?(, as far as HOME knows)?\.$/,
     'headline.counted':
       /^[A-Z]\w* things? on today(, besides the usual)?(, as far as HOME knows)?\.$/,
     'headline.usual': /^Just the usual today(, as far as HOME knows)?\.$/,
     'headline.nothing': /^Nothing on today(, as far as HOME knows)?\.$/,
     'headline.late': /^.+ (both|all) have something on after 6\.$/,
-    'person_line.routine': /^(School|Work|Work till \d\d:\d\d|.+)$/,
-    'person_line.item': /^(\d\d:\d\d .+|.+ until \d\d:\d\d|.+, all day|.+)$/,
     'person_line.birthday': /^Birthday$/,
   };
 
@@ -140,6 +165,40 @@ describe('wording matches its rule', () => {
     expect(
       run({ events: [], calendars: [] }, at('2026-10-14T07:00:00+13:00')).today.headline.text,
     ).toMatch(pattern['headline.first_run']!);
+  });
+
+  it('every person-line sentence is exactly its template, built from its own item', () => {
+    const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const shapes = new Set<string>();
+    for (const s of everything()) {
+      if (!s.rule.startsWith('person_line.') || s.rule === 'person_line.birthday') continue;
+      const i = s.item as Extract<AgendaItem, { kind: 'event' }>;
+      const title = esc(i.title);
+      let want: RegExp;
+      if (s.rule === 'person_line.routine')
+        want = i.allDay
+          ? new RegExp(`^${title}$`)
+          : i.eventKind === 'school'
+            ? /^School$/
+            : /^Work( till \d\d:\d\d)?$/;
+      else if (i.allDay) want = new RegExp(`^${title}$`);
+      else if (i.day === 1) want = new RegExp(`^\\d\\d:\\d\\d ${title}$`);
+      else if (i.day === i.days) want = new RegExp(`^${title} until \\d\\d:\\d\\d$`);
+      else want = new RegExp(`^${title}, all day$`);
+      expect(s.text, `${s.rule} ${i.eventId}`).toMatch(want);
+      shapes.add(
+        `${s.rule}:${i.allDay ? 'allday' : i.day === 1 ? 'first' : i.day === i.days ? 'last' : 'middle'}`,
+      );
+    }
+    // Every shape is exercised.
+    expect([...shapes].sort()).toEqual([
+      'person_line.item:allday',
+      'person_line.item:first',
+      'person_line.item:last',
+      'person_line.item:middle',
+      'person_line.routine:allday',
+      'person_line.routine:first',
+    ]);
   });
 
   it('the qualifier is there exactly when a visible calendar is stale or failing', () => {

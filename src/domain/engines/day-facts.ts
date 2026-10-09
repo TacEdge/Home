@@ -44,6 +44,16 @@ export const itemsOn = (days: readonly AgendaDay[], date: IsoDate): AgendaItem[]
 export const eventsOn = (days: readonly AgendaDay[], date: IsoDate): EventItem[] =>
   itemsOn(days, date).filter((i): i is EventItem => i.kind === 'event');
 
+/**
+ * Whether an item still counts as on that day (M5 Package 2, ADR 0008 §31):
+ * a carry-over (a timed occurrence that began on an earlier day, `day > 1`)
+ * that has already ended by `now` no longer does. One still running does,
+ * and so does everything that begins that day. The item stays on the agenda
+ * either way; only counts leave it out.
+ */
+export const stillCounts = (i: EventItem, now: Date): boolean =>
+  i.allDay || i.day === 1 || i.endsAt.getTime() > now.getTime();
+
 /** One occurrence once, however many days it covers. */
 export const occurrenceKey = (i: EventItem) => `${i.eventId}:${i.occurrenceDate}`;
 
