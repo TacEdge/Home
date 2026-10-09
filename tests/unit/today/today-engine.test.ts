@@ -225,6 +225,105 @@ describe('everyone’s day', () => {
   });
 });
 
+describe('what is on the surface of a person’s line (Package 3 review, ADR 0008 §32)', () => {
+  const line = (m: TodayModel, name: string) => m.personLines.find((l) => l.name === name)!;
+  const texts = (es: { text: string }[]) => es.map((e) => e.text);
+  /** Alex on Wednesday: Work 09:00–14:30, Swimming 15:30–16:15, Pilates 18:15–19:15. */
+  const alexAt = (clock: string) =>
+    line(run({ events: WED }, at(`2026-10-14T${clock}:00+13:00`)).today, 'Alex');
+
+  it('in the morning, everything is still to come: the first two, the third under “+ 1 more”', () => {
+    const a = alexAt('07:03');
+    expect(texts(a.shown)).toEqual(['Work till 14:30', '15:30 Swimming']);
+    expect(texts(a.rest)).toEqual(['18:15 Pilates']);
+  });
+
+  it('mid-afternoon, what is under way and what is next, not what is over', () => {
+    const a = alexAt('15:45'); // Work over, Swimming under way, Pilates to come
+    expect(texts(a.shown)).toEqual(['15:30 Swimming', '18:15 Pilates']);
+    expect(texts(a.rest)).toEqual(['Work till 14:30']);
+  });
+
+  it('regression: at 17:00 the appointment still to come stays visible after the earlier ones finish', () => {
+    const a = alexAt('17:00');
+    expect(texts(a.shown)).toContain('18:15 Pilates');
+    // The other place goes to the one that finished most recently.
+    expect(texts(a.shown)).toEqual(['15:30 Swimming', '18:15 Pilates']);
+    expect(a.more).toBe(1);
+  });
+
+  it('when all of it is over, the two that finished last', () => {
+    const a = alexAt('21:40');
+    expect(texts(a.shown)).toEqual(['15:30 Swimming', '18:15 Pilates']);
+    expect(texts(a.rest)).toEqual(['Work till 14:30']);
+  });
+
+  it('an overnight carry-over still running is still to come; once over, it gives way', () => {
+    const events = [
+      timed('e-shift', 'Late shift', '2026-10-13T22:00:00+13:00', '2026-10-14T01:00:00+13:00', {
+        people: [{ personId: ID.sam, role: 'attending' }],
+      }),
+      timed('e-bfast', 'Breakfast', '2026-10-14T07:00:00+13:00', '2026-10-14T07:30:00+13:00', {
+        people: [{ personId: ID.sam, role: 'attending' }],
+      }),
+      timed('e-dent', 'Dentist', '2026-10-14T10:00:00+13:00', '2026-10-14T10:30:00+13:00', {
+        people: [{ personId: ID.sam, role: 'attending' }],
+      }),
+    ];
+    const night = line(run({ events }, at('2026-10-14T00:30:00+13:00')).today, 'Sam');
+    expect(texts(night.shown)).toEqual(['Late shift until 01:00', '07:00 Breakfast']);
+    const morning = line(run({ events }, at('2026-10-14T08:00:00+13:00')).today, 'Sam');
+    expect(texts(morning.shown)).toEqual(['07:00 Breakfast', '10:00 Dentist']);
+    expect(texts(morning.rest)).toEqual(['Late shift until 01:00']);
+  });
+
+  it('an all-day item is never finished, so it stays on the surface all day', () => {
+    const events = [
+      ...WED,
+      timed('e-lunch', 'Lunch', '2026-10-14T12:00:00+13:00', '2026-10-14T13:00:00+13:00', {
+        people: [{ personId: ID.sam, role: 'attending' }],
+      }),
+    ];
+    const sam = line(run({ events }, at('2026-10-14T21:40:00+13:00')).today, 'Sam');
+    expect(texts(sam.shown)).toEqual(['Client site', '19:00 Board meeting']);
+    expect(texts(sam.rest)).toEqual(['12:00 Lunch']);
+  });
+
+  it('ties at the same time are broken the same way whatever order the records came in', () => {
+    const milo = (title: string, id: string) =>
+      timed(id, title, '2026-10-14T10:00:00+13:00', '2026-10-14T11:00:00+13:00', {
+        people: [{ personId: ID.milo, role: 'attending' }],
+      });
+    const later = timed('e-z', 'Art', '2026-10-14T16:00:00+13:00', '2026-10-14T17:00:00+13:00', {
+      people: [{ personId: ID.milo, role: 'attending' }],
+    });
+    const events = [milo('Chess', 'e-a'), milo('Band', 'e-b'), later];
+    const now = at('2026-10-14T12:00:00+13:00');
+    const one = line(run({ events }, now).today, 'Milo');
+    const two = line(run({ events: [...events].reverse() }, now).today, 'Milo');
+    expect(texts(one.shown)).toEqual(texts(two.shown));
+    expect(texts(one.rest)).toEqual(texts(two.rest));
+    expect(one.shown).toHaveLength(2);
+    expect(texts(one.shown)).toContain('16:00 Art');
+  });
+
+  it('“+ N more” counts and holds exactly the rest, and nothing is dropped from the day', () => {
+    for (const clock of ['07:03', '12:00', '15:45', '17:00', '21:40']) {
+      const m = run({ events: WED }, at(`2026-10-14T${clock}:00+13:00`)).today;
+      for (const l of m.personLines) {
+        expect(l.shown.length).toBeLessThanOrEqual(2);
+        expect(l.more).toBe(l.rest.length);
+        expect(l.shown.length + l.rest.length).toBe(l.entries.length);
+        // Both halves keep agenda order, and together they are the whole line.
+        const order = (es: typeof l.entries) => es.map((e) => l.entries.indexOf(e));
+        expect(order(l.shown)).toEqual([...order(l.shown)].sort((a, b) => a - b));
+        expect(order(l.rest)).toEqual([...order(l.rest)].sort((a, b) => a - b));
+        expect(new Set([...l.shown, ...l.rest])).toEqual(new Set(l.entries));
+      }
+    }
+  });
+});
+
 describe('also today', () => {
   it('birthdays outside the household, project targets, and events with no household person', () => {
     const nobody = timed(

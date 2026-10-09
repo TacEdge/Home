@@ -30,17 +30,35 @@ vi.mock('@/trust/session', () => ({
 }));
 vi.mock('@/domain/people/service', () => ({ listPeople: async () => people }));
 vi.mock('@/domain/captures/service', () => ({ listCaptures: async () => [] }));
-vi.mock('@/app/_calendar/stale', () => ({ hasStaleCalendar: async () => false }));
-vi.mock('@/domain/tasks/service', () => ({ listTasks: async () => [] }));
-vi.mock('@/domain/projects/service', () => ({ listProjects: async () => [] }));
+// 07:03 on Wednesday 14 October in Pacific/Auckland, with one calendar read an hour before.
+const NOW = new Date('2026-10-13T18:03:00Z');
+vi.mock('@/app/_agenda/now', () => ({ requestNow: async () => NOW }));
 vi.mock('@/app/_agenda/load', () => ({
-  todayInHomeZone: () => '2026-10-14',
   loadAgenda: async () => ({
     today: '2026-10-14',
     from: '2026-10-14',
-    to: '2026-10-14',
-    days: [],
-    people: new Map(),
+    to: '2026-10-15',
+    days: [
+      { date: '2026-10-14', items: [] },
+      { date: '2026-10-15', items: [] },
+    ],
+    people: new Map(people.map((p) => [p.id, { ...p, inHousehold: true, dateOfBirth: null }])),
+    events: [],
+    records: {
+      tasks: [],
+      projects: [],
+      calendars: [
+        {
+          id: 'c-1',
+          name: 'Sam’s work',
+          archivedAt: null,
+          lastAttemptAt: new Date(NOW.getTime() - 3_600_000),
+          lastSyncedAt: new Date(NOW.getTime() - 3_600_000),
+          lastSyncStatus: 'ok',
+          stale: false,
+        },
+      ],
+    },
   }),
 }));
 vi.mock('@/app/(home)/settings/you/actions', () => ({

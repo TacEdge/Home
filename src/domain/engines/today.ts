@@ -105,8 +105,10 @@ export type PersonLine = {
   name: string;
   /** Every entry, in agenda order. */
   entries: LineEntry[];
-  /** The first two, shown; then `more`. */
+  /** Up to two, shown (`lineSelection`), in agenda order. */
   shown: LineEntry[];
+  /** Every other entry, in agenda order: what "+ N more" holds. */
+  rest: LineEntry[];
   more: number;
 };
 
@@ -322,13 +324,8 @@ export function today(input: TodayInput): TodayModel {
       });
     }
     if (entries.length === 0) continue;
-    personLines.push({
-      personId: p.id,
-      name: p.name,
-      entries,
-      shown: entries.slice(0, LINE_SHOWN),
-      more: Math.max(0, entries.length - LINE_SHOWN),
-    });
+    const { shown, rest } = lineSelection(entries, now);
+    personLines.push({ personId: p.id, name: p.name, entries, shown, rest, more: rest.length });
   }
 
   // Also today (§5.2): what belongs to no visible household person.
@@ -382,6 +379,39 @@ export function today(input: TodayInput): TodayModel {
           }
         : null,
     incomplete,
+  };
+}
+
+/**
+ * Which two of a person's entries are on the surface (ADR 0008 §32, after
+ * the Package 3 review): those not yet finished first, so a finished
+ * morning never hides what is still to come. An entry is finished only when
+ * it is a timed occurrence whose end is at or before `now`; one under way,
+ * an all-day item and a birthday are not. Up to two unfinished entries, the
+ * earliest; if fewer remain, the most recently finished fill the rest
+ * (latest end, then later in agenda order). The two keep agenda order, and
+ * every other entry is in `rest`, also in agenda order. Nothing is ranked
+ * by importance; nothing is dropped.
+ */
+export function lineSelection(
+  entries: readonly LineEntry[],
+  now: Date,
+): { shown: LineEntry[]; rest: LineEntry[] } {
+  const finished = (e: LineEntry) =>
+    e.item.kind === 'event' && !e.item.allDay && e.item.endsAt.getTime() <= now.getTime();
+  const open = entries.map((e, k) => k).filter((k) => !finished(entries[k]!));
+  const done = entries
+    .map((e, k) => k)
+    .filter((k) => finished(entries[k]!))
+    .sort((a, b) => {
+      const ea = entries[a]!.item as TimedItem;
+      const eb = entries[b]!.item as TimedItem;
+      return eb.endsAt.getTime() - ea.endsAt.getTime() || b - a;
+    });
+  const chosen = new Set([...open, ...done].slice(0, LINE_SHOWN));
+  return {
+    shown: entries.filter((e, k) => chosen.has(k)),
+    rest: entries.filter((e, k) => !chosen.has(k)),
   };
 }
 
