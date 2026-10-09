@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { AgendaDays } from '@/app/_agenda/agenda-list';
-import { loadAgenda, todayInHomeZone } from '@/app/_agenda/load';
+import { loadAgenda } from '@/app/_agenda/load';
+import { requestNow } from '@/app/_agenda/now';
 import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
 import { hasStaleCalendar } from '@/app/_calendar/stale';
+import { isoDateInZone } from '@/lib/dates';
 import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { EmptyState, Page } from '@/ui/page';
@@ -17,8 +19,10 @@ export const dynamic = 'force-dynamic';
 // refreshed after the page has rendered.
 export default async function ForwardPage() {
   const actor = await requireActor();
+  // Today as the test time source sees it, like Today (M6 Package 1).
+  const today = isoDateInZone(await requestNow(), env.HOME_TIMEZONE);
   const [loaded, stale] = await Promise.all([
-    loadAgenda(actor, todayInHomeZone(), 30),
+    loadAgenda(actor, today, 30, today),
     hasStaleCalendar(actor),
   ]);
   return (

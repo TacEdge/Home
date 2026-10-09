@@ -76,7 +76,7 @@ Notes:
 4. Enable **secret scanning** (Settings → Code security).
 5. **Your GitHub account → Settings → Emails**: enable **Keep my email addresses private** and **Block command line pushes that expose my email**, so merges made on github.com no longer carry your address.
 6. Dependabot (`.github/dependabot.yml`) opens weekly PRs for the SHA-pinned actions; merge them like any other PR.
-7. Tag the prototype if not yet done: tag `m0.6-prototype` on commit `3d58390`.
+7. Tag the prototype if not yet done: tag `m0.6-prototype` on commit `3d58390`. (Done; `/prototype` itself was deleted in M6 Package 1, and the tag keeps it.)
 
 ## B. Each release
 

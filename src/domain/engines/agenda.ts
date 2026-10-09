@@ -10,9 +10,10 @@ import { addDays, daysBetween, isoDateInZone, parseIsoDate, type IsoDate } from 
 // home time zone, and passes everything in. No screen re-implements dates.
 //
 // Within a day: all-day items first (all-day events, then birthdays, then
-// project target dates, then tasks due), then timed events by start
-// (ADR 0005 §27). Ties break by title, then id, so the order never depends
-// on the order the inputs arrived in.
+// project target dates, then tasks due), then timed items by start: timed
+// events and, from M6 (ADR 0009 §26), open tasks scheduled for a time, an
+// event before a task at the same start (ADR 0005 §27). Ties break by title,
+// then id, so the order never depends on the order the inputs arrived in.
 //
 // Placement and order (ADR 0008 §24, M5 Package 1): a timed occurrence is on
 // every day it covers in the home zone, from the day it starts to the day
@@ -38,6 +39,9 @@ export type AgendaTaskInput = {
   title: string;
   status: string;
   dueDate: IsoDate | null;
+  /** The task's recorded scheduled window (both ends or neither), if any. */
+  scheduledStartsAt?: Date | null;
+  scheduledEndsAt?: Date | null;
 };
 export type AgendaProjectInput = {
   id: string;
@@ -83,7 +87,16 @@ export type AgendaItem =
     }
   | { kind: 'birthday'; date: IsoDate; personId: string; name: string; age: number }
   | { kind: 'project_target'; date: IsoDate; projectId: string; title: string }
-  | { kind: 'task_due'; date: IsoDate; taskId: string; title: string };
+  | { kind: 'task_due'; date: IsoDate; taskId: string; title: string }
+  | {
+      /** An open task scheduled for a time (ADR 0009 §26), on the home day its window starts. */
+      kind: 'task_scheduled';
+      date: IsoDate;
+      taskId: string;
+      title: string;
+      startsAt: Date;
+      endsAt: Date;
+    };
 
 export type AgendaDay = { date: IsoDate; items: AgendaItem[] };
 
@@ -107,7 +120,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DONE_PROJECT = 'done';
 
 /** All-day kinds in their order within a day. */
-const ALL_DAY_RANK: Record<AgendaItem['kind'], number> = {
+const ALL_DAY_RANK: Record<Exclude<AgendaItem['kind'], 'task_scheduled'>, number> = {
   event: 0,
   birthday: 1,
   project_target: 2,
@@ -123,8 +136,11 @@ const idOf = (i: AgendaItem) =>
       : i.kind === 'project_target'
         ? i.projectId
         : i.taskId;
-const isTimed = (i: AgendaItem): i is Extract<AgendaItem, { allDay: false }> =>
-  i.kind === 'event' && i.allDay === false;
+type TimedAgendaItem =
+  | Extract<AgendaItem, { allDay: false }>
+  | Extract<AgendaItem, { kind: 'task_scheduled' }>;
+const isTimed = (i: AgendaItem): i is TimedAgendaItem =>
+  (i.kind === 'event' && i.allDay === false) || i.kind === 'task_scheduled';
 
 /** The order of items within one day. Exported so every screen sorts alike. */
 export function compareAgendaItems(a: AgendaItem, b: AgendaItem): number {
@@ -134,7 +150,9 @@ export function compareAgendaItems(a: AgendaItem, b: AgendaItem): number {
   if (ta && tb) {
     const d = a.startsAt.getTime() - b.startsAt.getTime();
     if (d !== 0) return d;
-  } else {
+    const k = (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1);
+    if (k !== 0) return k; // an event before a task at the same start
+  } else if (!ta && !tb) {
     const r = ALL_DAY_RANK[a.kind] - ALL_DAY_RANK[b.kind];
     if (r !== 0) return r;
   }
@@ -234,9 +252,24 @@ export function agenda(input: AgendaInput): AgendaDay[] {
     }
   }
 
-  for (const t of input.tasks ?? [])
-    if (t.status === OPEN_TASK && t.dueDate && inRange(t.dueDate))
+  for (const t of input.tasks ?? []) {
+    if (t.status !== OPEN_TASK) continue;
+    if (t.dueDate && inRange(t.dueDate))
       items.push({ kind: 'task_due', date: t.dueDate, taskId: t.id, title: t.title });
+    // A scheduled window (both ends or neither, M2): on the home day it starts.
+    if (t.scheduledStartsAt && t.scheduledEndsAt) {
+      const date = isoDateInZone(t.scheduledStartsAt, timeZone);
+      if (inRange(date))
+        items.push({
+          kind: 'task_scheduled',
+          date,
+          taskId: t.id,
+          title: t.title,
+          startsAt: t.scheduledStartsAt,
+          endsAt: t.scheduledEndsAt,
+        });
+    }
+  }
 
   for (const p of input.projects ?? [])
     if (p.status !== DONE_PROJECT && p.targetDate && inRange(p.targetDate))

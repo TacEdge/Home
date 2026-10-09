@@ -59,4 +59,4 @@ Set `PLAYWRIGHT_CHROMIUM_PATH` to use a specific Chromium binary for e2e; where 
 - `next dev` runs with `NODE_ENV=development`; `next start` forces `production`, which refuses the `test` mail transport and non-https URLs by design. E2E therefore runs on the dev server.
 - Environment is validated at server start by `src/instrumentation.ts` (and lazily by `src/lib/env.ts`); a missing or invalid variable fails fast naming the variable, never its value.
 - The sign-in form is the only way to request a link; `/api/auth/*` serves nothing but the magic-link verify endpoint.
-- `/prototype` is reference only. It is not linted, built, tested or deployed.
+- The M0 experience prototype was deleted in M6 Package 1 (ADR 0009 §32). The tag `m0.6-prototype` keeps it: `git checkout m0.6-prototype -- prototype` restores a local copy for reference, never to be committed.

@@ -39,7 +39,6 @@
   // (.vercelignore) — tsconfig.test.json adds them back for `pnpm typecheck`.
   "exclude": [
     "node_modules",
-    "prototype",
     ".next",
     ".next-*",
     "out",

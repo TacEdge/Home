@@ -687,7 +687,10 @@ describe('privacy of the log', () => {
       ).rows.map((r) => r.id),
     );
     expect(alexSees.filter((r) => samOwn.has(r.subjectId ?? ''))).toEqual([]);
-  });
+    // It reads the whole shared audit log, which grows with every suite run
+    // before it; it once took over vitest's 5 s default in a full verify
+    // (M5-ACCEPTANCE §9). Its timeout is explicit rather than flaky.
+  }, 30_000);
 
   it('the capture row is untouched by every proposal path', async () => {
     const all = await admin.db.select({ id: capture.id, text: capture.text }).from(capture);

@@ -1,10 +1,8 @@
 # ADR 0009 — M6 Forward Coordination: scope, architecture and decisions
 
-Status: **Proposed**, 2026-10-09 (M6 Package 0).
+Status: **Accepted**, 2026-10-09. The owner approved the product decisions on PR #59 (§20–§29, as refined there) and accepted this ADR and the contract (`docs/m6/M6-BUILD-CONTRACT.md`) by merging Package 0.
 
-- **Product decisions approved:** the owner approved them on PR #59, 2026-10-09: §20–§29, as refined there. Each is marked **Approved** below.
-- **Not yet accepted:** the ADR and the contract (`docs/m6/M6-BUILD-CONTRACT.md`) as a whole are accepted when the owner merges Package 0.
-- **Package 1** does not start until the owner says so.
+- **Implementation:** Package 1 (Forward groundwork and engine, §32) is in review.
 - **Refinements on PR #59:**
   - `conflict.away` removed (§12, §24);
   - conflict identity and lifecycle defined precisely (§13);
@@ -342,6 +340,68 @@ Earlier decisions already settle much of the shape:
     Builder, review intensity and verification are set per package in contract §2. Review is risk-based: high for the conflict engine, for the feedback write path and for acceptance; medium elsewhere. Package 1 cannot start until the owner merges Package 0 and says to start.
 
 31. **Production.** M6 is built and accepted on synthetic data, and `HOME_REAL_DATA` stays closed. M6 adds no migration and no Production setting. Its operational acceptance on real records waits on the gate, through two new DEPLOY.md §E items added in Package 5.
+
+### Implementation
+
+32. **Package 1: Forward groundwork and engine.**
+
+    - **One agenda, 90 days.** Forward composes every horizon from one read (`readAgendaInputs`, as the signed-in adult) and one 90-day run of the shared agenda engine. No second engine and no recurrence of its own. Recurrence identity, overnight placement, override suppression, changed occurrences and calendar default people all come through unchanged. The read costs a constant number of queries: measured through the real services at 9 for the test's composition (the 7-query agenda read plus a 2-query calendar read the page will not need, because the agenda read already carries the calendars), before and after 30 more events and tasks.
+    - **Scheduled tasks (§26).** The agenda engine places an open task with a recorded scheduled window as a `task_scheduled` item on the home day its window starts. It sits among timed items by start, with an event before a task at the same start. Done and dropped tasks are never placed. Today still says a task once, under To do: its engine leaves `task_scheduled` out of Also today, person lines and Earlier today, as it already did `task_due`. The current 30-day Forward list shows the row ("Scheduled until 11:00") until Package 4 replaces the page. A person's Coming up is unchanged (it lists events and birthdays only).
+    - **The Forward engine** (`src/domain/engines/forward.ts`, `forward()`), one composition for every horizon:
+      - **Inputs:** the agenda's days, the events with their people, the reader's people, calendars, `now`, the home zone, the horizon, and conflicts (empty until Package 2).
+      - **Units (§15):** days for Week, Monday-to-Sunday weeks for Month (the first runs from today to Sunday, so a Sunday gives a one-day "This week"), and calendar months for Season (with the year in the label once it changes). Every unit is drawn.
+      - **Entries:** each occurrence (`{eventId}:{occurrenceDate}`), birthday, project target, task due or scheduled task appears once per unit, at its first day there. It is either notable or usual; nothing is dropped. A test checks, for every horizon, that the entries equal the agenda's items for each unit.
+      - **The usual:** an event whose series is in a household person's regular week (`profile.regularWeek`), unless it is in a current conflict. A changed occurrence, a monthly or not-yet-begun series, and a series only a non-household person is on are notable. Nothing is read from a title.
+      - **Rows:** ordered by kind and time (conflict, birthday, all-day or multi-day, project target, task due, scheduled task, timed), then day, agenda order and key: a total order. Shown up to the cap (2, 3, 3), with the rest kept in `rest` and `more` exactly `rest.length`.
+      - **Load (§22):** the counted notable entries per unit, banded 1/3/5 for a day and 1/5/10 for a week or month, with the facts counted and a text equivalent: "Three things recorded", "Nothing recorded besides the usual" or "Nothing recorded".
+    - **Counting rule.** As Today's (ADR 0008 §31): everything that begins in the range counts; a carry-over from before today counts only while it is still running at `now`. An overnight item from last night that has ended stays in its unit's entries (`counts: false`), so in that one case a row can show an item its load does not count.
+    - **Headline (§16).** First run (no live calendar and no events), nothing, usual, listed, counted, then the overlaps sentence and the qualifier.
+      - **Listed** is Week only, and only when the one or two notable items are events or birthdays, named as recorded with "today", "tomorrow" or "on {weekday}". Anything else is counted, which avoids wording rules for targets and tasks that the contract never set.
+      - **Wording.** Every horizon reads "in the next …". The contract's Season example said "over the next 90 days"; the template said "in the next", and the template wins.
+      - **Qualifier.** "As far as HOME knows." is its own sentence after the headline, as on Today.
+      - **Facts.** The headline carries the items counted, or the range and calendars consulted.
+      - **Determinism.** The engine imports only the agenda, day-facts, profile and today engines and the date library, and reads no clock.
+    - **For Package 2.** The engine takes `conflicts: { key, occurrences }[]`, where `occurrences` are occurrence keys. The caller passes only the reader's current conflicts that the reader has not responded to.
+      - An occurrence in one is notable (even a usual one), marked `conflicted`, and first in its row.
+      - The headline's second sentence counts the conflicts touching the range ("There is one overlap.").
+      - Package 1 passes none; the behaviour is unit-tested with synthetic conflicts.
+    - **Other groundwork.**
+      - The insights engine takes an optional last day (`through`, default today + 7), so Today is unchanged.
+      - The Forward page reads the test time source (`requestNow`), and `loadAgenda` takes the screen's today.
+      - The audit-log scan in `proposals.test.ts` has an explicit 30-second timeout (M5-ACCEPTANCE §9).
+    - **Prototype retired.**
+      - **Before deleting:** the tag `m0.6-prototype` was confirmed on `origin` at `3d58390`, and no route, source file or test referred to `/prototype`; only the build, lint, format and deploy exclusions named it.
+      - **What was removed:** the directory and those exclusions. CLAUDE.md rule 14 now records the retirement; README, LOCAL-DEV and DEPLOY say how the tag restores a local copy for reference.
+      - **What it kept:** the design references live on in `docs/concepts/`, including its six fixture states (README) and the scenario family.
+      - **Test:** `prototype-retired.test.ts` fails if the directory or any exclusion returns.
+    - **Evidence.**
+      - **Engine unit tests** (`tests/unit/forward/`):
+        - units and labels across month, year and week ends;
+        - the NZ DST start and end;
+        - UTC, London and New York (on their own clock-change days);
+        - overnight and all-day items;
+        - changed and skipped occurrences;
+        - scheduled tasks;
+        - caps and exact "+ N";
+        - load bands at every boundary;
+        - every headline rule;
+        - forbidden words over every horizon;
+        - shuffled-input determinism;
+        - traceability, and every rule id present in the contract;
+        - purity.
+      - **Non-interference through the real services:** Sam adds a private person with a birthday, a private weekly series, private one-offs across the season, a private scheduled task, task and project target, and a stale private calendar. Alex's model for Week, Month and Season is identical before and after, and Sam's changes. Putting a private person on a household event is refused by the domain (`references_private`), so that path cannot reach the other adult.
+      - **Performance:** 300 events over 90 days (60 weekly series, 240 one-offs) take about 220 ms for the agenda and 55 ms for all three horizons on the dev container.
+      - **Targeted mutations**, each failing its tests:
+        - a recurring series of any kind counted as usual;
+        - the household filter removed;
+        - weeks ending on Monday;
+        - one held row dropped;
+        - "+ N" off by one;
+        - a read handing Sam's records to Alex, simulated in the invariant test, because a temporary edit to the visibility predicate was not permitted in this environment.
+    - **Unchanged.**
+      - No schema, migration or new dependency.
+      - No Forward screen: the page stays the plain 30-day list, apart from the scheduled-task rows and the test clock.
+      - No conflict detection, Kev, transport or weather.
 
 ## Consequences
 

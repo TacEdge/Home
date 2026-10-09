@@ -1,10 +1,8 @@
 # M6 — Forward Coordination: Build Contract
 
-Status: **Proposed**, 2026-10-09 (Package 0).
+Status: **Approved**, 2026-10-09 (Package 0, PR #59, merged by the owner; product decisions in §12.2).
 
-- **Product decisions approved:** the owner approved them on PR #59 (§12.2; ADR 0009 §20–§29, as refined there).
-- **Not yet accepted:** the contract as a whole is accepted when the owner merges Package 0.
-- **Nothing is built yet.** Package 1 does not start until the owner says so.
+- **Progress:** Package 1 (Forward groundwork and engine, ADR 0009 §32) is in review. Package 2 does not start until the owner says so.
 
 The architecture decisions are recorded in ADR 0009 (`docs/decisions/0009-m6-forward-coordination.md`).
 
@@ -976,7 +974,7 @@ M6 is fully accepted only when both technical and operational acceptance are rec
 |---|---|---|
 | 20 | Transport: the structured model deferred; responsibility never read as transport; re-decided at M9 planning with real-family evidence | **Approved** |
 | 12, 24 | `conflict.away`: excluded; conflicts only from timed overlaps | **Approved** |
-| 13 | Conflict identity: standing for unchanged recurring pairs, occurrence for one-offs and changes; material change; lifecycle (§5.7) | **Approved direction**; the precise rules here are for final approval with Package 0 |
+| 13 | Conflict identity: standing for unchanged recurring pairs, occurrence for one-offs and changes; material change; lifecycle (§5.7) | **Approved** (with Package 0) |
 | 15 | Week primary; Month and Season as summaries; headline, Worth knowing, Coming up, The usual | **Approved** |
 | 21 | The usual on Forward = the existing regular week | **Approved** |
 | 22 | Factual load indicators with provisional bands; no subjective labels; no Season graphic | **Approved** (the graphic's removal is a refinement under "one structure") |
