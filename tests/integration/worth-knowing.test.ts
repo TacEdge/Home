@@ -192,7 +192,15 @@ describe('dismiss', () => {
     expect(raw).not.toContain('Nana');
     expect(raw).not.toContain(key.nana);
     const alexPage = await listAudit(h.alex, { limit: 200 }, deps);
-    expect(alexPage.rows.filter((r) => r.event === 'insight_response.respond')).toEqual([]);
+    // Alex may have responses of their own (other suites share the database); none of Sam's is listed.
+    const ids = new Set(mine.map((r) => r.id));
+    expect(
+      alexPage.rows.filter(
+        (r) =>
+          r.event === 'insight_response.respond' &&
+          (r.actorUserId === h.sam.userId || ids.has(r.id)),
+      ),
+    ).toEqual([]);
   });
 
   it('refuses a key the reader cannot see, and writes nothing: Alex cannot touch Sam’s private insight', async () => {
