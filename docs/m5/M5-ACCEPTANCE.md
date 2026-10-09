@@ -128,6 +128,7 @@ Each package had a focused independent review at its stated intensity; every Blo
   - The shared header at 320px: wordmark and switch touch (shell backlog).
   - A full day's person cards are tall on a tablet; time-of-day words on cards and fading past items remain deferred (§32).
   - The dev-only hydration warning (M4-ACCEPTANCE §6) still shows as a badge in development screenshots.
+  - In this package's full `pnpm verify`, one integration test this package does not touch (`proposals.test.ts`, "privacy of the log", which scans the whole audit log) hit vitest's 5-second timeout once. It passed alone (3.4s) and in a full rerun of the integration suite (722 of 722). It is reported here, not treated as fixed; watch for it in CI.
 - **Kept from earlier milestones:** parallel browser workers need per-worker databases (M4-ACCEPTANCE §9); `check-export.mts` needs Node 22.18 or later.
 
 ## 10. Owner actions
