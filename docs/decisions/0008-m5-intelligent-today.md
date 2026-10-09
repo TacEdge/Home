@@ -5,7 +5,7 @@ Status: **Accepted**, 2026-10-08. The owner approved this ADR and the contract, 
 - **Approved:** §20, §23, §24, §25 and §26.
 - **Approved as provisional:** §22.
 - **Revised as the owner directed:** §21.
-- **Implementation:** Packages 1, 2 and 3 merged (PRs #54, #55, #56; §30–§32). Package 4 (Worth knowing and Dismiss) is in review; its decisions are recorded in §33.
+- **Implementation:** Packages 1–4 merged (PRs #54–#57; §30–§33). Package 5 (acceptance) is in review (§34): M5 is technically accepted on synthetic data (`docs/m5/M5-ACCEPTANCE.md`); operational acceptance waits on DEPLOY.md §E.
 
 ## Context
 
@@ -320,6 +320,15 @@ Four items are carried forward to M5:
     - **Cost.** One query for the reader's responses. Today now reads eight days of agenda instead of two (pure computation over the same read; no new query).
     - **Carried to M5 acceptance.** A household person's birthday folds into Earlier today in the evening (§32). The narrow shared header at 320px stays on the shell backlog.
     - **Unchanged.** No schema, no migration, no dependency, no Kev, no transport, no weather, no notification, no background job, no "Not useful".
+
+34. **Package 5: acceptance.**
+
+    - **Verdict.** M5 is technically accepted on synthetic data (`docs/m5/M5-ACCEPTANCE.md`): every contract §10 criterion is met with tests that run in CI, criterion 8's subjective part rests on the owner's screenshot review, and no Blocker or Important finding is open. Operational acceptance on real family use is DEPLOY.md §E items 16–17 (added here), after the gate and the first real calendar.
+    - **First-run insights.** First run no longer hides Worth knowing. A household with birthdays or a project recorded before any calendar sees those insights; a calendar insight cannot occur there. First-run messaging stays as it was ("Connect a calendar ›"). Presentation only; the engines are unchanged.
+    - **Evening birthdays.** In the evening, birthdays stay in view under "All day today" with all-day events, instead of folding into Earlier today: they belong to the whole day, not a time. Presentation only; the headline's evening rules are unchanged.
+    - **The failure episode across disconnect and reconnect.** Proved through the real calendar services and a synthetic provider: disconnecting removes the insight (the calendar is archived); reconnecting without a success since is the same episode and key, each adult's dismissal intact; a success ends it; the next failure is a new key for both. No code change was needed.
+    - **Measured.** Today's data load 8 queries, constant; Worth knowing 1 query; engines 75 ms per run over 300 events; the page 422 ms (ordinary day) and 998 ms (300 extra events) on the dev server.
+    - **Carried forward.** The shared header at 320px (wordmark and switch touch, no overlap): shell backlog. The dev-only hydration badge in development screenshots. Time-of-day words on cards and fading past items stay deferred. A dismissal from a page loaded before midnight may be refused after the key changes.
 
 ## Consequences
 

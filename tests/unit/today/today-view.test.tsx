@@ -234,3 +234,38 @@ describe('the view is presentation only', () => {
     }
   });
 });
+
+describe('acceptance corrections (M5 Package 5)', () => {
+  it('first run still shows insights about what is recorded: a birthday next week', () => {
+    const { html, model } = render(at('2026-10-17T07:03:00+13:00'), {
+      events: [],
+      calendars: [],
+      tasks: [],
+    });
+    expect(model.state).toBe('first_run');
+    expect(headings(html, 2)).toEqual(['Worth knowing']);
+    expect(text(html)).toContain('Nana Jo’s birthday is Tuesday.');
+    expect(text(html)).toContain('Connect a calendar ›');
+  });
+
+  it('first run with nothing to say shows no Worth knowing at all', () => {
+    const { html } = render(at('2026-10-17T07:03:00+13:00'), {
+      events: [],
+      calendars: [],
+      tasks: [],
+      people: PEOPLE.map((p) => ({ ...p, dateOfBirth: null })),
+      projects: [],
+    });
+    expect(headings(html, 2)).toEqual([]);
+  });
+
+  it('in the evening a household birthday stays in view, under All day today, not folded away', () => {
+    const people = PEOPLE.map((p) => (p.id === ID.milo ? { ...p, dateOfBirth: '2017-10-14' } : p));
+    const { html, model } = render(at('2026-10-14T21:40:00+13:00'), { events: WED, people });
+    expect(model.state).toBe('evening');
+    const allDay = html.slice(html.indexOf('today-allday'), html.indexOf('today-tomorrow'));
+    expect(text(allDay)).toContain('Milo’s birthday');
+    const earlier = html.slice(html.lastIndexOf('Earlier today'));
+    expect(text(earlier)).not.toContain('Milo’s birthday');
+  });
+});

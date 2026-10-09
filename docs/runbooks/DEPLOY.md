@@ -168,7 +168,7 @@ Confirmed by the owner, 2026-10-02:
 - Postmark DKIM and Return-Path are verified for the sending subdomain.
 - A sign-in request from HOME reaches Postmark.
 
-**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. M4 (calendars, ADR 0007) is being built on synthetic data: no calendar credential exists in Production, and no real calendar is connected anywhere, until the gate opens and M4 is accepted. Preview may hold only a throwaway Google account's synthetic calendar (M4 contract §6.2). M4's own rows are items 12–15 below (added by its Package 9); its keys are in the env table (§A). The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
+**Status on 2026-10-05:** none of items 1–11 below is recorded as passed, so the real-data gate stays closed. M3's build is complete and audited (`docs/m3/M3-ACCEPTANCE.md`); M3 acceptance additionally waits on items 7 and 8. M4 (calendars, ADR 0007) is being built on synthetic data: no calendar credential exists in Production, and no real calendar is connected anywhere, until the gate opens and M4 is accepted. Preview may hold only a throwaway Google account's synthetic calendar (M4 contract §6.2). M4's own rows are items 12–15 below (added by its Package 9), and M5's are items 16–17 (added by its Package 5); its keys are in the env table (§A). The R2 verification SQL in §D was checked against a local migrated database on 2026-10-05 (synthetic data, not an §E item): it runs as written, the migrations count matches the journal, both audit triggers are present, and both `home_app` append-only checks fail as expected.
 
 Outstanding M1 acceptance items. Record the date and result of each here when it passes.
 
@@ -200,6 +200,13 @@ M4 (calendars) items. M4 is technically accepted on synthetic data (`docs/m4/M4-
 | 14 | **First real calendar, after the gate opens**: an adult connects their own Google calendar's secret address in Production; it refreshes; events appear with the right times on Today and Forward; a private calendar is not visible to the other adult; Settings › Activity shows the connect and refresh rows with counts only. | M4 works on the family's real calendar. |
 | 15 | **Calendar logging review**: after item 14, Production's runtime logs reviewed for the calendar flow: no secret address, calendar id, event title or place appears. | Calendar data does not leak into logs. |
 
+M5 (Intelligent Today) items. M5 is technically accepted on synthetic data (`docs/m5/M5-ACCEPTANCE.md`) and adds no Production setting, key or migration; these close its operational acceptance on the family's real records, after the gate opens (item 11) and the first real calendar (item 14).
+
+| # | Item | Proves |
+|---|---|---|
+| 16 | **Today on a real day**: each adult opens Today on a weekday morning and in the evening; the headline, each person's lines and To do match what is recorded; nothing private to the other adult appears; Worth knowing, Why and Dismiss work, and a dismissal on one adult's Today does not change the other's. | M5 works on the family's real records, privately. |
+| 17 | **The five-second check**: the owner confirms, on their own phone, that a real day can be understood in about five seconds (concepts README design tests 1–3, 7), noting anything that reads wrong. Usefulness itself is evaluated in the M10 trial (ADR 0008 §22). | The approved design holds on real days. |
+
 **Evidence required before `HOME_REAL_DATA=open`.** Each item is recorded here with its date and the owner's initials, as counts and yes/no observations only, never record contents, credentials, hosts or addresses.
 
 | Item | Evidence to record |
@@ -215,5 +222,7 @@ M4 (calendars) items. M4 is technically accepted on synthetic data (`docs/m4/M4-
 | 13 | The date; refresh worked (yes/no); events on Today and Forward (yes/no); disconnect and reconnect restored the calendar (yes/no); the address absent from Preview's logs (yes/no). |
 | 14 | The date; which adult (initials); refresh worked (yes/no); times correct on Today and Forward (yes/no); a private calendar not visible to the other adult (yes/no, if one was connected private). |
 | 15 | The date; no address, calendar id, title or place in the logs (yes/no). |
+| 16 | The date; for each adult (initials): headline and lines matched the records (yes/no); nothing of the other adult's private records seen (yes/no); Dismiss worked and stayed one adult's (yes/no). |
+| 17 | The date; understood in about five seconds (yes/no); anything that read wrong, in general terms only (no record contents). |
 
 Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.

@@ -2,8 +2,11 @@ import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 import { calendarSource, insightResponse } from '@/db/schema';
-import { connectCalendar } from '@/domain/calendar/service';
-import { SYNTHETIC_ADDRESS } from '../fixtures/calendars/google';
+import { connectCalendar, disconnectCalendar, reconnectCalendar } from '@/domain/calendar/service';
+import { refreshCalendar } from '@/domain/calendar/sync';
+import { fakeProvider } from '@/integrations/calendar/fake';
+import { googleFeed, nzEvent, SYNTHETIC_ADDRESS } from '../fixtures/calendars/google';
+import { TODAY } from '../fixtures/calendars/sequences';
 import { NotPermittedError } from '@/domain/common/errors';
 import { createEventWithPeople } from '@/domain/events/service';
 import { dismissInsight, insightsFor, insightsInput, readInsights } from '@/domain/insights/today';
@@ -388,5 +391,92 @@ describe('a failed calendar, one failure episode at a time', () => {
     }
     expect(await rowsFor(h.sam.userId, k)).toHaveLength(0);
     expect(await listed(h.sam, at('2026-10-18T07:03:00+13:00'), k)).toBe(true);
+  });
+});
+
+// M5 Package 5: the failure episode through the real calendar services and a synthetic
+// provider, including disconnect and reconnect. Disconnecting archives the calendar (no
+// insight while it is gone); reconnecting brings back its recorded state, so until it next
+// succeeds it is the same episode, under the same key, with each adult's dismissal intact.
+describe('a failure episode across disconnect and reconnect (real services)', () => {
+  const address = SYNTHETIC_ADDRESS.replace(
+    '0123456789abcdef0123456789abcdef',
+    'e9150de0e9150de0e9150de0e9150de0',
+  );
+  const feed = {
+    ics: googleFeed([
+      nzEvent({
+        uid: 'ep-wk@example.test',
+        start: '20261014T090000',
+        end: '20261014T100000',
+        summary: 'Episode WK',
+      }),
+    ]),
+  };
+  // Steps: 0 succeeds, 1 fails, 2 succeeds, 3 fails.
+  const p = fakeProvider([feed, { fail: 'unreachable' }, feed, { fail: 'unreachable' }], {
+    homeTimeZone: ZONE,
+  });
+  let id = '';
+  const refresh = (step: number) => {
+    p.goTo(step);
+    return refreshCalendar(h.sam, id, p, { today: TODAY }, deps);
+  };
+  const failedKey = async (who: UserActor) =>
+    (await readInsights(who, new Date(), ZONE, deps)).all.find(
+      (i) =>
+        i.rule === 'data_health.failed' &&
+        i.facts.some((f) => f.kind === 'calendar' && f.id === id),
+    )?.key;
+  const listed = async (who: UserActor, k: string) =>
+    keysOf(await readInsights(who, new Date(), ZONE, deps)).listed.includes(k);
+
+  it('fails, is dismissed by Sam, survives disconnect and reconnect as the same episode, ends on success, and starts again', async () => {
+    id = (
+      await connectCalendar(h.sam, { address, name: 'Reconnect WK', visibility: 'household' }, deps)
+    ).calendarId;
+    await refresh(0);
+    expect(await failedKey(h.sam)).toBeUndefined();
+
+    // A first failure: one key, both adults see it.
+    await refresh(1);
+    const k1 = (await failedKey(h.sam))!;
+    expect(k1).toMatch(new RegExp(`^data_health\\.failed:${id}:s\\d+$`));
+    expect(await listed(h.sam, k1)).toBe(true);
+    expect(await listed(h.alex, k1)).toBe(true);
+
+    // Sam dismisses; another failure keeps the key, so it stays dismissed for Sam only.
+    await dismissInsight(h.sam, k1, new Date(), ZONE, deps);
+    await refresh(1);
+    expect(await failedKey(h.sam)).toBe(k1);
+    expect(await listed(h.sam, k1)).toBe(false);
+    expect(await listed(h.alex, k1)).toBe(true);
+
+    // Disconnected, the calendar is gone, and so is its insight, for both.
+    await disconnectCalendar(h.sam, id, deps);
+    expect(await failedKey(h.sam)).toBeUndefined();
+    expect(await failedKey(h.alex)).toBeUndefined();
+
+    // Reconnected: it has not succeeded since, so it is the same episode and the same key.
+    await reconnectCalendar(h.sam, id, { address }, deps);
+    expect(await failedKey(h.sam)).toBe(k1);
+    expect(await listed(h.sam, k1)).toBe(false); // Sam's dismissal holds
+    expect(await listed(h.alex, k1)).toBe(true);
+    // Alex dismisses on their own; a failure after reconnecting is still the same episode.
+    await dismissInsight(h.alex, k1, new Date(), ZONE, deps);
+    await refresh(1);
+    expect(await failedKey(h.alex)).toBe(k1);
+    expect(await listed(h.alex, k1)).toBe(false);
+    expect(await rowsFor(h.sam.userId, k1)).toHaveLength(1);
+    expect(await rowsFor(h.alex.userId, k1)).toHaveLength(1);
+
+    // A success ends the episode; the next failure is a new key that neither has dismissed.
+    await refresh(2);
+    expect(await failedKey(h.sam)).toBeUndefined();
+    await refresh(3);
+    const k2 = (await failedKey(h.sam))!;
+    expect(k2).not.toBe(k1);
+    expect(await listed(h.sam, k2)).toBe(true);
+    expect(await listed(h.alex, k2)).toBe(true);
   });
 });
