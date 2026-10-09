@@ -165,12 +165,12 @@ const colour = (p: Person | undefined) => (p?.colour ?? null) as PersonColour | 
 
 function PersonLineRow({ line, lookup }: { line: PersonLine; lookup: FactLookup }) {
   const person = lookup.people.get(line.personId);
-  const rest = line.entries.slice(line.shown.length);
+  const rest = line.rest;
   return (
     <li className="border-line flex gap-3 border-t py-1.5 md:mb-3 md:block md:rounded-home md:border md:px-4 md:py-2">
       <Link
         href={`/people/${line.personId}`}
-        className="hover:bg-paper-2 rounded-home-sm -mx-2 flex min-h-11 w-[5.75rem] shrink-0 items-center px-2 break-words md:w-auto"
+        className="hover:bg-paper-2 rounded-home-sm -mx-2 flex min-h-11 w-[5.75rem] shrink-0 items-center self-start px-2 break-words md:w-auto"
       >
         <PersonName name={line.name} colour={colour(person)} />
       </Link>

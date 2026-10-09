@@ -402,7 +402,7 @@ Desktop keeps the same layout. The Kev panel is M8.
 
 - **Order.** Date, headline, (Worth knowing: Package 4), Everyone's day, *Also today*, To do, To sort, "Which one is you?", Forward. Empty sections are absent.
 - **Headline facts.** A labelled "What this is based on ›" disclosure under the headline, not a tap on the headline itself, so it can be found and used by keyboard. It opens without JavaScript.
-- **Everyone's day.** The engine's lines and order; "+ N more" opens the rest in place. Routine entries are one word with nobody beside them; one-offs show the other people recorded. Tablet and desktop: cards on the right, with no time-of-day words (§4.3 deferred).
+- **Everyone's day.** The engine's lines and order, with what is still to come on the surface; "+ N more" opens the rest in place. Routine entries are one word with nobody beside them; one-offs show the other people recorded. Tablet and desktop: cards on the right, with no time-of-day words (§4.3 deferred).
 - **Evening.** All day today (when an all-day event is recorded), Tomorrow morning, Before then (or "Due tomorrow"), To do, To sort, and Earlier today folded. "Tonight" is the headline.
 - **Not built.** Folding or fading past items in the day view.
 
@@ -418,7 +418,7 @@ Desktop keeps the same layout. The Kev panel is M8.
   - Routine `work` reads "Work till {end}", or "Work" when the end is after 17:00.
   - All-day routine reads its title.
 - **Other items** read "{time} {title}", with the people recorded on the item (attending and responsible, as the agenda resolves them). There is no added label.
-- **Order and length:** time order, at most two lines, then "+ N".
+- **Order and length:** time order, at most two lines, then "+ N". The two are the earliest entries not yet finished, filled with the most recently finished when fewer remain (ADR 0008 §32).
 
 ### 5.2 *Also today* (`also_today`)
 

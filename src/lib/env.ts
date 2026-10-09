@@ -92,7 +92,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if (env.NODE_ENV === 'production') {
     const bad: string[] = [];
     if (env.HOME_TEST_TIME || env.HOME_TEST_CLOCK)
-      bad.push('HOME_TEST_TIME (the test time source is not allowed in production)');
+      bad.push(
+        'HOME_TEST_TIME / HOME_TEST_CLOCK (the test time source is not allowed in production)',
+      );
     if (env.HOME_MAIL_TRANSPORT === 'test')
       bad.push('HOME_MAIL_TRANSPORT (test transport is not allowed in production)');
     if (!env.BETTER_AUTH_URL.startsWith('https://'))
@@ -108,7 +110,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if ((env.HOME_TEST_TIME || env.HOME_TEST_CLOCK) && env.VERCEL_ENV)
     throw new EnvError(
       ['HOME_TEST_TIME'],
-      'HOME_TEST_TIME (the test time source is not allowed on a Vercel deployment)',
+      'HOME_TEST_TIME / HOME_TEST_CLOCK (the test time source is not allowed on a Vercel deployment)',
     );
   // Preview/production database isolation (contract §1.4). Preview and
   // production are separate Neon projects; this is the backstop against a

@@ -726,6 +726,22 @@ test('the keyboard reaches every control in reading order, with a visible focus,
   await context.close();
 });
 
+test('regression: at 17:00 Alex’s next appointment is on the card, and the finished morning has moved under “+ 1 more”', async ({
+  browser,
+}) => {
+  await ordinaryWeekday();
+  const { context, page } = await open(browser, '17:00');
+  const alex = section(page, 'today-day')
+    .locator(':scope > ul > li')
+    .filter({ has: page.getByRole('link', { name: 'Alex', exact: true }) });
+  await expect(alex.getByRole('link', { name: '18:15 Pilates' })).toBeVisible();
+  await expect(alex.getByRole('link', { name: /15:30 Swimming/ })).toBeVisible();
+  await expect(alex.getByRole('link', { name: 'Work till 14:30' })).toBeHidden();
+  await alex.locator('summary', { hasText: '+ 1 more' }).click();
+  await expect(alex.getByRole('link', { name: 'Work till 14:30' })).toBeVisible();
+  await context.close();
+});
+
 test('the longest headline wraps inside a 320px phone, and nothing scrolls sideways', async ({
   browser,
 }) => {
@@ -807,6 +823,23 @@ for (const [name, viewport] of Object.entries(VIEWPORTS))
         );
       });
       expect(clear, `${where}: the last control is clear of the capture bar`).toBe(true);
+      // Each person's name sits level with the first line of their day, not the middle of it:
+      // the name's text and the first entry's text share a centre line (side by side, phone).
+      const misaligned = await page.evaluate(() =>
+        [...document.querySelectorAll('section[aria-labelledby="today-day"] > ul > li')].flatMap(
+          (li) => {
+            const link = li.querySelector(':scope > a')!.getBoundingClientRect();
+            const name = li.querySelector(':scope > a > span')!.getBoundingClientRect();
+            const first = li.querySelector(':scope > div li span')!.getBoundingClientRect();
+            if (link.right > first.left) return []; // stacked (cards): the name is above
+            const mid = (r: DOMRect) => r.top + r.height / 2;
+            return Math.abs(mid(name) - mid(first)) > 4
+              ? [`${li.textContent?.slice(0, 12)}: ${mid(name)} vs ${mid(first)}`]
+              : [];
+          },
+        ),
+      );
+      expect(misaligned, `${where}: names level with their first line`).toEqual([]);
       // Two columns only where there are two things to put in them.
       const columns = await page.evaluate(() => {
         const s = document.querySelector('main [data-wide]');
