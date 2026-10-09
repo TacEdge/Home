@@ -960,6 +960,155 @@ test('a calendar whose last refresh failed is never called current', async ({ br
   await context.close();
 });
 
+// M5 acceptance (Package 5): the screens the owner reviews for five-second comprehension,
+// at phone, tablet and desktop, at the times of day that change what Today says. The
+// day scenes carry a project due Saturday and a birthday next week, so Worth knowing
+// shows as it would on an ordinary week. Screenshots only, plus a check that the headline
+// and Everyone's day start above the fold on a phone (contract §10 criterion 8).
+const ACCEPTANCE: [string, string, () => Promise<void>][] = [
+  [
+    'morning',
+    '07:03',
+    async () => {
+      await ordinaryWeekday();
+      await projectDue('Fence', '2027-02-13');
+      await birthday('Aunty Bea', '02-15');
+    },
+  ],
+  [
+    'midday',
+    '12:30',
+    async () => {
+      await ordinaryWeekday();
+      await projectDue('Fence', '2027-02-13');
+    },
+  ],
+  ['late-afternoon', '17:00', ordinaryWeekday],
+  [
+    'evening',
+    '21:40',
+    async () => {
+      await ordinaryWeekday();
+      await task('Sign Milo’s camp form', { due: NEXT });
+    },
+  ],
+  ['quiet', '07:03', seedFreshCalendar],
+  [
+    'full',
+    '07:03',
+    async () => {
+      await ordinaryWeekday();
+      for (const [t, clock, who] of [
+        ['Orthodontist', '10:00', 'Milo'],
+        ['Parent interview', '11:00', 'Sam'],
+        ['Haircut', '12:00', 'Isla'],
+      ] as const)
+        await event({
+          title: t,
+          start: at(DAY, clock),
+          end: at(DAY, clock.replace(':00', ':30')),
+          people: [who],
+        });
+      for (const t of ['Renew rego', 'Book flights', 'Return parcel', 'School photos form'])
+        await task(t, { due: PREV });
+    },
+  ],
+  [
+    'stale',
+    '07:03',
+    async () => {
+      await ordinaryWeekday();
+      await q(
+        `update calendar_source set last_attempt_at = $1::timestamptz, last_synced_at = $1::timestamptz where name = $2`,
+        [at('2027-02-08', '09:00'), `${P3}calendar`],
+      );
+    },
+  ],
+  [
+    'first-run',
+    '07:03',
+    async () => {
+      await birthday('Aunty Bea', '02-15');
+    },
+  ],
+];
+for (const [scene, clock, seed] of ACCEPTANCE)
+  test(`acceptance screens: ${scene}`, async ({ browser }) => {
+    await seed();
+    for (const name of ['phone', 'tablet-portrait', 'desktop'] as const) {
+      const { context, page } = await open(browser, clock, { viewport: VIEWPORTS[name] });
+      await expectNoHorizontalScroll(page, `${scene} ${name}`);
+      if (
+        name === 'phone' &&
+        ['morning', 'midday', 'late-afternoon', 'full', 'stale'].includes(scene)
+      ) {
+        // The headline and the start of Everyone's day are on the first screen of a phone.
+        const fold = VIEWPORTS.phone.height;
+        expect((await headline(page).boundingBox())!.y).toBeLessThan(fold);
+        const day = section(page, 'today-day');
+        expect(
+          (await day.boundingBox())!.y,
+          `${scene}: Everyone’s day starts on screen`,
+        ).toBeLessThan(fold);
+      }
+      await shot(page, `acceptance-${scene}-${name}`);
+      await context.close();
+    }
+  });
+
+test('the shared header at 320px: measured for the shell backlog, not an M5 defect', async ({
+  browser,
+}) => {
+  await seedFreshCalendar();
+  const { context, page } = await open(browser, '07:03', { viewport: { width: 320, height: 640 } });
+  const gap = await page.evaluate(() => {
+    const mark = document.querySelector('header a[href="/today"]')!.getBoundingClientRect();
+    const nav = document.querySelector('header nav')!.getBoundingClientRect();
+    return Math.round(nav.left - mark.right);
+  });
+  console.info(`320px header: ${gap}px between the wordmark and the Today/Forward switch`);
+  expect(gap).toBeGreaterThanOrEqual(0); // touching, not overlapping
+  await expectNoHorizontalScroll(page, '320px header');
+  await shot(page, 'acceptance-header-320');
+  await context.close();
+});
+
+test('render time, measured: an ordinary day, and a 300-event household week', async ({
+  browser,
+}) => {
+  const timeOf = async (page: Page) => {
+    const times: number[] = [];
+    for (let k = 0; k < 6; k++) {
+      const t = Date.now();
+      await page.goto('/today');
+      await expect(headline(page)).toBeVisible();
+      if (k > 0) times.push(Date.now() - t); // the first visit compiles the route in the dev server
+    }
+    times.sort((a, b) => a - b);
+    return times[Math.floor(times.length / 2)]!;
+  };
+  await ordinaryWeekday();
+  let { context, page } = await open(browser, '07:03');
+  const ordinary = await timeOf(page);
+  await context.close();
+  const rows = await q(
+    `insert into event (title, kind, all_day, starts_at, ends_at, time_zone, created_by, created_via, visibility, source)
+     select 'Load ' || g, 'other', false,
+            (($1::date + (g % 8)) + make_interval(hours => 7 + (g % 12))) at time zone 'Pacific/Auckland',
+            (($1::date + (g % 8)) + make_interval(hours => 8 + (g % 12))) at time zone 'Pacific/Auckland',
+            'Pacific/Auckland', 'fixture-sam', 'ui', 'household', 'manual'
+     from generate_series(1, 300) g returning id`,
+    [DAY],
+  );
+  made.events.push(...rows.map((r) => r.id!));
+  ({ context, page } = await open(browser, '07:03'));
+  const heavy = await timeOf(page);
+  console.info(
+    `Today render (dev server, median of 5 warm loads): ordinary day ${ordinary} ms; 300-event week ${heavy} ms`,
+  );
+  await context.close();
+});
+
 const SWEEP: [string, string, () => Promise<void>][] = [
   ['ordinary', '07:03', ordinaryWeekday],
   [

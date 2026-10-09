@@ -4,7 +4,7 @@ Status: **Approved**, 2026-10-08 (Package 0, PR #53, merged by the owner).
 
 - **Approved:** ADR 0008 §20, §23, §24, §25 and §26. §22 is approved as provisional.
 - **Revised as the owner directed:** §21. There is no transport inference, so Getting everyone there is not built in M5.
-- **Progress:** Packages 0–3 merged (PRs #53–#56). Package 4 (Worth knowing and Dismiss, ADR 0008 §33) is in review. Package 5 has not started.
+- **Progress:** Packages 0–4 merged (PRs #53–#57). Package 5 (acceptance, ADR 0008 §34) is in review: **technically accepted on synthetic data** (`docs/m5/M5-ACCEPTANCE.md`); operational acceptance waits on DEPLOY.md §E items 16–17.
 
 Implementers and reviewers: per package (§2).
 

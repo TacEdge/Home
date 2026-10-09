@@ -158,13 +158,15 @@ export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
   );
 
   // Worth knowing sits between the headline and Everyone's day (contract
-  // §4.1); on a tablet it stays in the left column, under the headline.
-  const worthKnowing =
-    state === 'first_run' ? null : (
-      <div className="md:col-start-1 md:row-start-2">
-        <WorthKnowing shown={worth.shown} rest={worth.rest} lookup={lookup} />
-      </div>
-    );
+  // §4.1); on a tablet it stays in the left column, under the headline. It
+  // shows on first run too (M5 Package 5): a household with birthdays or a
+  // project recorded before any calendar still has those insights. It is
+  // absent, as every empty section is, when there are none.
+  const worthKnowing = (
+    <div className="md:col-start-1 md:row-start-2">
+      <WorthKnowing shown={worth.shown} rest={worth.rest} lookup={lookup} />
+    </div>
+  );
 
   return (
     <div
@@ -298,13 +300,21 @@ function TodoRow({
 }
 
 /**
+ * Today's items that are about the whole day, not a time: all-day events and
+ * birthdays. In the evening they stay in view (M5 Package 5): a birthday is
+ * still today's when the timed things are over.
+ */
+const allDay = (i: AgendaItem) => (i.kind === 'event' && i.allDay) || i.kind === 'birthday';
+
+/**
  * Evening (contract §5.6): the engine says the timed events are over. What is
- * left is what is still recorded as all-day today, tomorrow morning, and what
- * is due tomorrow, with today's items folded away under "Earlier today".
+ * left is what is still recorded as all-day today (all-day events and
+ * birthdays), tomorrow morning, and what is due tomorrow, with today's other
+ * items folded away under "Earlier today".
  */
 function Evening({ model, lookup }: { model: TodayModel; lookup: FactLookup }) {
   const evening = model.evening!;
-  const allDayToday = evening.earlier.filter((i) => i.kind === 'event' && i.allDay);
+  const allDayToday = evening.earlier.filter(allDay);
   const morning = evening.tomorrowMorning;
   const before = evening.beforeThen;
   const row = (item: AgendaItem, i: number) => (
@@ -345,7 +355,7 @@ function Evening({ model, lookup }: { model: TodayModel; lookup: FactLookup }) {
 
 /** Today's items, folded away once the evening has come (contract §5.6). */
 function EarlierToday({ model, lookup }: { model: TodayModel; lookup: FactLookup }) {
-  const folded = (model.evening?.earlier ?? []).filter((i) => !(i.kind === 'event' && i.allDay));
+  const folded = (model.evening?.earlier ?? []).filter((i) => !allDay(i));
   if (folded.length === 0) return null;
   return (
     <section aria-label="Earlier today" className="mt-6">
