@@ -4,7 +4,7 @@ Status: **Approved**, 2026-10-08 (Package 0, PR #53, merged by the owner).
 
 - **Approved:** ADR 0008 §20, §23, §24, §25 and §26. §22 is approved as provisional.
 - **Revised as the owner directed:** §21. There is no transport inference, so Getting everyone there is not built in M5.
-- **Progress:** Packages 0, 1 and 2 merged (PRs #53, #54, #55). Package 3 (the Today screen, ADR 0008 §32) is in review. Packages 4–5 have not started.
+- **Progress:** Packages 0–3 merged (PRs #53–#56). Package 4 (Worth knowing and Dismiss, ADR 0008 §33) is in review. Package 5 has not started.
 
 Implementers and reviewers: per package (§2).
 
@@ -400,11 +400,17 @@ Desktop keeps the same layout. The Kev panel is M8.
 
 ### 4.5 As built in Package 3 (ADR 0008 §32)
 
-- **Order.** Date, headline, (Worth knowing: Package 4), Everyone's day, *Also today*, To do, To sort, "Which one is you?", Forward. Empty sections are absent.
+- **Order.** Date, headline, Worth knowing (Package 4), Everyone's day, *Also today*, To do, To sort, "Which one is you?", Forward. Empty sections are absent.
 - **Headline facts.** A labelled "What this is based on ›" disclosure under the headline, not a tap on the headline itself, so it can be found and used by keyboard. It opens without JavaScript.
 - **Everyone's day.** The engine's lines and order, with what is still to come on the surface; "+ N more" opens the rest in place. Routine entries are one word with nobody beside them; one-offs show the other people recorded. Tablet and desktop: cards on the right, with no time-of-day words (§4.3 deferred).
 - **Evening.** All day today (when an all-day event is recorded), Tomorrow morning, Before then (or "Due tomorrow"), To do, To sort, and Earlier today folded. "Tonight" is the headline.
 - **Not built.** Folding or fading past items in the day view.
+
+### 4.6 As built in Package 4 (ADR 0008 §33)
+
+- **Worth knowing.** Up to three, each with "Why ›" (its rule and records, no JavaScript) and Dismiss (a no-JS form); "+ N more" opens the rest in place.
+- **Dismiss.** The reader's own, for an insight the reader can see now; refused for any other key and while the gate is closed; dismissing again writes nothing.
+- **Headline qualifier.** "As far as HOME knows." on its own line under the sentence. A calendar Worth knowing speaks about is not repeated in the headline's facts.
 
 ---
 
@@ -463,7 +469,7 @@ They are shown in the agenda's own row style, so no item is lost.
 - **Carry-overs in counts** (review fix, ADR 0008 §31): a timed occurrence carried over from an earlier day counts towards the headline and `busy_day.count` only while it is still running at `now`. One that has already ended is no longer counted, but it stays on the day's agenda and on its person's line. Everything that begins on the day counts, whether it has happened yet or not.
 - **Ranking:** `data_health`, then `preparation`, then `busy_day`; then by date; then by key.
 - **Display:** Worth knowing shows the top 3 not dismissed and not `onObject`. "+ N more" counts only those.
-- **Keys:** `{kind}:{ids}:{date}`. Changed facts produce a new key.
+- **Keys:** `{kind}:{ids}:{date}`. Changed facts produce a new key. `data_health.failed` is keyed by its failure episode (the calendar's last successful refresh), so a dismissal holds until the calendar succeeds and fails again (ADR 0008 §33).
 - **Provisional thresholds:** §22's thresholds are code constants, evaluated during the M10 family trial and changed only by an ADR amendment.
 
 ### 5.5 To do (`todo`)

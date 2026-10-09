@@ -85,6 +85,11 @@ export type Traced<R extends string> = { rule: R; text: string; facts: Fact[] };
 export type Headline = Traced<HeadlineRule> & {
   /** "As far as HOME knows": a visible calendar is out of date or failing. */
   qualified: boolean;
+  /**
+   * The sentence without its qualifier, for a screen that sets the qualifier
+   * on its own line (ADR 0008 §33). `text` is the whole statement.
+   */
+  sentence: string;
   /** The second sentence, when `headline.late` holds today. */
   late: Traced<'headline.late'> | null;
 };
@@ -139,6 +144,9 @@ export type TodayModel = {
   /** The calendars that make Today's absences and counts "as far as HOME knows". */
   incomplete: Fact[];
 };
+
+const QUALIFIER = ', as far as HOME knows';
+const QUALIFIED = /, as far as HOME knows\.$/;
 
 /** Provisional thresholds (ADR 0008 §22): code constants, evaluated in the M10 trial. */
 export const LATE_AFTER = '18:00';
@@ -234,7 +242,7 @@ export function today(input: TodayInput): TodayModel {
 
   // The headline (§5.3): first match wins.
   const qualify = (sentence: string) =>
-    qualified ? `${sentence.slice(0, -1)}, as far as HOME knows.` : sentence;
+    qualified ? `${sentence.slice(0, -1)}${QUALIFIER}.` : sentence;
   const once = new Map<string, EventItem>();
   for (const i of events)
     if (stillCounts(i, now) && !once.has(occurrenceKey(i))) once.set(occurrenceKey(i), i);
@@ -346,6 +354,7 @@ export function today(input: TodayInput): TodayModel {
     headline: {
       ...headline,
       qualified: qualified && headline.rule !== 'headline.first_run',
+      sentence: headline.text.replace(QUALIFIED, '.'),
       late: late
         ? { rule: 'headline.late', text: lateSentence(late.names, 'today'), facts: late.facts }
         : null,

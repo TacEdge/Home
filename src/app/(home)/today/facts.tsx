@@ -19,12 +19,14 @@ export type FactLookup = {
   people: Map<string, Person>;
   calendars: Map<string, CalendarView>;
   tasks: Map<string, Task>;
+  /** Project id → its title and target date, as the reader can see them. */
+  projects: Map<string, { title: string; targetDate: IsoDate | null }>;
   timeZone: string;
 };
 
 const sameFact = (a: Fact, b: Fact) => JSON.stringify(a) === JSON.stringify(b);
 
-function eventRow(
+export function eventRow(
   f: Extract<Fact, { kind: 'event' }>,
   days: readonly AgendaDay[],
 ): AgendaItem | null {
@@ -35,11 +37,25 @@ function eventRow(
   return null;
 }
 
-/** "last updated Tuesday 13 October, 09:05", in the home zone. */
-function updated(c: CalendarView, timeZone: string): string {
-  if (c.lastSyncedAt === null) return 'not updated yet';
-  const day: IsoDate = isoDateInZone(c.lastSyncedAt, timeZone);
-  return `last updated ${longDate(day)}, ${clockOf(c.lastSyncedAt, timeZone)}`;
+/** "Tuesday 13 October, 09:05": an instant in words, in the home zone. */
+export function when(instant: Date, timeZone: string): string {
+  const day: IsoDate = isoDateInZone(instant, timeZone);
+  return `${longDate(day)}, ${clockOf(instant, timeZone)}`;
+}
+
+/** A calendar's last refresh failed: it is never called current (ADR 0008 §33). */
+export const refreshFailed = (c: CalendarView) =>
+  c.lastSyncStatus !== null && c.lastSyncStatus !== 'ok' && c.lastSyncStatus !== 'partial';
+
+/**
+ * "last updated Tuesday 13 October, 09:05", or, when the last refresh did not
+ * work, "the last refresh didn’t work; last updated …": a failed calendar is
+ * never read as current.
+ */
+export function updated(c: CalendarView, timeZone: string): string {
+  const last =
+    c.lastSyncedAt === null ? 'not updated yet' : `last updated ${when(c.lastSyncedAt, timeZone)}`;
+  return refreshFailed(c) ? `the last refresh didn’t work; ${last}` : last;
 }
 
 export function FactsInPlace({

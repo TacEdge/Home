@@ -25,8 +25,14 @@ const at = (date: string, clock: string) => `${date}T${clock}:00+13:00`;
 const P3 = 'p3 ';
 
 type Adult2 = Exclude<Adult, never>;
-type Made = { events: string[]; tasks: string[]; captures: string[] };
-let made: Made = { events: [], tasks: [], captures: [] };
+type Made = {
+  events: string[];
+  tasks: string[];
+  captures: string[];
+  people: string[];
+  projects: string[];
+};
+let made: Made = { events: [], tasks: [], captures: [], people: [], projects: [] };
 const held = {
   events: [] as string[],
   tasks: [] as string[],
@@ -166,10 +172,15 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(() => {
-  made = { events: [], tasks: [], captures: [] };
+  made = { events: [], tasks: [], captures: [], people: [], projects: [] };
 });
 
 test.afterEach(async () => {
+  // Each scenario's dismissals are its own: the scenario calendar keeps its id from one test to
+  // the next, so its insight keys would otherwise carry over. Only the scenario day's keys go.
+  await q(`delete from insight_response where insight_key like '%:2027-02-%'`);
+  await archive('person', made.people);
+  await archive('project', made.projects);
   await archive('event', made.events);
   await archive('task', made.tasks);
   await archive('capture', made.captures);
@@ -459,22 +470,34 @@ test('first run: HOME says it does not know the calendars yet, and where to conn
   await context.close();
 });
 
-test('a calendar not updated for more than a day: every statement says “as far as HOME knows”, and the facts name it', async ({
+test('a calendar not updated for more than a day: the qualifier stands on its own line; the calendar is said once, and back in the facts once dismissed', async ({
   browser,
 }) => {
   await ordinaryWeekday();
   await q(
     `update calendar_source set last_attempt_at = $1::timestamptz, last_synced_at = $1::timestamptz where name = $2`,
-    [at(PREV.replace('10', '08'), '09:00'), `${P3}calendar`],
+    [at('2027-02-08', '09:00'), `${P3}calendar`],
   );
   const { context, page } = await open(browser, '07:03');
-  await expect(headline(page)).toHaveText(
-    'Four things on today, besides the usual, as far as HOME knows.',
+  await expect(headline(page)).toHaveText('Four things on today, besides the usual.');
+  await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
+  await expect(insightRows(page).first().locator(':scope > p')).toHaveText(
+    'p3 calendar hasn’t updated since Monday.',
   );
-  const based = page.locator('details', { hasText: 'What this is based on' });
+  const based = page.locator('header details', { hasText: 'What this is based on' });
   await based.locator('summary').click();
-  await expect(based).toContainText('p3 calendar · last updated Monday 8 February, 09:00');
+  await expect(based).not.toContainText('p3 calendar');
   await shot(page, 'stale-phone');
+  // Dismissed from Worth knowing, the calendar is named under the headline again, so the
+  // qualifier is never left without its reason.
+  await page
+    .getByRole('button', { name: 'Dismiss: p3 calendar hasn’t updated since Monday.' })
+    .click();
+  await expect(worth(page)).toHaveCount(0);
+  await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
+  const again = page.locator('header details', { hasText: 'What this is based on' });
+  await again.locator('summary').click();
+  await expect(again).toContainText('p3 calendar · last updated Monday 8 February, 09:00');
   await context.close();
 });
 
@@ -757,14 +780,183 @@ test('the longest headline wraps inside a 320px phone, and nothing scrolls sidew
     people: ['Sam'],
   });
   const { context, page } = await open(browser, '07:03', { viewport: { width: 320, height: 640 } });
-  await expect(headline(page)).toHaveText(
-    'Five things on today, besides the usual, as far as HOME knows.',
-  );
+  await expect(headline(page)).toHaveText('Five things on today, besides the usual.');
+  await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
   const box = await headline(page).boundingBox();
   expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   await expectNoHorizontalScroll(page, '320px /today');
   await expectAccessible(page, '320px /today');
   await shot(page, 'narrow-320');
+  await context.close();
+});
+
+/** Someone outside the household with a birthday on `md` (MM-DD). */
+async function birthday(name: string, md: string) {
+  const [row] = await q(
+    `insert into person (name, role, in_household, date_of_birth, created_by, created_via, visibility)
+     values ($1, 'other', false, $2, 'fixture-sam', 'ui', 'household') returning id`,
+    [name, `1960-${md}`],
+  );
+  made.people.push(row!.id!);
+  return row!.id!;
+}
+
+/** An active project with a target date and one open task. */
+async function projectDue(
+  title: string,
+  target: string,
+  o: { by?: 'fixture-sam' | 'fixture-alex'; visibility?: string } = {},
+) {
+  const [row] = await q(
+    `insert into project (title, status, target_date, domain, created_by, created_via, visibility)
+     values ($1, 'active', $2, 'home', $3, 'ui', $4) returning id`,
+    [title, target, o.by ?? 'fixture-sam', o.visibility ?? 'household'],
+  );
+  made.projects.push(row!.id!);
+  const [t] = await q(
+    `insert into task (title, status, project_id, needs, created_by, created_via, visibility)
+     values ($1, 'open', $2, '[]', $3, 'ui', $4) returning id`,
+    [`${title} task`, row!.id, o.by ?? 'fixture-sam', o.visibility ?? 'household'],
+  );
+  made.tasks.push(t!.id!);
+}
+
+/**
+ * Four things worth knowing for Sam on the ordinary Thursday: a calendar not
+ * updated since Monday, a project due Saturday, and two birthdays next week;
+ * and one only Alex can see (Alex's private project).
+ */
+async function worthKnowingDay() {
+  await ordinaryWeekday();
+  await q(
+    `update calendar_source set last_attempt_at = $1::timestamptz, last_synced_at = $1::timestamptz where name = $2`,
+    [at('2027-02-08', '09:00'), `${P3}calendar`],
+  );
+  await projectDue('Fence', '2027-02-13');
+  await birthday('Aunty Bea', '02-15');
+  await birthday('Uncle Tam', '02-16');
+  await projectDue(`${CANARY_MARK.alex}shed`, '2027-02-14', {
+    by: 'fixture-alex',
+    visibility: 'private',
+  });
+}
+
+const worth = (page: Page) => section(page, 'today-worth');
+const insightRows = (page: Page) => worth(page).locator(':scope > ul > li');
+
+test('worth knowing: three, in order, with “+ 1 more”; the calendar said once; the qualifier on its own line', async ({
+  browser,
+}) => {
+  await worthKnowingDay();
+  const { context, page } = await open(browser, '07:03');
+  await expect(headline(page)).toHaveText('Four things on today, besides the usual.');
+  await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
+  await expect(insightRows(page).locator(':scope > p')).toHaveText([
+    'p3 calendar hasn’t updated since Monday.',
+    'Fence’s target date is Saturday; one task is open.',
+    'Aunty Bea’s birthday is Monday.',
+  ]);
+  await expect(worth(page).locator('summary', { hasText: '+ 1 more' })).toBeVisible();
+  // The headline's facts no longer list the calendar: Worth knowing says it.
+  const based = page.locator('header details', { hasText: 'What this is based on' });
+  await based.locator('summary').click();
+  await expect(based).not.toContainText('p3 calendar');
+  // Nothing of Alex's private project, by name or by count.
+  const main = (await page.textContent('main')) ?? '';
+  expect(main).not.toContain(CANARY_MARK.alex);
+  expect(main).not.toMatch(/\b(urgent|needs?|should|busy)\b/i);
+  await shot(page, 'worth-phone');
+  await context.close();
+});
+
+test('why, without JavaScript: each insight opens to its rule and its records', async ({
+  browser,
+}) => {
+  await worthKnowingDay();
+  const { context, page } = await open(browser, '07:03', { js: false });
+  const rows = insightRows(page);
+  await rows.nth(0).locator('summary', { hasText: 'Why' }).click();
+  await expect(rows.nth(0)).toContainText(
+    'HOME mentions a calendar when it hasn’t updated for more than a day.',
+  );
+  await expect(rows.nth(0).getByRole('link', { name: /p3 calendar/ })).toContainText(
+    'Last updated Monday 8 February, 09:00',
+  );
+  await rows.nth(1).locator('summary', { hasText: 'Why' }).click();
+  await expect(rows.nth(1)).toContainText('Fence has a target date of Saturday 13 February');
+  await expect(rows.nth(1).getByRole('link', { name: /Fence task/ })).toBeVisible();
+  await rows.nth(2).locator('summary', { hasText: 'Why' }).click();
+  await expect(rows.nth(2)).toContainText('Aunty Bea’s birthday is recorded as 15 February.');
+  await context.close();
+});
+
+test('dismiss, without JavaScript: gone for Sam after reload, the next one moves up, still there for Alex', async ({
+  browser,
+}) => {
+  await worthKnowingDay();
+  const sam = await open(browser, '07:03', { js: false });
+  await sam.page.getByRole('button', { name: 'Dismiss: Aunty Bea’s birthday is Monday.' }).click();
+  await expect(sam.page).toHaveURL(/\/today$/);
+  await expect(insightRows(sam.page).locator(':scope > p')).toHaveText([
+    'p3 calendar hasn’t updated since Monday.',
+    'Fence’s target date is Saturday; one task is open.',
+    'Uncle Tam’s birthday is Tuesday.',
+  ]);
+  await expect(worth(sam.page).locator('summary', { hasText: 'more' })).toHaveCount(0);
+  await sam.page.reload();
+  await expect(sam.page.getByText('Aunty Bea’s birthday is Monday.')).toHaveCount(0);
+  await sam.context.close();
+
+  const alex = await open(browser, '07:03', { adult: 'alex' });
+  await expect(worth(alex.page)).toContainText('Aunty Bea’s birthday is Monday.');
+  // Alex's own private project is Alex's insight.
+  await expect(worth(alex.page)).toContainText(`${CANARY_MARK.alex}shed`);
+  await alex.context.close();
+});
+
+test('dismiss with JavaScript, and a crafted key is refused calmly with nothing written', async ({
+  browser,
+}) => {
+  await worthKnowingDay();
+  const { context, page } = await open(browser, '07:03');
+  await page.getByRole('button', { name: 'Dismiss: Aunty Bea’s birthday is Monday.' }).click();
+  await expect(page.getByText('Aunty Bea’s birthday is Monday.')).toHaveCount(0);
+  await expect(insightRows(page).nth(2).locator(':scope > p')).toHaveText(
+    'Uncle Tam’s birthday is Tuesday.',
+  );
+  // A form whose key was changed in the page to one Sam cannot see (Alex's private project).
+  const [alexProject] = await q(`select id from project where title = $1 and archived_at is null`, [
+    `${CANARY_MARK.alex}shed`,
+  ]);
+  const crafted = `preparation.project_target:${alexProject!.id}:2027-02-14`;
+  const form = insightRows(page).nth(0).locator('form');
+  await form
+    .locator('input[name="key"]')
+    .evaluate((el, v) => ((el as HTMLInputElement).value = v), crafted);
+  await form.getByRole('button').click();
+  await expect(form.getByRole('alert')).toHaveText('That can’t be done with this one.');
+  await expect(form.getByRole('alert')).toBeFocused();
+  const rows = await q(`select count(*)::int as n from insight_response where insight_key = $1`, [
+    crafted,
+  ]);
+  expect(Number(rows[0]!.n)).toBe(0);
+  await context.close();
+});
+
+test('a calendar whose last refresh failed is never called current', async ({ browser }) => {
+  await ordinaryWeekday();
+  await q(`update calendar_source set last_sync_status = 'unreachable' where name = $1`, [
+    `${P3}calendar`,
+  ]);
+  const { context, page } = await open(browser, '07:03');
+  await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
+  const row = insightRows(page).first();
+  await expect(row.locator(':scope > p')).toHaveText(
+    'p3 calendar didn’t update the last time it was checked.',
+  );
+  await row.locator('summary', { hasText: 'Why' }).click();
+  await expect(row).toContainText('The last time HOME checked this calendar, it couldn’t read it.');
+  await expect(row.getByRole('link', { name: /p3 calendar/ })).toContainText('Last checked');
   await context.close();
 });
 
@@ -786,6 +978,7 @@ const SWEEP: [string, string, () => Promise<void>][] = [
     },
   ],
   ['first-run', '07:03', async () => {}],
+  ['worth', '07:03', worthKnowingDay],
 ];
 for (const [name, viewport] of Object.entries(VIEWPORTS))
   for (const [scenario, clock, seed] of SWEEP)
@@ -845,6 +1038,8 @@ for (const [name, viewport] of Object.entries(VIEWPORTS))
         const s = document.querySelector('main [data-wide]');
         return s ? getComputedStyle(s).gridTemplateColumns.split(' ').length : 1;
       });
-      expect(columns).toBe(scenario === 'ordinary' && viewport.width >= 768 ? 2 : 1);
+      expect(columns).toBe(
+        (scenario === 'ordinary' || scenario === 'worth') && viewport.width >= 768 ? 2 : 1,
+      );
       await context.close();
     });

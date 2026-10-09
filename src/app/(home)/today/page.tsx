@@ -3,6 +3,8 @@ import { requestNow } from '@/app/_agenda/now';
 import { todayInput } from '@/app/_agenda/today-input';
 import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
 import { listCaptures } from '@/domain/captures/service';
+import { LOOKAHEAD_DAYS } from '@/domain/engines/insights';
+import { insightsFor, insightsInput } from '@/domain/insights/today';
 import { today } from '@/domain/engines/today';
 import { env, realDataGateOpen } from '@/lib/env';
 import { isoDateInZone } from '@/lib/dates';
@@ -24,18 +26,33 @@ export default async function TodayPage() {
   const now = await requestNow();
   const timeZone = env.HOME_TIMEZONE;
   const date = isoDateInZone(now, timeZone);
-  const [agenda, captures] = await Promise.all([loadAgenda(actor, date, 2), listCaptures(actor)]);
+  const [agenda, captures] = await Promise.all([
+    loadAgenda(actor, date, LOOKAHEAD_DAYS + 1),
+    listCaptures(actor),
+  ]);
   const waiting = captures.filter((c) => c.status === 'new' || c.status === 'proposed').length;
   const model = today(todayInput(agenda, now, timeZone, waiting));
+  // Worth knowing: the same records, the reader's own dismissals applied (one more query).
+  const worth = await insightsFor(
+    actor,
+    insightsInput(
+      { events: agenda.events, people: [...agenda.people.values()], records: agenda.records },
+      agenda.days,
+      now,
+      timeZone,
+    ),
+  );
 
   const lookup: FactLookup = {
     days: agenda.days,
     people: agenda.people,
     calendars: new Map(agenda.records.calendars.map((c) => [c.id, c])),
     tasks: new Map(agenda.records.tasks.map((t) => [t.id, t])),
+    projects: new Map(
+      agenda.records.projects.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }]),
+    ),
     timeZone,
   };
-  const projects = new Map(agenda.records.projects.map((p) => [p.id, p.title]));
   const people = [...agenda.people.values()];
   const linked = !realDataGateOpen() || people.some((p) => p.userId === actor.userId);
   const stale = agenda.records.calendars.some((c) => c.stale && c.archivedAt === null);
@@ -43,7 +60,7 @@ export default async function TodayPage() {
   return (
     <>
       {stale ? <RefreshOnUse /> : null}
-      <TodayView model={model} lookup={lookup} linked={linked} projects={projects} />
+      <TodayView model={model} lookup={lookup} linked={linked} worth={worth} />
     </>
   );
 }

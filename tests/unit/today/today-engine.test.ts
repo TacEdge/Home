@@ -23,6 +23,22 @@ const lines = (m: TodayModel) =>
     (l) => `${l.name}: ${l.shown.map((e) => e.text).join(' · ')}${l.more ? ` +${l.more}` : ''}`,
   );
 
+describe('headline sentence and qualifier (Package 4, ADR 0008 §33)', () => {
+  it('the sentence is the statement without its qualifier; the text keeps both', () => {
+    const now = at('2026-10-14T07:03:00+13:00');
+    const stale = [fresh(now, { lastSyncedAt: at('2026-10-12T09:00:00+13:00') })];
+    const q = run({ events: WED, calendars: stale }, now).today.headline;
+    expect(q.qualified).toBe(true);
+    expect(q.text).toBe('Four things on today, besides the usual, as far as HOME knows.');
+    expect(q.sentence).toBe('Four things on today, besides the usual.');
+    const plain = run({ events: WED }, now).today.headline;
+    expect(plain.sentence).toBe(plain.text);
+    const nothing = run({ events: [], calendars: stale }, at('2026-10-17T07:03:00+13:00')).today
+      .headline;
+    expect(nothing.sentence).toBe('Nothing on today.');
+  });
+});
+
 describe('headline', () => {
   it('counts what is on beyond the routine, and says who has something on after 6', () => {
     const { today } = run({ events: WED }, at('2026-10-14T07:03:00+13:00'));
