@@ -1,3 +1,4 @@
+// CI scenario (risk-based CI, ADR 0010): a screen-only change. Not for merging.
 import { capitalise, numberWord } from '@/domain/engines/day-facts';
 import { addDays, longDate, type IsoDate, weekdayOf } from '@/lib/dates';
 
