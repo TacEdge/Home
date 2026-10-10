@@ -7,14 +7,24 @@ import { Label } from '@/ui/page';
 // "Usually", then each weekday that has something, with what happens then.
 // A small household timetable in the agenda's own rows: no grid, no planner,
 // no source labels. Nothing is shown when there is nothing regular. The
-// entries come from the profile engine; this only lays them out.
+// entries come from the profile engine; this only lays them out. Forward's
+// "The usual" (M6 Package 4) lays out each person's the same way.
 
 export function RegularWeek({ entries }: { entries: readonly RegularWeekEntry[] }) {
   if (entries.length === 0) return null;
-  const days = [...new Set(entries.map((e) => e.weekday))];
   return (
     <section aria-labelledby="usually">
       <Label id="usually">Usually</Label>
+      <RegularWeekDays entries={entries} />
+    </section>
+  );
+}
+
+/** The weekday lists alone, without a label: what a regular week is made of. */
+export function RegularWeekDays({ entries }: { entries: readonly RegularWeekEntry[] }) {
+  const days = [...new Set(entries.map((e) => e.weekday))];
+  return (
+    <>
       {days.map((day) => (
         <div key={day}>
           <h3 className="text-ink-2 mt-4 mb-1 text-[15px] font-medium">{WEEKDAY_LABEL[day]}</h3>
@@ -35,6 +45,6 @@ export function RegularWeek({ entries }: { entries: readonly RegularWeekEntry[] 
           </List>
         </div>
       ))}
-    </section>
+    </>
   );
 }

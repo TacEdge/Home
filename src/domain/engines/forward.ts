@@ -16,7 +16,7 @@ import {
   type Fact,
 } from './day-facts';
 import { regularWeek, type RegularWeekEntry } from './profile';
-import { unhealthyCalendars, type TodayCalendar } from './today';
+import { placement, unhealthyCalendars, type TodayCalendar } from './today';
 import {
   addDays,
   compareIsoDates,
@@ -570,4 +570,19 @@ export function forward(input: ForwardInput): ForwardModel {
     },
     incomplete,
   };
+}
+
+/**
+ * Where Forward's rows can hold a conflict mark (contract §4.5): every event
+ * entry on the surface, shown or folded, by `placement(null, key)`, since a
+ * Forward row is shared and not a person's line. A lookup for the marks, not
+ * a rule.
+ */
+export function forwardPlacements(model: Pick<ForwardModel, 'units'>): Set<string> {
+  return new Set(
+    model.units
+      .flatMap((u) => [...u.shown, ...u.rest])
+      .filter((e) => e.item.kind === 'event')
+      .map((e) => placement(null, e.key)),
+  );
 }

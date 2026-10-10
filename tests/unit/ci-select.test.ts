@@ -46,6 +46,8 @@ describe('tiers by kind of change', () => {
       [
         'capture-sort',
         'events',
+        'forward',
+        'home-tasks',
         'occurrence-changes',
         'people',
         'regular-week',

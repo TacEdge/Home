@@ -45,7 +45,7 @@ export function insightsInput(
   now: Date,
   timeZone: string,
   dismissed: ReadonlySet<string> = new Set(),
-  extra: Pick<InsightsInput, 'conflicts' | 'placed'> = {},
+  extra: Partial<Pick<InsightsInput, 'conflicts' | 'placed' | 'through' | 'listed' | 'shown'>> = {},
 ): InsightsInput {
   return {
     now,

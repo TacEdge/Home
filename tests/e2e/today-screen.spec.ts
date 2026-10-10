@@ -322,7 +322,7 @@ test('an ordinary weekday: the headline, then everyone’s day, to do and to sor
     'href',
     '/sort',
   );
-  await expect(page.getByRole('link', { name: 'The next 30 days ›' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'What’s coming up ›' })).toHaveAttribute(
     'href',
     '/forward',
   );
@@ -339,7 +339,7 @@ test('an ordinary weekday: the headline, then everyone’s day, to do and to sor
     'Everyone’s day',
     'To do',
     'Two things to sort ›',
-    'The next 30 days ›',
+    'What’s coming up ›',
   ]);
   await shot(page, 'ordinary-phone');
   await context.close();
@@ -444,7 +444,7 @@ test('a quiet day says so, and shows only what is there: no sections, no contain
   await expect(headline(page)).toHaveText('Nothing on today.');
   await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'One thing to sort ›' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'The next 30 days ›' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'What’s coming up ›' })).toBeVisible();
   // The record that nothing was found is there to be read, not asserted.
   const based = page.locator('details', { hasText: 'What this is based on' });
   await based.locator('summary').click();

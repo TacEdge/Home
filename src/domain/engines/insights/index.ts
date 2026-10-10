@@ -112,6 +112,16 @@ export type InsightsInput = {
    * seven days unless a surface asks for its own window. Today's is the default.
    */
   through?: IsoDate;
+  /**
+   * The families this surface lists (contract §5.8): Today lists all four,
+   * Forward's Week only `data_health`, its Month and Season also `conflict`.
+   * An insight of a family not listed is said on its item or indicator, so
+   * it is `onObject`: never listed or counted, but still in `all`, with its
+   * key, for the responses query and the marks.
+   */
+  listed?: ReadonlySet<InsightKind>;
+  /** How many are shown before "+ N more": Today's three (`SHOWN`) unless a surface says (Forward's two). */
+  shown?: number;
 };
 
 export type Insights = {
@@ -119,7 +129,7 @@ export type Insights = {
   all: Insight[];
   /** The top eligible ones (not on an object, not dismissed). */
   shown: Insight[];
-  /** The eligible ones after the first three, in order: what "+ N more" holds. */
+  /** The eligible ones after the first few (three on Today), in order: what "+ N more" holds. */
   rest: Insight[];
   /** How many more eligible ones there are: genuine insights only. */
   more: number;
@@ -131,6 +141,13 @@ export const BUSY_DAY_COUNT = 6;
 export const LOOKAHEAD_DAYS = 7;
 /** Worth knowing shows at most this many (M5 contract §4.1). */
 export const SHOWN = 3;
+
+const ALL_KINDS: ReadonlySet<InsightKind> = new Set([
+  'data_health',
+  'conflict',
+  'preparation',
+  'busy_day',
+]);
 
 const KIND_ORDER: Record<InsightKind, number> = {
   data_health: 0,
@@ -185,8 +202,9 @@ export function insights(input: InsightsInput): Insights {
   const household = new Set(people.filter((p) => p.inHousehold).map((p) => p.id));
   const routine = routineEvents(input.events, household);
   const found = new Map<string, Insight>();
+  const listed = input.listed ?? ALL_KINDS;
   const add = (i: Insight) => {
-    if (!found.has(i.key)) found.set(i.key, i);
+    if (!found.has(i.key)) found.set(i.key, { ...i, onObject: i.onObject || !listed.has(i.kind) });
   };
 
   // data_health: a visible calendar's recorded freshness.
@@ -309,7 +327,7 @@ export function insights(input: InsightsInput): Insights {
         from: c.overlap.from.toISOString(),
         to: c.overlap.to.toISOString(),
       },
-      onObject: c.when <= today && isPlaced(c, placed),
+      onObject: !listed.has('conflict') || (c.when <= today && isPlaced(c, placed)),
       conflict: c,
     });
   }
@@ -317,24 +335,28 @@ export function insights(input: InsightsInput): Insights {
   const all = [...found.values()].sort(compareInsights);
   const dismissed = input.dismissed ?? new Set<string>();
   const eligible = all.filter((i) => !i.onObject && !dismissed.has(i.key));
+  const shown = input.shown ?? SHOWN;
   return {
     all,
-    shown: eligible.slice(0, SHOWN),
-    rest: eligible.slice(SHOWN),
-    more: Math.max(0, eligible.length - SHOWN),
+    shown: eligible.slice(0, shown),
+    rest: eligible.slice(shown),
+    more: Math.max(0, eligible.length - shown),
   };
 }
 
-/** One conflict said on one of Today's items: "overlaps Art club 15:00". */
+/** One conflict said on one item: "overlaps Art club 15:00". */
 export type ConflictMark = { insight: Insight; text: string };
 
 /**
- * Today's conflict marks (contract §4.5): for each place an occurrence is
- * shown, the reader's current conflicts of today about it, with no
- * response, in insight order. A conflict is marked on each of its two
+ * Conflict marks (contract §4.5, §4.6): for each place an occurrence is
+ * shown, the reader's current conflicts about it that are said on their
+ * items, with no response, in insight order. A conflict is marked on each of its two
  * occurrences that has a place, on its person's line when that person has
- * one there, else on Also today. Each mark names the other commitment and
- * its recorded start, as recorded; it says nothing about why or what to do.
+ * one there, else on a shared row (Also today, or a Forward row). Each mark
+ * names the other commitment and its recorded start, as recorded; on a
+ * shared row it also names the person ("overlaps Art club 15:00 · Sam"),
+ * since the row does not say whose line it is. It says nothing about why or
+ * what to do.
  */
 export function conflictMarks(
   found: Pick<Insights, 'all'>,
@@ -353,10 +375,8 @@ export function conflictMarks(
       const own = placement(c.person.id, mine.occurrence);
       const where = placed.has(own) ? own : placement(null, mine.occurrence);
       if (!placed.has(where)) continue;
-      const mark = {
-        insight,
-        text: `overlaps ${other.title} ${clockOf(other.startsAt, timeZone)}`,
-      };
+      const said = `overlaps ${other.title} ${clockOf(other.startsAt, timeZone)}`;
+      const mark = { insight, text: where === own ? said : `${said} · ${c.person.name}` };
       const list = out.get(where);
       if (list) list.push(mark);
       else out.set(where, [mark]);

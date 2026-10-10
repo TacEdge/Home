@@ -4,7 +4,7 @@ import { InsightExplanation } from './explanation';
 import type { FactLookup } from './facts';
 import { DismissButton, NotUsefulButton } from './responses';
 
-// Today's conflicts, said on their items (contract §4.5, ADR 0009 §18): a
+// Conflicts, said on their items (Today, Forward's Week, a person's Coming up) (contract §4.5, ADR 0009 §18): a
 // small Sun mark and the other commitment, as recorded ("overlaps Art club
 // 15:00"), with Why holding the facts, Dismiss and Not useful, all without
 // JavaScript. No colour but the one Sun mark, no alarm, nothing about why or
@@ -16,10 +16,15 @@ export const MARKS_SHOWN = 2;
 export function ConflictMarks({
   marks,
   lookup,
+  surface = 'today',
+  returnTo = '/today',
 }: {
   marks: readonly ConflictMark[] | undefined;
   lookup: FactLookup;
+  surface?: 'today' | 'forward' | 'person';
+  returnTo?: string;
 }) {
+  const where = { surface, returnTo };
   if (!marks || marks.length === 0) return null;
   const shown = marks.slice(0, MARKS_SHOWN);
   const rest = marks.slice(MARKS_SHOWN);
@@ -27,14 +32,14 @@ export function ConflictMarks({
     <div className="pb-2 pl-1">
       <ul>
         {shown.map((m) => (
-          <Mark key={m.insight.key} mark={m} lookup={lookup} />
+          <Mark key={m.insight.key} mark={m} lookup={lookup} {...where} />
         ))}
       </ul>
       {rest.length > 0 ? (
         <Disclosure label={`+ ${rest.length} more ${rest.length === 1 ? 'overlap' : 'overlaps'}`}>
           <ul>
             {rest.map((m) => (
-              <Mark key={m.insight.key} mark={m} lookup={lookup} />
+              <Mark key={m.insight.key} mark={m} lookup={lookup} {...where} />
             ))}
           </ul>
         </Disclosure>
@@ -43,7 +48,17 @@ export function ConflictMarks({
   );
 }
 
-function Mark({ mark, lookup }: { mark: ConflictMark; lookup: FactLookup }) {
+function Mark({
+  mark,
+  lookup,
+  surface,
+  returnTo,
+}: {
+  mark: ConflictMark;
+  lookup: FactLookup;
+  surface: 'today' | 'forward' | 'person';
+  returnTo: string;
+}) {
   return (
     <li data-conflict={mark.insight.rule} className="text-[15px]">
       <p className="flex items-baseline gap-2">
@@ -54,8 +69,8 @@ function Mark({ mark, lookup }: { mark: ConflictMark; lookup: FactLookup }) {
         <Disclosure label="Why" className="open:basis-full">
           <InsightExplanation insight={mark.insight} lookup={lookup} />
           <div className="flex flex-wrap gap-x-6">
-            <DismissButton insight={mark.insight} />
-            <NotUsefulButton insight={mark.insight} />
+            <DismissButton insight={mark.insight} surface={surface} returnTo={returnTo} />
+            <NotUsefulButton insight={mark.insight} surface={surface} returnTo={returnTo} />
           </div>
         </Disclosure>
       </div>
