@@ -6,6 +6,10 @@ import { expect, type Page } from '@playwright/test';
 // and no horizontal page scroll.
 
 export async function expectAccessible(page: Page, where: string): Promise<void> {
+  // Next streams a page's <title> after its content; after a client-side
+  // navigation (a form's redirect) axe can otherwise run in the moment before
+  // it lands and report `document-title`. Wait for the title, then check.
+  await expect(page, where).toHaveTitle(/\S/);
   const result = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
     .analyze();
