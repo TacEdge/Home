@@ -137,6 +137,24 @@ describe('Today: today’s conflicts on their items (contract §4.5)', () => {
     ]);
   });
 
+  it('the Also today mark names the person; a mark on the person’s own line does not', () => {
+    // Nana Jo has no line on Today: her marks are on shared Also today rows, so they say whose.
+    const shared = run({ events: pair('2026-10-14', ID.nana) }, WED_0703);
+    const sharedMarks = conflictMarks(shared.insights, new Set(), shared.placed, NZ);
+    expect(sharedMarks.get(placement(null, 'e-art:2026-10-14'))!.map((m) => m.text)).toEqual([
+      'overlaps Dentist 15:30 · Nana Jo',
+    ]);
+    expect(sharedMarks.get(placement(null, 'e-dentist:2026-10-14'))!.map((m) => m.text)).toEqual([
+      'overlaps Art club 15:00 · Nana Jo',
+    ]);
+    // Milo has a line: the line says whose it is, so the mark does not repeat him.
+    const own = today();
+    const ownMarks = conflictMarks(own.insights, new Set(), own.placed, NZ);
+    const texts = [...ownMarks.values()].flat().map((m) => m.text);
+    expect(texts.sort()).toEqual(['overlaps Art club 15:00', 'overlaps Dentist 15:30']);
+    for (const t of texts) expect(t).not.toContain('·');
+  });
+
   it('a conflict of today with no place on the screen is listed, not lost', () => {
     const events = pair('2026-10-14', ID.milo);
     const days = agenda({ from: '2026-10-14', to: '2026-10-21', timeZone: NZ, events });
