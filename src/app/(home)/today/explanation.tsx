@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { AgendaItemRow } from '@/app/_agenda/agenda-list';
 import type { AgendaItem } from '@/domain/engines/agenda';
 import type { Fact } from '@/domain/engines/day-facts';
+import type { Conflict, ConflictOccurrence } from '@/domain/engines/conflicts';
 import type { Insight } from '@/domain/engines/insights';
-import { longDate } from '@/lib/dates';
+import { clockOf, isoDateInZone, longDate } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { eventRow, refreshFailed, updated, when, type FactLookup } from './facts';
 
@@ -17,6 +18,7 @@ const of = <K extends Fact['kind']>(facts: readonly Fact[], kind: K) =>
   facts.filter((f): f is Extract<Fact, { kind: K }> => f.kind === kind);
 
 export function InsightExplanation({ insight, lookup }: { insight: Insight; lookup: FactLookup }) {
+  if (insight.conflict) return <ConflictExplanation conflict={insight.conflict} lookup={lookup} />;
   const { facts, basis } = insight;
   const events = of(facts, 'event')
     .map((f) => eventRow(f, lookup.days))
@@ -56,6 +58,8 @@ export function InsightExplanation({ insight, lookup }: { insight: Insight; look
       rule =
         'The last time HOME checked this calendar, it couldn’t read it. What HOME shows from it may be out of date.';
       break;
+    default:
+      rule = '';
   }
 
   return (
@@ -102,6 +106,54 @@ export function InsightExplanation({ insight, lookup }: { insight: Insight; look
           ))}
         </List>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Why a conflict is said (ADR 0009 §14): the rule in one plain sentence, the
+ * two commitments as recorded, each with its own times (so two with the same
+ * title are told apart) and the person's recorded role, and the overlap. For
+ * a standing conflict, that both repeat and when the next one is. Never a
+ * place, travel, a reason, availability or what anyone should do. Every word
+ * is the reader's own records, from the conflict engine's facts.
+ */
+function ConflictExplanation({ conflict, lookup }: { conflict: Conflict; lookup: FactLookup }) {
+  const zone = lookup.timeZone;
+  const name = conflict.person.name;
+  const from = clockOf(conflict.overlap.from, zone);
+  const to = clockOf(conflict.overlap.to, zone);
+  const lead =
+    conflict.rule === 'conflict.responsible'
+      ? `${name} is recorded as responsible for both of these, and their times overlap from ${from} to ${to}.`
+      : `${name} is recorded on both of these, and their times overlap from ${from} to ${to}.`;
+  const span = (o: ConflictOccurrence) => {
+    const start = isoDateInZone(o.startsAt, zone);
+    const end = isoDateInZone(o.endsAt, zone);
+    return end === start
+      ? `${longDate(start)}, ${clockOf(o.startsAt, zone)}–${clockOf(o.endsAt, zone)}`
+      : `${longDate(start)}, ${clockOf(o.startsAt, zone)} to ${longDate(end)}, ${clockOf(o.endsAt, zone)}`;
+  };
+  return (
+    <div className="mt-1 mb-2 text-[15px]">
+      <p className="text-ink-2">{lead}</p>
+      {conflict.identity === 'standing' ? (
+        <p className="text-ink-2 mt-1">
+          Both repeat, and they overlap at this time each time. The next is{' '}
+          {longDate(conflict.when)}.
+        </p>
+      ) : null}
+      <List label="The two commitments">
+        {conflict.occurrences.map((o) => (
+          <ItemRow
+            key={o.occurrence}
+            href={`/events/${o.eventId}`}
+            time={clockOf(o.startsAt, zone)}
+            title={o.title}
+            detail={`${span(o)} · ${name} ${o.role === 'responsible' ? 'responsible' : 'attending'}`}
+          />
+        ))}
+      </List>
     </div>
   );
 }

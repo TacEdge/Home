@@ -477,3 +477,30 @@ function itemText(i: EventItem, timeZone: string): string {
   if (i.day === i.days) return `${i.title} until ${homeClock(i.endsAt, timeZone)}`;
   return `${i.title}, all day`;
 }
+
+/**
+ * Where a conflict of today can be said on Today (ADR 0009 §18, contract
+ * §4.5): `{personId}|{occurrence}` for an entry on that person's line,
+ * `|{occurrence}` for an Also today row.
+ */
+export const placement = (personId: string | null, occurrence: string) =>
+  `${personId ?? ''}|${occurrence}`;
+
+/**
+ * Every place Today shows an event occurrence in its day state: each
+ * person's line (all its entries, the folded ones too) and Also today. In
+ * the evening and on first run there are none, so today's conflicts are
+ * listed instead of marked: nothing is lost.
+ */
+export function conflictPlacements(
+  model: Pick<TodayModel, 'state' | 'personLines' | 'alsoToday'>,
+): Set<string> {
+  const out = new Set<string>();
+  if (model.state !== 'day') return out;
+  for (const line of model.personLines)
+    for (const e of line.entries)
+      if (e.item.kind === 'event') out.add(placement(line.personId, occurrenceKey(e.item)));
+  for (const i of model.alsoToday)
+    if (i.kind === 'event') out.add(placement(null, occurrenceKey(i)));
+  return out;
+}

@@ -206,8 +206,15 @@ function sentence(
   c: Pick<Conflict, 'occurrences' | 'when' | 'person' | 'rule' | 'identity'>,
   onDay: (date: IsoDate) => string,
   [from, to]: [string, string],
+  clockAt: (instant: Date) => string,
 ): string {
-  const [a, b] = c.occurrences;
+  // Two occurrences with the same title (a moved occurrence on another of its
+  // own series, ADR 0009 §33) are told apart by their recorded starts.
+  const same = c.occurrences[0].title === c.occurrences[1].title;
+  const label = (o: ConflictOccurrence) => ({
+    title: same ? `${o.title} (from ${clockAt(o.startsAt)})` : o.title,
+  });
+  const [a, b] = [label(c.occurrences[0]), label(c.occurrences[1])];
   const span = `${from}–${to}`;
   const day = onDay(c.when);
   const name = c.person.name;
@@ -356,7 +363,7 @@ export function conflicts(input: ConflictInput): Conflict[] {
           occurrenceDate: o.occurrenceDate,
         })),
       ],
-      text: sentence(base, onDay, clocks),
+      text: sentence(base, onDay, clocks, (d) => home(d).clock),
     });
   }
   return out.sort(compareConflicts);

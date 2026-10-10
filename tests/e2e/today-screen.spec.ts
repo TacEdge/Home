@@ -929,7 +929,10 @@ test('dismiss with JavaScript, and a crafted key is refused calmly with nothing 
     `${CANARY_MARK.alex}shed`,
   ]);
   const crafted = `preparation.project_target:${alexProject!.id}:2027-02-14`;
-  const form = insightRows(page).nth(0).locator('form');
+  // The row's Dismiss form (Not useful, inside Why, is the other since M6).
+  const form = insightRows(page)
+    .nth(0)
+    .locator('form', { has: page.getByRole('button', { name: /^Dismiss:/ }) });
   await form
     .locator('input[name="key"]')
     .evaluate((el, v) => ((el as HTMLInputElement).value = v), crafted);

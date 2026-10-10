@@ -1,4 +1,5 @@
 import type { AgendaDay, AgendaEventInput } from '../agenda';
+import { compareConflicts, type Conflict } from '../conflicts';
 import {
   capitalise,
   eventFact,
@@ -14,9 +15,10 @@ import {
   type Fact,
 } from '../day-facts';
 import { nextBirthday } from '../profile';
-import { lateOn, lateSentence, unhealthyCalendars, type TodayCalendar } from '../today';
+import { lateOn, lateSentence, placement, unhealthyCalendars, type TodayCalendar } from '../today';
 import {
   addDays,
+  clockOf,
   compareIsoDates,
   daysBetween,
   longDate,
@@ -30,13 +32,18 @@ import {
 // came from and its template sentence, ranked without randomness or an LLM.
 // Derived on read; nothing is stored but a person's own dismissals.
 //
-// M5's families only (ADR 0008 §16, §21): `busy_day` (counts and recorded
+// M5's families (ADR 0008 §16, §21): `busy_day` (counts and recorded
 // evening events, provisional thresholds), `preparation` (a recorded
 // birthday, or a recorded project target with recorded open tasks) and
-// `data_health` (a visible calendar's recorded freshness). No transport,
-// no `coordination_gap`, no need inferred from a missing record.
+// `data_health` (a visible calendar's recorded freshness). M6 adds
+// `conflict` (ADR 0009 §9–§13, §18): the conflict engine's observations,
+// passed in as they are, with their keys, rules, facts and sentences. No
+// second detector, no transport, no `coordination_gap`, no need inferred
+// from a missing record.
 
 export const INSIGHT_RULES = [
+  'conflict.responsible',
+  'conflict.overlap',
   'busy_day.count',
   'busy_day.late',
   'preparation.birthday',
@@ -45,7 +52,7 @@ export const INSIGHT_RULES = [
   'data_health.failed',
 ] as const;
 export type InsightRule = (typeof INSIGHT_RULES)[number];
-export type InsightKind = 'data_health' | 'preparation' | 'busy_day';
+export type InsightKind = 'data_health' | 'conflict' | 'preparation' | 'busy_day';
 
 export type Insight = {
   /** Deterministic: kind, rule, subject ids and date; never text. */
@@ -61,6 +68,8 @@ export type Insight = {
   basis: Record<string, number | string>;
   /** Already said on its own item or by the headline (ADR 0002 §3): never listed or counted. */
   onObject: boolean;
+  /** For a `conflict`: the engine's observation, for its marks and its Why. */
+  conflict?: Conflict;
 };
 
 export type InsightPerson = DayPerson & { dateOfBirth: IsoDate | null };
@@ -86,6 +95,19 @@ export type InsightsInput = {
   /** The reader's own dismissed keys. */
   dismissed?: ReadonlySet<string>;
   /**
+   * The reader's conflicts (`engines/conflicts.ts`) over at least the
+   * detectors' window, as that engine returned them. Each one whose (next)
+   * overlap is on or before the last day becomes a `conflict` insight.
+   */
+  conflicts?: readonly Conflict[];
+  /**
+   * Where today's conflicts are marked on Today (`conflictPlacements`): a
+   * conflict of today is said on its item, and so not listed, only when it
+   * has an item to be said on. One with no place on the screen is listed, so
+   * nothing is lost.
+   */
+  placed?: ReadonlySet<string>;
+  /**
    * The last day the detectors look at (ADR 0009 §18): today and the next
    * seven days unless a surface asks for its own window. Today's is the default.
    */
@@ -110,14 +132,32 @@ export const LOOKAHEAD_DAYS = 7;
 /** Worth knowing shows at most this many (M5 contract §4.1). */
 export const SHOWN = 3;
 
-const KIND_ORDER: Record<InsightKind, number> = { data_health: 0, preparation: 1, busy_day: 2 };
+const KIND_ORDER: Record<InsightKind, number> = {
+  data_health: 0,
+  conflict: 1,
+  preparation: 2,
+  busy_day: 3,
+};
 
-/** The order of insights: kind, then date, then key. Total: no ties remain. */
+/**
+ * The order of insights (ADR 0009 §18): family, then within the family
+ * (conflicts by their own order, ADR 0009 §13: rule, then the overlap's
+ * start, then the key), then date, then key. Total: no ties remain.
+ */
 export function compareInsights(a: Insight, b: Insight): number {
   return (
     KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+    (a.conflict && b.conflict ? compareConflicts(a.conflict, b.conflict) : 0) ||
     compareIsoDates(a.when, b.when) ||
     (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  );
+}
+
+/** Whether a conflict has a place on Today: its person's line, or an Also today row, holds one of its occurrences. */
+export function isPlaced(c: Conflict, placed: ReadonlySet<string>): boolean {
+  return c.occurrences.some(
+    (o) =>
+      placed.has(placement(c.person.id, o.occurrence)) || placed.has(placement(null, o.occurrence)),
   );
 }
 
@@ -252,6 +292,28 @@ export function insights(input: InsightsInput): Insights {
     }
   }
 
+  // conflict: the conflict engine's observations, as they are (ADR 0009 §18).
+  // Today's are said on their items when Today has a place for them.
+  const placed = input.placed ?? new Set<string>();
+  for (const c of input.conflicts ?? []) {
+    if (c.when > last) continue;
+    add({
+      key: c.key,
+      kind: 'conflict',
+      rule: c.rule,
+      when: c.when,
+      text: c.text,
+      facts: [...c.facts],
+      basis: {
+        identity: c.identity,
+        from: c.overlap.from.toISOString(),
+        to: c.overlap.to.toISOString(),
+      },
+      onObject: c.when <= today && isPlaced(c, placed),
+      conflict: c,
+    });
+  }
+
   const all = [...found.values()].sort(compareInsights);
   const dismissed = input.dismissed ?? new Set<string>();
   const eligible = all.filter((i) => !i.onObject && !dismissed.has(i.key));
@@ -261,4 +323,44 @@ export function insights(input: InsightsInput): Insights {
     rest: eligible.slice(SHOWN),
     more: Math.max(0, eligible.length - SHOWN),
   };
+}
+
+/** One conflict said on one of Today's items: "overlaps Art club 15:00". */
+export type ConflictMark = { insight: Insight; text: string };
+
+/**
+ * Today's conflict marks (contract §4.5): for each place an occurrence is
+ * shown, the reader's current conflicts of today about it, with no
+ * response, in insight order. A conflict is marked on each of its two
+ * occurrences that has a place, on its person's line when that person has
+ * one there, else on Also today. Each mark names the other commitment and
+ * its recorded start, as recorded; it says nothing about why or what to do.
+ */
+export function conflictMarks(
+  found: Pick<Insights, 'all'>,
+  responded: ReadonlySet<string>,
+  placed: ReadonlySet<string>,
+  timeZone: string,
+): Map<string, ConflictMark[]> {
+  const out = new Map<string, ConflictMark[]>();
+  for (const insight of found.all) {
+    const c = insight.conflict;
+    if (!c || !insight.onObject || responded.has(insight.key)) continue;
+    for (const [mine, other] of [
+      [c.occurrences[0], c.occurrences[1]],
+      [c.occurrences[1], c.occurrences[0]],
+    ] as const) {
+      const own = placement(c.person.id, mine.occurrence);
+      const where = placed.has(own) ? own : placement(null, mine.occurrence);
+      if (!placed.has(where)) continue;
+      const mark = {
+        insight,
+        text: `overlaps ${other.title} ${clockOf(other.startsAt, timeZone)}`,
+      };
+      const list = out.get(where);
+      if (list) list.push(mark);
+      else out.set(where, [mark]);
+    }
+  }
+  return out;
 }

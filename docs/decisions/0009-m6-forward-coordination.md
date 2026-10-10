@@ -2,7 +2,7 @@
 
 Status: **Accepted**, 2026-10-09. The owner approved the product decisions on PR #59 (§20–§29, as refined there) and accepted this ADR and the contract (`docs/m6/M6-BUILD-CONTRACT.md`) by merging Package 0.
 
-- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60). Package 2 (the conflict engine, §33) is in review.
+- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) is in review.
 - **Refinements on PR #59:**
   - `conflict.away` removed (§12, §24);
   - conflict identity and lifecycle defined precisely (§13);
@@ -534,6 +534,98 @@ Earlier decisions already settle much of the shape:
       - the corrected coverage claim;
       - the decisions above on a change overlapping its own series, the DST-change night, overlaps under a minute and very many conflicts.
     - **Unchanged.** No schema, no migration, no dependency, no screen, no insight or response, no Kev. The shared agenda and its read are untouched. Forward still receives no conflicts (Package 3 connects them).
+
+34. **Package 3: conflict insights, Not useful and Today.**
+
+    - **Conflicts are an insight family, not a second detector.** The insights engine (`engines/insights/`) takes the conflict engine's output (`conflicts`) and turns each one whose (next) overlap is in its window into a `conflict` insight: the same key, rule, sentence and facts, with the observation kept for its marks and its Why.
+      - **Ranking (§18):** family (`data_health`, `conflict`, `preparation`, `busy_day`), then the conflicts' own order (§13), then date, then key. Total.
+      - **Today's window** is unchanged: today and the next seven days.
+    - **Today (contract §4.5).**
+      - **Today's conflicts are said on their items.** `conflictPlacements` lists every place Today shows an occurrence in its day state: each person's line (its folded entries too) and Also today.
+        - **On the items:** a conflict of today that has a place is on-object, not listed. It is marked on each of its two occurrences: on its person's line where that person has one, else on Also today.
+        - **The mark:** a small Sun dot and "overlaps Art club 15:00", the other commitment as recorded. Why holds the facts, Dismiss and Not useful.
+        - **Two per entry:** an entry shows two marks, then "+ N more overlaps" in place.
+      - **Nothing is lost.** A conflict of today with no place on the screen (the evening, first run) is listed in Worth knowing instead.
+      - **Tomorrow onwards** is listed in Worth knowing, with the Sun mark.
+      - **Unchanged:** the headline and everything else on Today. M5's Today suites pass. One end-to-end test now names the Dismiss form explicitly, because each row has a second form (Not useful).
+    - **Responses (contract §5.9).**
+      - **One service:** `respondToInsight(actor, key, response, surface, now, timeZone)`, in the contract's order:
+        1. the gate, then the actor, before any read;
+        2. the key, the response and the surface, by schema;
+        3. the reader's insights and conflicts, re-derived from one 90-day agenda read;
+        4. a current conflict of the reader's is accepted from any surface, and anything else only if it is current, not said on its item, and listed on the named surface (Today: M5's families; Forward: `data_health`; a person's page: none); otherwise `not_eligible`;
+        5. the same response again writes nothing;
+        6. `respond`: an upsert, audited with the response kind only.
+
+        Changing Dismiss to Not useful (or back) is one more audited upsert.
+      - **Dismiss** is now `respondToInsight(…, 'dismissed', 'today', …)`.
+      - **Not useful** hides exactly as Dismiss does, and records the judgement (`insight_response.response = 'not_useful'`). It changes no rule, threshold, ranking, family or other insight. Kev does not read it.
+      - **Where they are:** Not useful sits inside every insight's Why, after the facts. Dismiss stays on the surface; on a Today mark, both sit inside its Why.
+    - **Explanations (§14).** A conflict's Why gives:
+      - the rule in one sentence, naming the person: recorded on both, or recorded as responsible for both;
+      - the overlap ("from 15:30 to 16:00");
+      - for a standing conflict, that both repeat and when the next one is;
+      - the two commitments, each with its own recorded date and times and the person's role, linked to the event.
+
+      **Two same-titled commitments:** a moved occurrence on another occurrence of its own series (§33) is told apart by its start, in the sentence ("Swimming (from 15:30) and Swimming (from 15:45)") and in Why. This is a text change in the engine; no key changed.
+    - **Forward and Coming up data (for Package 4).** `domain/insights/conflicts.ts`:
+      - `readConflicts`: one agenda read over 90 days, one engine run and one query for the reader's responses. It gives every current conflict, the unanswered ones, and the reader's responses.
+      - `forwardConflicts`: the Forward engine's input, each key with its (next) pair's occurrence keys.
+      - `personConflicts`: one person's conflicts, for Coming up.
+      - **No new identity:** Today, Forward and Coming up take the same keys from the same engine, and a response hides a key on all of them.
+      - **No Forward dependency:** `forwardConflicts` writes its output shape out rather than importing the Forward engine, so the medium-tier engine keeps no high-tier importer (ADR 0010 §8).
+      - **The Forward page is unchanged** (Package 4).
+    - **Shared UI.** `ItemRow` and `AgendaItemRow` take an optional `after` slot, under the row and outside its link, used for Also today's marks. Existing callers are unchanged.
+    - **Evidence.**
+      - **Unit tests** (`tests/unit/conflicts/conflict-insights.test.ts`, 12, plus the M5 suites):
+        - the conflict family's fields and ranking;
+        - Today's window;
+        - a response hides it;
+        - on-object when placed, and marked on both occurrences without a duplicate;
+        - Also today for someone outside the household;
+        - listed when there is no place;
+        - same-title wording;
+        - 435 conflicts bounded to three shown, with an exact remainder and none lost;
+        - the Forward engine marks and counts the same keys, and drops a responded one.
+
+        The Today test helper now composes exactly as the page does, with conflicts and placements.
+      - **Through the real services** (`tests/integration/conflict-insights.test.ts`, 15):
+        - **Both adults:** both get the same keys.
+        - **Refusals:** crafted, malformed and private keys are refused, and nothing is written.
+        - **T17:** Alex's dismissal is Alex's alone, and is hidden from Alex's Today list and Forward data.
+        - **Not useful:** it hides, records `not_useful`, is audited as `{"response":"not_useful"}` with no key or title, is visible in Sam's Activity only, and is idempotent.
+        - **Changing the kind:** Not useful to Dismiss is one audited upsert.
+        - **Lifecycle:**
+          - T3: nothing expires;
+          - T4: a change is a new, eligible key despite the standing dismissal;
+          - T5: returned to the series;
+          - T6: put away, then restored, and its response applies again;
+          - T7 and T8: skip and put back;
+          - T14: archive and restore.
+        - **Privacy:** Sam's private event changes nothing in Alex's conflicts or insights, byte for byte.
+        - **The gate:** both responses are refused before any query.
+        - **Cost:** the 90-day read is 7 queries, the same after 20 more events.
+      - **End to end** (`tests/e2e/today-conflicts.spec.ts`):
+        - **Without JavaScript:** marks on Milo's entries; Why's sentence, links and buttons; Not useful hides that pair for Sam while the fixture's other pairs stay; Alex still sees it.
+        - **With JavaScript:** tomorrow's conflict in Worth knowing; Not useful inside Why; Dismiss; the accessibility baseline with marks and an open Why.
+      - **Performance:**
+        - **Today:** the page adds no query. Conflicts and insights over its eight days take about 6 ms for a 300-event household (the agenda read, about 37 ms, as before).
+        - **A response:** it reads 90 days, which is about 200 ms of agenda for 300 events.
+      - **Mutations,** each failing its tests, with the code restored after:
+
+        | Mutation | Tests failed |
+        |---|---|
+        | Responses read for every user (cross-adult leak) | 3 |
+        | Responses matched by person, so an old dismissal hides a changed conflict | 4 |
+        | Eligibility skipped, so an unauthorised key is accepted | 2 |
+        | The gate check removed | 1 |
+        | A conflict of today both marked and listed | 3 |
+    - **Caveats, recorded:**
+      - **Today marks only today's conflicts.** A standing conflict is marked at its next pair only, as §13 says it is said.
+      - **Two marks per entry**, then "+ N more overlaps". Worth knowing shows three, then "+ N more" with the exact remainder.
+      - **A response costs a 90-day read**, about 200 ms at 300 events. It is not on any page's render path.
+      - **Coming up and Forward show no conflicts yet.** Their data is ready; Package 4 presents it.
+    - **Unchanged.** No schema, migration, dependency, transport, weather, Kev or external write. No adaptive ranking, and no Forward UI.
 
 ## Consequences
 

@@ -1,7 +1,16 @@
 import Link from 'next/link';
 import { AgendaItemRow } from '@/app/_agenda/agenda-list';
 import type { AgendaItem } from '@/domain/engines/agenda';
-import type { LineEntry, PersonLine, TodayModel, TodoEntry } from '@/domain/engines/today';
+import {
+  placement,
+  type LineEntry,
+  type PersonLine,
+  type TodayModel,
+  type TodoEntry,
+} from '@/domain/engines/today';
+import { occurrenceKey } from '@/domain/engines/day-facts';
+import type { ConflictMark } from '@/domain/engines/insights';
+import { ConflictMarks } from './conflict-marks';
 import type { Person } from '@/domain/people/service';
 import { clockOf } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
@@ -30,9 +39,11 @@ export type TodayViewProps = {
   linked: boolean;
   /** The reader's insights, own dismissals applied (Package 4). */
   worth: Pick<Insights, 'shown' | 'rest'>;
+  /** Today's conflicts on their items (M6 Package 3), by `placement`. */
+  marks?: ReadonlyMap<string, readonly ConflictMark[]>;
 };
 
-export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
+export function TodayView({ model, lookup, linked, worth, marks = new Map() }: TodayViewProps) {
   const { headline, state } = model;
   const day = state === 'day';
   const twoColumns = day && (model.personLines.length > 0 || model.alsoToday.length > 0);
@@ -95,7 +106,7 @@ export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
         <Label id="today-day">Everyone’s day</Label>
         <ul className="border-line border-b md:border-b-0">
           {model.personLines.map((line) => (
-            <PersonLineRow key={line.personId} line={line} lookup={lookup} />
+            <PersonLineRow key={line.personId} line={line} lookup={lookup} marks={marks} />
           ))}
         </ul>
       </section>
@@ -107,7 +118,20 @@ export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
         <Label id="today-also">Also today</Label>
         <List>
           {model.alsoToday.map((item, i) => (
-            <AgendaItemRow key={i} item={item} timeZone={lookup.timeZone} people={lookup.people} />
+            <AgendaItemRow
+              key={i}
+              item={item}
+              timeZone={lookup.timeZone}
+              people={lookup.people}
+              after={
+                item.kind === 'event' ? (
+                  <ConflictMarks
+                    marks={marks.get(placement(null, occurrenceKey(item)))}
+                    lookup={lookup}
+                  />
+                ) : null
+              }
+            />
           ))}
         </List>
       </section>
@@ -196,7 +220,17 @@ export function TodayView({ model, lookup, linked, worth }: TodayViewProps) {
 
 const colour = (p: Person | undefined) => (p?.colour ?? null) as PersonColour | null;
 
-function PersonLineRow({ line, lookup }: { line: PersonLine; lookup: FactLookup }) {
+type Marks = ReadonlyMap<string, readonly ConflictMark[]>;
+
+function PersonLineRow({
+  line,
+  lookup,
+  marks,
+}: {
+  line: PersonLine;
+  lookup: FactLookup;
+  marks: Marks;
+}) {
   const person = lookup.people.get(line.personId);
   const rest = line.rest;
   return (
@@ -210,14 +244,14 @@ function PersonLineRow({ line, lookup }: { line: PersonLine; lookup: FactLookup 
       <div className="min-w-0 flex-1">
         <ul>
           {line.shown.map((e, i) => (
-            <Entry key={i} entry={e} owner={line.personId} lookup={lookup} />
+            <Entry key={i} entry={e} owner={line.personId} lookup={lookup} marks={marks} />
           ))}
         </ul>
         {rest.length > 0 ? (
           <Disclosure label={`+ ${rest.length} more`}>
             <ul>
               {rest.map((e, i) => (
-                <Entry key={i} entry={e} owner={line.personId} lookup={lookup} />
+                <Entry key={i} entry={e} owner={line.personId} lookup={lookup} marks={marks} />
               ))}
             </ul>
           </Disclosure>
@@ -228,8 +262,19 @@ function PersonLineRow({ line, lookup }: { line: PersonLine; lookup: FactLookup 
 }
 
 /** One line of someone's day, with the other people recorded on it (never inferred). */
-function Entry({ entry, owner, lookup }: { entry: LineEntry; owner: string; lookup: FactLookup }) {
+function Entry({
+  entry,
+  owner,
+  lookup,
+  marks,
+}: {
+  entry: LineEntry;
+  owner: string;
+  lookup: FactLookup;
+  marks: Marks;
+}) {
   const item = entry.item;
+  const said = item.kind === 'event' ? marks.get(placement(owner, occurrenceKey(item))) : undefined;
   const href =
     item.kind === 'event'
       ? `/events/${item.eventId}`
@@ -263,6 +308,7 @@ function Entry({ entry, owner, lookup }: { entry: LineEntry; owner: string; look
       ) : (
         <div className={row}>{body}</div>
       )}
+      <ConflictMarks marks={said} lookup={lookup} />
     </li>
   );
 }
