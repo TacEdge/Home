@@ -60,12 +60,12 @@ CI scopes the browser suite by the risk tier of the pull request; every other jo
 
 - **Tiers:**
   - **Low** (docs, Markdown, unit and integration tests): no browser tests.
-  - **Medium** (established screens, pure engines other than agenda and recurrence, a changed spec): the mapped specs plus `tests/e2e/smoke.spec.ts`.
+  - **Medium** (established screens, the Forward engine, a changed spec that still exists): the specs of every screen that uses the change plus `tests/e2e/smoke.spec.ts`. Shared code (`_forms`, `_capture`, engines the agenda or a domain service imports) and a deleted or renamed spec are high.
   - **High** (domain services, agenda and recurrence, the shared agenda loader, integrations, shared UI and the shell, and anything unmapped) and **critical** (trust, auth, the database and migrations, CI, scripts, dependencies, the test harness, environment controls, acceptance documents and DEPLOY.md): full regression.
 - **How the tier is decided:** the highest-risk path wins, and a path no rule names is high.
 - **Full regression always:** on pushes to `main`, the nightly run, manual runs (*Actions → CI → Run workflow*) and any PR labelled `ci:full`. No label lowers a tier.
 - **Where to see it:** the `End-to-end (Playwright)` job summary shows the tier, the selection and every changed path's reason.
-- **Adding a screen or engine:** add its rule (and specs) to `scripts/ci-select.mts`. Until then it is high and runs everything.
+- **Adding a screen or engine:** add its rule (and specs) to `scripts/ci-select.mts`. Until then it is high and runs everything. `tests/unit/ci-import-coverage.test.ts` then checks the rule against the code's imports: a medium rule must name the specs of every screen that imports it, and must not be imported by high-tier code.
 
 ## Notes
 

@@ -6,18 +6,19 @@
 // `ci:full` forces the full browser regression, and no label lowers a tier.
 //
 //   low       docs, Markdown, unit and integration tests: no browser tests
-//   medium    established screens and isolated pure engines: the browser
-//             specs mapped to them, plus the smoke suite
-//   high      domain services, the shared agenda and recurrence,
-//             integrations, shared UI and the shell, anything unmapped:
-//             full browser regression
+//   medium    established screens and the one engine no shared code imports:
+//             the specs of every screen that uses them, plus the smoke suite
+//   high      domain services, the shared agenda and recurrence and the
+//             engines they import, integrations, shared UI, the shell, form
+//             and capture helpers, a deleted or renamed spec, anything
+//             unmapped: full browser regression
 //   critical  auth, trust and privacy infrastructure, the database and its
 //             migrations, CI, the test harness, environment controls,
 //             dependencies and milestone acceptance: full browser regression
 //
 // Pushes to main, the nightly run and manual runs are always full. Anything
 // unexpected (an unreadable diff, an empty diff, a missing output file, a
-// spec that does not exist) throws, and the CI step fails: a classifier
+// rule naming a spec that does not exist) throws, and the CI step fails: a classifier
 // defect can never turn into a green, untested result.
 
 import { execFileSync } from 'node:child_process';
@@ -109,13 +110,37 @@ export const RULES: Rule[] = [
   },
   { re: /^src\/app\/\(home\)\/layout[^/]*$/, tier: 'high', reason: 'the app shell' },
   { re: /^src\/app\/_agenda\//, tier: 'high', reason: 'the shared agenda loader' },
+  // Shared by every screen, through the shell's capture bar and every form:
+  // no subset of specs covers them (ADR 0010 §8).
+  { re: /^src\/app\/_forms\//, tier: 'high', reason: 'form helpers every screen uses' },
+  { re: /^src\/app\/_capture\//, tier: 'high', reason: 'the capture bar in the shell' },
+  // Engines the shared agenda, its loader or a domain service imports: a
+  // change reaches every screen those reach (ADR 0010 §8).
+  {
+    re: /^src\/domain\/engines\/(today|day-facts|profile|staleness)\.ts$|^src\/domain\/engines\/insights\//,
+    tier: 'high',
+    reason: 'an engine the shared agenda or a domain service imports',
+  },
 
   // ---- medium: established screens and isolated pure engines --------------
+  // Each rule names every spec of every screen that imports its files, directly
+  // or through other screen code; tests/unit/ci-import-coverage.test.ts checks
+  // that against the source on every run, and a screen whose importers are
+  // high-tier code is high instead (ADR 0010 §8).
   {
     re: /^src\/app\/\(home\)\/events\//,
     tier: 'medium',
-    reason: 'events screens',
-    specs: ['events', 'occurrence-changes', 'synced-events'],
+    reason: 'events screens (also used by People, the regular week and To sort)',
+    specs: [
+      'capture-sort',
+      'events',
+      'occurrence-changes',
+      'people',
+      'regular-week',
+      'synced-events',
+      'today',
+      'today-screen',
+    ],
   },
   {
     re: /^src\/app\/\(home\)\/today\//,
@@ -132,26 +157,36 @@ export const RULES: Rule[] = [
   {
     re: /^src\/app\/\(home\)\/people\//,
     tier: 'medium',
-    reason: 'people screens',
-    specs: ['people', 'regular-week'],
+    reason: 'people screens (also used by To sort)',
+    specs: ['capture-sort', 'people', 'regular-week', 'today', 'today-screen'],
   },
   {
     re: /^src\/app\/\(home\)\/(home|tasks)\//,
     tier: 'medium',
-    reason: 'projects and tasks',
-    specs: ['home-tasks'],
+    reason: 'projects and tasks (also used by To sort)',
+    specs: ['capture-sort', 'home-tasks', 'today', 'today-screen'],
   },
   {
-    re: /^src\/app\/\(home\)\/sort\/|^src\/app\/_capture\//,
+    re: /^src\/app\/\(home\)\/sort\//,
     tier: 'medium',
-    reason: 'capture and To sort',
-    specs: ['capture-sort'],
+    reason: 'To sort (also used by Today)',
+    specs: ['capture-sort', 'today', 'today-screen'],
   },
   {
     re: /^src\/app\/\(home\)\/(calendars|settings\/calendars)\/|^src\/app\/_calendar\//,
     tier: 'medium',
-    reason: 'calendar screens',
-    specs: ['calendars', 'calendar-refresh', 'synced-events'],
+    reason: 'calendar screens and refresh on use (Today, Forward, a person’s page)',
+    specs: [
+      'calendar-refresh',
+      'calendars',
+      'capture-sort',
+      'events',
+      'people',
+      'regular-week',
+      'synced-events',
+      'today',
+      'today-screen',
+    ],
   },
   {
     re: /^src\/app\/\(home\)\/settings\/(?!calendars\/)/,
@@ -159,42 +194,33 @@ export const RULES: Rule[] = [
     reason: 'settings screens',
     specs: ['settings-knows-archived', 'export'],
   },
-  { re: /^src\/app\/_notes\//, tier: 'medium', reason: 'notes', specs: ['events', 'people'] },
   {
-    re: /^src\/app\/_forms\//,
+    re: /^src\/app\/_notes\//,
     tier: 'medium',
-    reason: 'form helpers',
-    specs: ['events', 'home-tasks', 'calendars'],
+    reason: 'notes (events, projects, people)',
+    specs: [
+      'capture-sort',
+      'events',
+      'home-tasks',
+      'occurrence-changes',
+      'people',
+      'regular-week',
+      'synced-events',
+      'today',
+      'today-screen',
+    ],
   },
   {
     re: /^src\/app\/_profile\//,
     tier: 'medium',
-    reason: 'profile pieces',
-    specs: ['regular-week', 'people'],
-  },
-  {
-    re: /^src\/domain\/engines\/(today|day-facts)\.ts$|^src\/domain\/engines\/insights\//,
-    tier: 'medium',
-    reason: 'Today and insights engines',
-    specs: ['today', 'today-screen'],
+    reason: 'profile pieces (a person’s page)',
+    specs: ['capture-sort', 'people', 'regular-week', 'today', 'today-screen'],
   },
   {
     re: /^src\/domain\/engines\/forward\.ts$/,
     tier: 'medium',
     reason: 'the Forward engine',
     specs: ['events'],
-  },
-  {
-    re: /^src\/domain\/engines\/profile\.ts$/,
-    tier: 'medium',
-    reason: 'the profile engine',
-    specs: ['regular-week', 'people'],
-  },
-  {
-    re: /^src\/domain\/engines\/staleness\.ts$/,
-    tier: 'medium',
-    reason: 'the staleness engine',
-    specs: ['settings-knows-archived'],
   },
 
   // ---- low ----------------------------------------------------------------
@@ -216,6 +242,15 @@ export function classifyPath(path: string): PathClass {
   if (typeof path !== 'string' || path.trim() === '' || path !== path.trim())
     throw new Error(`ci-select: not a path: ${JSON.stringify(path)}`);
   const own = SPEC_FILE.exec(path);
+  // A spec the change deletes (or renames: --no-renames lists the old path as
+  // deleted) cannot run itself, and what it covered is unknown: full regression.
+  if (own && !existsSync(path))
+    return {
+      path,
+      tier: 'high',
+      reason: 'a browser spec this change deletes or renames: full regression',
+      specs: [],
+    };
   if (own)
     return { path, tier: 'medium', reason: 'a changed browser spec runs itself', specs: [own[1]!] };
   const hits = RULES.filter((r) => r.re.test(path));

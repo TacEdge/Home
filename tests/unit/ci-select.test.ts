@@ -40,17 +40,75 @@ describe('tiers by kind of change', () => {
       mode: 'targeted',
       specs: [SMOKE, 'today', 'today-screen'].sort(),
     });
+    // Events screens are also used by People, the regular week and To sort
+    // (which Today uses): their specs come too (ADR 0010 §8).
     expect(pr('src/app/(home)/events/[id]/page.tsx').specs).toEqual(
-      ['events', 'occurrence-changes', SMOKE, 'synced-events'].sort(),
+      [
+        'capture-sort',
+        'events',
+        'occurrence-changes',
+        'people',
+        'regular-week',
+        SMOKE,
+        'synced-events',
+        'today',
+        'today-screen',
+      ].sort(),
     );
   });
 
-  it('a pure engine: medium', () => {
-    expect(pr('src/domain/engines/insights/index.ts')).toMatchObject({
+  it('the one engine no shared code imports: medium', () => {
+    expect(pr('src/domain/engines/forward.ts')).toMatchObject({
       tier: 'medium',
       mode: 'targeted',
     });
-    expect(pr('src/domain/engines/forward.ts').tier).toBe('medium');
+  });
+
+  it.each([
+    ['form helpers', 'src/app/_forms/action-form.tsx'],
+    ['the capture bar', 'src/app/_capture/capture-bar.tsx'],
+    ['the Today engine (the agenda loader imports it)', 'src/domain/engines/today.ts'],
+    ['day facts', 'src/domain/engines/day-facts.ts'],
+    [
+      'the insight detectors (a domain service imports them)',
+      'src/domain/engines/insights/index.ts',
+    ],
+    ['the profile engine (the agenda engine imports it)', 'src/domain/engines/profile.ts'],
+    ['the staleness engine (domain services import it)', 'src/domain/engines/staleness.ts'],
+  ])('shared code (%s): high, full regression', (_, p) => {
+    expect(pr(p)).toMatchObject({ tier: 'high', mode: 'full' });
+  });
+
+  it.each([
+    [
+      'refresh on use reaches Today, Forward and a person’s page',
+      'src/app/_calendar/refresh-on-use.tsx',
+      ['today-screen', 'events', 'people', 'calendars'],
+    ],
+    [
+      'To sort is used by Today',
+      'src/app/(home)/sort/copy.ts',
+      ['capture-sort', 'today', 'today-screen'],
+    ],
+    [
+      'task forms are used by To sort',
+      'src/app/(home)/tasks/task-form.tsx',
+      ['home-tasks', 'capture-sort', 'today'],
+    ],
+    [
+      'project forms are used by To sort',
+      'src/app/(home)/home/project-form.tsx',
+      ['home-tasks', 'capture-sort'],
+    ],
+    [
+      'notes are on events, projects and people',
+      'src/app/_notes/notes-section.tsx',
+      ['events', 'home-tasks', 'people', 'capture-sort'],
+    ],
+  ])('cross-screen code (%s) selects every dependent screen’s specs', (_, p, want) => {
+    const s = pr(p);
+    expect(s.mode).toBe('targeted');
+    for (const w of want) expect(s.specs, w).toContain(w);
   });
 
   it.each([
@@ -107,6 +165,25 @@ describe('tiers by kind of change', () => {
       specs: ['people', SMOKE],
     });
   });
+
+  it('a deleted browser spec: high, full regression, and the summary says why', () => {
+    const s = pr('tests/e2e/no-longer-here.spec.ts');
+    expect(s).toMatchObject({ tier: 'high', mode: 'full', specs: [] });
+    expect(summary(s)).toMatch(
+      /no-longer-here\.spec\.ts` \| high \| a browser spec this change deletes or renames/,
+    );
+  });
+
+  it('a renamed browser spec (old path deleted, new path added): full regression', () => {
+    // git diff --no-renames lists a rename as the old path and the new one.
+    const s = pr('tests/e2e/people-old-name.spec.ts', 'tests/e2e/people.spec.ts');
+    expect(s).toMatchObject({ tier: 'high', mode: 'full' });
+    expect(s.paths.find((p) => p.path.endsWith('people.spec.ts'))?.tier).toBe('medium');
+  });
+
+  it('a deleted spec never yields no browser tests, even beside docs only', () => {
+    expect(pr('docs/HOME-VISION.md', 'tests/e2e/gone.spec.ts').mode).toBe('full');
+  });
 });
 
 describe('the highest-risk path decides', () => {
@@ -116,7 +193,7 @@ describe('the highest-risk path decides', () => {
   it('docs plus a screen is medium', () => {
     expect(pr('docs/HOME-VISION.md', 'src/app/(home)/people/page.tsx')).toMatchObject({
       tier: 'medium',
-      specs: ['people', 'regular-week', SMOKE].sort(),
+      specs: ['capture-sort', 'people', 'regular-week', SMOKE, 'today', 'today-screen'].sort(),
     });
   });
   it('a screen plus an unknown path is high', () => {
@@ -124,7 +201,7 @@ describe('the highest-risk path decides', () => {
   });
   it('specs from several screens are unioned', () => {
     expect(pr('src/app/(home)/today/page.tsx', 'src/app/(home)/home/page.tsx').specs).toEqual(
-      ['home-tasks', SMOKE, 'today', 'today-screen'].sort(),
+      ['capture-sort', 'home-tasks', SMOKE, 'today', 'today-screen'].sort(),
     );
   });
 });

@@ -17,8 +17,8 @@ Every pull request ran the whole browser suite (about 17.5 minutes), and the bro
    | Tier | What | Browser tests |
    |---|---|---|
    | **Low** | `docs/` and Markdown, unit tests, integration test files | None |
-   | **Medium** | established screens (`src/app/(home)/<area>/`, `_capture`, `_calendar`, `_forms`, `_notes`, `_profile`), pure engines other than agenda and recurrence, a changed browser spec | The specs mapped to the change, plus the smoke suite |
-   | **High** | domain services (where privacy is enforced), the agenda and recurrence engines, the shared agenda loader, integrations, `src/lib`, shared UI and the app shell, Kev, **and any path no rule names** | Full regression |
+   | **Medium** | established screens (`src/app/(home)/<area>/`, `_calendar`, `_notes`, `_profile`), the Forward engine (no shared code imports it yet), a changed browser spec that still exists | The specs of every screen that uses the change (§8), plus the smoke suite |
+   | **High** | domain services (where privacy is enforced), the agenda and recurrence engines and the engines they or a domain service import (Today, day facts, insights, profile, staleness), the shared agenda loader, the form helpers (`_forms`) and the capture bar (`_capture`), integrations, `src/lib`, shared UI and the app shell, Kev, a browser spec the change deletes or renames, **and any path no rule names** | Full regression |
    | **Critical** | `src/trust`, sign-in and API routes, the proxy, Next config, environment controls, the database, schema and migrations, `.github/`, `scripts/`, dependencies and the toolchain config, the test harness and fixtures, milestone acceptance documents and DEPLOY.md | Full regression |
 
    - **How a path is tiered:** every rule that matches a path applies, and the path takes the highest tier among them.
@@ -29,7 +29,8 @@ Every pull request ran the whole browser suite (about 17.5 minutes), and the bro
 2. **Fail closed.** These all mean full regression or a failed job, never a green untested one:
    - **A path no rule names** is high.
    - **An empty diff** is high.
-   - **A classifier error** (an unreadable event, a base that is not a commit, a missing output file, a spec that does not exist) exits non-zero, so the job fails.
+   - **A classifier error** (an unreadable event, a base that is not a commit, a missing output file, a rule naming a spec that does not exist) exits non-zero, so the job fails.
+   - **A deleted or renamed spec** (the diff lists the old path, and `--no-renames` lists a rename as a deletion) is high: full regression, with the reason in the job summary. It cannot run itself and what it covered is unknown, and it must never make a pull request permanently red.
    - **No recognisable mode** written by the classifier: a guard step fails the job.
    - **High and critical changes** always get full regression. Only low changes get no browser tests.
 
@@ -62,6 +63,11 @@ Every pull request ran the whole browser suite (about 17.5 minutes), and the bro
 
 7. **No new parallelism.** Playwright still runs one worker against the job's own database.
 
+8. **Shared code is high; screen rules cover every screen that uses them** (added after the PR's focused review).
+   - **Shared code is high:** the form helpers (`_forms`, used by nearly every screen and by the shell's capture bar), the capture bar (`_capture`, in the shell on every page), and every engine the shared agenda, its loader or a domain service imports (Today, day facts, insights, profile, staleness). No subset of specs covers them.
+   - **Screen rules name every dependent screen's specs:** events screens bring People, the regular week, To sort and Today; To sort brings Today; projects, tasks and people bring To sort and Today; calendar code (refresh on use) brings Today, Forward and a person's page; notes bring events, projects and people. A rule's specs cover its own screens and, transitively, every screen that imports them, so some medium changes select more specs than the file itself needs: over-selecting is the accepted cost.
+   - **Checked against the code on every run:** `tests/unit/ci-import-coverage.test.ts` reads every local import under `src/` and, for each medium file, follows its importers transitively. It fails if any importer is high or critical code (the file must be high too), or if an importer's specs are not all in the file's selection. It fails closed: an import it cannot resolve, an `import()` of a computed path or a `require()` fails the test. Mutation tests prove that removing a cross-screen spec, putting the form helpers back to medium, dropping a calendar dependent, or following only direct imports each fail it.
+
 ## Branch protection (evidence)
 
 - **Protection rules:** this session's token cannot read them; `branches/main/protection` returns 403.
@@ -79,9 +85,20 @@ Every pull request ran the whole browser suite (about 17.5 minutes), and the bro
 ## Known limitations
 
 - **A medium change can break a screen its mapped specs don't cover.** That is caught by the full run on `main` after merge, or the nightly run, and fixed forward. This is the accepted trade.
-- **The map is path-based, not import-graph-based.** A screen that imports a medium engine is covered only if the engine's rule names its specs. New paths fail closed to high until a rule names them.
+- **The map is path-based, but checked against the import graph** (§8). The check sees static imports only: a dependency through something other than an import (a route a page links to, a shared database row, a URL a test visits) is not a code dependency, and only the smoke suite and full runs on `main` and nightly catch a break there. Type-only imports count as dependencies, which over-selects a little.
+- **Rules are per folder,** so a folder's specs are the union of what any file in it needs. New paths fail closed to high until a rule names them; a new medium rule that misses a dependent fails the coverage test in the checks job.
 - **A scheduled run's failure notifies only the person who last edited the schedule,** as GitHub does by default.
 - **Services still start on low runs.** The browser job starts the Postgres service even when no browser test runs (about 16 seconds): services cannot be conditional.
+
+## Local stale-cache 404s (diagnosis)
+
+During this PR's verification, three local runs (two of a larger subset including the device sweep and the smoke suite, and one of the targeted calendar set) failed together. The calendar edit and reconnect routes answered "Nothing here" (404) for calendars that existed. Other runs of the same sets passed, and no CI run has shown it.
+
+- **Cause:** stale development-server caches in `.next` and `.next-narrow`. Those runs were plain `playwright test` invocations started straight after `pnpm verify`, which had left a production build and earlier development caches there. It is the failure already recorded in ADR 0007 §48 and LOCAL-DEV.md: stale compiled routes answer 404 for routes that exist, for the life of the server.
+- **Ruled out:** fixtures, database reset sequencing, test order and session reuse. Each run resets the database and feeds, servers are never reused (`reuseExistingServer: false`), every test signs in afresh, and the same spec order both passed and failed.
+- **Confirmed:** after clearing both caches, the targeted calendar set passed (30 tests).
+- **Not a CI risk:** CI starts from a clean checkout every run, and `pnpm verify` and `pnpm verify:focused` clear both caches first. No calendar escalation is needed.
+- **Locally:** clear `.next` and `.next-narrow` before a plain `pnpm test:e2e` or `playwright test` run.
 
 ## Phase 2 (proposed, not built)
 
