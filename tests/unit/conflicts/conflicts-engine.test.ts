@@ -89,6 +89,27 @@ function run({ events, now = WED_0703, days = 90, people = VISIBLE, timeZone = N
 const keys = (cs: Conflict[]) => cs.map((c) => c.key);
 const about = (cs: Conflict[], personId: string) => cs.filter((c) => c.person.id === personId);
 
+/** A seeded generator (mulberry32): the same seed, the same sequence. */
+function mulberry32(seed: number): () => number {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Fisher–Yates over a copy. */
+function shuffle<T>(xs: readonly T[], random: () => number): T[] {
+  const out = [...xs];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
 /** A one-off pair on Thursday 15 October, for boundary tests. */
 function pair(a: [string, string], b: [string, string], extraB: Partial<AgendaEventInput> = {}) {
   return [
@@ -331,9 +352,35 @@ describe('the contract’s identity and lifecycle tests (§5.7.4, engine level)'
     expect(run({ events: T1() })[0]!.instances.map((i) => i.when)).toContain('2026-10-28');
   });
 
-  it('T6 (engine level): a change put away and restored is the same row and times, so the same key', () => {
-    const k = keys(about(run({ events: T4() }), ID.milo));
-    expect(keys(about(run({ events: T4() }), ID.milo))).toEqual(k);
+  // T6 at engine level only: the inputs the reads give before, during and after a
+  // put-away and restore. That the database put-away and restore produce exactly
+  // these inputs (the same change row, the same times) is Package 3's service-level
+  // acceptance test (contract §5.7.4, marked P3); this test does not prove it.
+  it('T6 (engine level): the change put away, then restored as the same row and times: the T4 key returns', () => {
+    const changeKey = 'conflict.overlap:p-milo:e-swim-28.e-tutor:20261028T0300Z-20261028T0330Z';
+    expect(keys(about(run({ events: T4() }), ID.milo))).toContain(changeKey);
+    // Put away: the change row is gone and the series shows its own 28 October again.
+    const away = about(run({ events: T1() }), ID.milo);
+    expect(keys(away)).toEqual([STANDING]);
+    expect(away[0]!.instances.map((i) => i.when)).toContain('2026-10-28');
+    // Restored: built afresh, the same row id and times, a non-material field changed.
+    const restored = [
+      swimming({ exdates: ['2026-10-28T02:30:00Z'] }),
+      tutoring(),
+      timed(
+        'e-swim-28',
+        'Swimming lesson',
+        '2026-10-28T16:00:00+13:00',
+        '2026-10-28T16:45:00+13:00',
+        {
+          kind: 'activity',
+          people: [...att(ID.milo), ...resp(ID.alex)],
+        },
+      ),
+    ];
+    expect(keys(about(run({ events: restored }), ID.milo)).sort()).toEqual(
+      [STANDING, changeKey].sort(),
+    );
   });
 
   it('T7: the 21 October Tutoring skipped: no conflict that day; next date 28 October; same key', () => {
@@ -399,16 +446,55 @@ describe('the contract’s identity and lifecycle tests (§5.7.4, engine level)'
   // T16 is under exclusions; T17 is Package 3 (two adults' responses through the real services);
   // T18 is the privacy invariant below and in tests/integration/conflicts-engine.test.ts.
 
-  it('T19: shuffled inputs and repeated runs give identical conflicts, keys and order', () => {
-    const events = [...T4(), artClub(), dentist(), ...ROUTINE];
-    const base = JSON.stringify(run({ events }));
-    for (let n = 0; n < 12; n++) {
-      const shuffled = [...events]
-        .sort(() => (Math.sin(n * 97 + events.length) > 0 ? 1 : -1))
-        .reverse();
-      const people = n % 2 ? [...VISIBLE].reverse() : VISIBLE;
-      expect(JSON.stringify(run({ events: shuffled, people }))).toBe(base);
+  it('T19: seeded shuffles of events, people and the agenda’s days and items give identical output', () => {
+    const events = [
+      ...T4(),
+      artClub(),
+      dentist(),
+      ...ROUTINE,
+      ...pair(['18:00', '19:00'], ['18:30', '19:30']),
+    ];
+    const from = '2026-10-14';
+    const to = addDays(from, 89);
+    const placed = agenda({ from, to, timeZone: NZ, events });
+    const engine = (ev: AgendaEventInput[], people: ConflictPerson[], days: typeof placed) =>
+      conflicts({
+        now: WED_0703,
+        timeZone: NZ,
+        window: { from, to },
+        days,
+        coverage: { from, to },
+        events: ev,
+        people,
+      });
+    const base = engine(events, VISIBLE, placed);
+    expect(base.length).toBeGreaterThan(3);
+    const SEEDS = [1, 7, 42, 2026, 31337, 65_000, 123_457, 999_983];
+    const orders = new Set<string>();
+    const original = events.map((e) => e.id).join(',');
+    for (const seed of SEEDS) {
+      const random = mulberry32(seed);
+      const ev = shuffle(events, random);
+      const people = shuffle(VISIBLE, random);
+      // The agenda's own output reordered too: days, and the items within each day.
+      const days = shuffle(placed, random).map((d) => ({ ...d, items: shuffle(d.items, random) }));
+      orders.add(ev.map((e) => e.id).join(','));
+      const out = engine(ev, people, days);
+      // Complete output: keys, ranking, instances, facts and wording.
+      expect(out).toEqual(base);
+      expect(JSON.stringify(out)).toBe(JSON.stringify(base));
     }
+    // The shuffles really are different orders: not the input, not just its reverse.
+    expect(orders.size).toBe(SEEDS.length);
+    orders.delete(original);
+    orders.delete(
+      [...events]
+        .reverse()
+        .map((e) => e.id)
+        .join(','),
+    );
+    expect(orders.size).toBeGreaterThanOrEqual(SEEDS.length - 2);
+    expect(orders.size).toBeGreaterThan(2);
   });
 
   it('T20: every key matches insightKey, fits 200 characters and carries no record text', () => {

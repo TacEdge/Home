@@ -462,15 +462,24 @@ Earlier decisions already settle much of the shape:
 
       A standing `conflict.responsible` combines the two. No sentence says why, where, who should change or that anyone is unavailable. Package 3 places these in insights; Package 4 presents them.
     - **Interpretations the contract needed** (for the domain review):
-      - **"The same event"** is the same event row. A changed occurrence is a different row from its series, so a change that overlaps another occurrence of its own series is stated. It is rare: it needs a change moved onto the next repeat. Treating a change as part of its series would need the series id in the agenda's inputs, a change to the shared read that Package 2 does not make.
+      - **"The same event"** is the same event row. A changed occurrence is a different row from its series, so a change that overlaps another occurrence of its own series is stated.
+        - **Why that is right:** it is a genuine recorded overlap, not a series overlapping its own repeats (what §10 excludes). For example, the 21 October lesson moved onto 28 October's slot is a make-up lesson landing on the regular one.
+        - **The key** names the change's row and the series, so it is unambiguous.
+        - **The wording** is ambiguous for now: "Milo has Swimming and Swimming at the same time on Wednesday 28 October, 15:45–16:15." Telling two same-titled occurrences apart (by date, or "the moved Swimming") is deferred to the Package 3 and 4 presentation.
+        - **No schema or shared-read change** is needed or made.
       - **Routine** is Today's definition, by event. A changed occurrence of a routine series is not itself routine, so it can conflict, as it is notable on Forward.
       - **A standing window is the home wall clock.** For a series kept in another zone, the home-clock window moves when that zone changes its clocks, so the pair has two standing conflicts, one per window. This is §5.7.1's "two windows, two conflicts". A home-zone series keeps its key across Pacific/Auckland's changes (tested over April 2027).
       - **`when`** is the home date the overlap starts, even for an overlap that began before the window and is still running at `now`.
       - **Minutes.** Occurrence windows are UTC to the minute, as §13 sets. Two overlaps of the same two events differing only in seconds would share a key; HOME records minutes.
+        - **Under a minute:** an overlap shorter than a minute (possible only with seconds in synced times) is still an overlap. Its key and wording show the same minute twice (`…2200Z-2200Z`, "11:00–11:00"). That is a presentation limitation, left as it is.
+      - **The DST-change night.** A standing pair whose overlap spans the night Pacific/Auckland's clocks change has, for that one week, a different home-clock window. It is a second standing key for that week alone (for example `w0130-0230` beside `w0130-0330`). This is factual and rare (an overlap at about 2am on that Sunday), and is left as it is.
+      - **Many concurrent occurrences.** The number of conflicts is what it is: 400 occurrences that all overlap for one person give 79,800 pairs, about 630 ms. The sweep is bounded by that output, not by the window. Real household data comes nowhere near this. Presenting a long list in bounded form (caps and "+ N more") is Package 3's job.
     - **Evidence.**
       - **Unit tests** (`tests/unit/conflicts/conflicts-engine.test.ts`, 57):
-        - every boundary in contract §2.2: touching ends, one minute, identical times, overnight, multi-day, DST (home and foreign zones), routine and work-pair exclusions, the same series, all-day, visibility, changed occurrences;
-        - the engine-level cases of §5.7.4 by number: T1–T4, T7, T9–T13, T15, T16, T19 and T20, and engine-level forms of T5, T6, T8 and T14 (the same inputs give the same keys);
+        - the engine boundaries in contract §2.2: touching ends, one minute, identical times, overnight, multi-day, DST (home and foreign zones), routine and work-pair exclusions, the same series, all-day, visibility, changed occurrences. "Default people" is resolved by the shared read before the engine, so its evidence is the integration test below, not a unit test;
+        - the engine-level cases of §5.7.4 by number: T1–T4, T7, T9–T13, T15, T16, T19 and T20;
+        - **T19** shuffles events, people and the agenda's days and items with a seeded Fisher–Yates over eight fixed seeds, and asserts that every seed gives a different order (so not the input, and not only its reverse) and that the complete output is identical, deeply and byte for byte;
+        - **engine-level forms of T5, T6, T8 and T14:** the inputs the reads give before, during and after the change. T6 is the change put away (the change row gone, the series' own occurrence back), then restored as a fresh row with the same id and times. The T4 key returns. These show identity follows the inputs. That the database operations produce those inputs is Package 3's service-level acceptance (marked P3), and these tests do not claim it;
         - T17 is Package 3: it is about responses, which the engine never sees;
         - material and non-material changes;
         - multiple people;
@@ -483,6 +492,10 @@ Earlier decisions already settle much of the shape:
         - **T4:** a change made with `changeEventOccurrence` is its own occurrence-level conflict, keyed by the change's row and showing its series' people.
         - **T7:** a skip made with `skipEventOccurrence` keeps the standing key and moves its next date.
         - **T18, the non-interference invariant:** Sam adds a private event overlapping a household event Sam is on, a private one-off and a private weekly series naming Milo, and a private person on two overlapping private events. Alex's conflicts are equal deeply and byte for byte, and contain no private title; Sam's gain them.
+      - **Calendar default people** (`tests/integration/conflicts-default-people.test.ts`, through `connectCalendar`, `refreshCalendar` with a synthetic feed, and `setEventPerson`):
+        - **Household calendar:** a synced event with no people of its own, on a household calendar whose usual person is Milo, overlaps a household event Milo is on. Both adults get the conflict, with the same key, person, occurrences, facts and sentence. The engine has no default-people logic; the shared read resolves them.
+        - **Private calendar:** the same on Sam's private calendar is Sam's conflict only. Alex's list has nothing of it, not even the title.
+        - **Replacement:** a person recorded on the synced event replaces the calendar's usual people. The read gives only Isla, and Milo's conflict ends for both adults.
       - **Performance** (dev container; `conflicts-performance.test.ts`):
 
         | Data, 90 days | Occurrences | Conflicts (overlaps) | Agenda | Engine (warm) |
@@ -509,8 +522,17 @@ Earlier decisions already settle much of the shape:
         | The same-event exclusion removed | 1 |
         | The overlap-start tie-break removed | 1 |
         | `visibleTo` letting every private row through, in the integration test | 1 (the non-interference test) |
+        | The calendar's usual people not applied in the shared read (`readAgendaInputs`) | 2 (default-people tests) |
+        | The T19 shuffle doing nothing | T19's order-diversity check (1 order, not 8) |
+        | The T19 shuffle only reversing | T19's order-diversity check |
 
         **Adjusted after the first mutation run:** three mutations first survived. Touching ends had two redundant guards, so the redundant one was removed. The overnight mutation had changed only one of its two lines. The order test's key order happened to equal its time order, so it was given cases that disagree.
+    - **After the Package 2 review (PR #65).** Tests and documentation only; the engine is unchanged:
+      - the calendar default-people integration test;
+      - a seeded T19;
+      - a real change-and-restore sequence for T6, labelled engine-level;
+      - the corrected coverage claim;
+      - the decisions above on a change overlapping its own series, the DST-change night, overlaps under a minute and very many conflicts.
     - **Unchanged.** No schema, no migration, no dependency, no screen, no insight or response, no Kev. The shared agenda and its read are untouched. Forward still receives no conflicts (Package 3 connects them).
 
 ## Consequences
