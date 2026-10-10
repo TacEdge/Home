@@ -38,7 +38,7 @@ describe('tiers by kind of change', () => {
     expect(pr('src/app/(home)/today/today-view.tsx')).toMatchObject({
       tier: 'medium',
       mode: 'targeted',
-      specs: [SMOKE, 'today', 'today-screen'].sort(),
+      specs: [SMOKE, 'today', 'today-conflicts', 'today-screen'].sort(),
     });
     // Events screens are also used by People, the regular week and To sort
     // (which Today uses): their specs come too (ADR 0010 §8).
@@ -52,6 +52,7 @@ describe('tiers by kind of change', () => {
         SMOKE,
         'synced-events',
         'today',
+        'today-conflicts',
         'today-screen',
       ].sort(),
     );
@@ -83,12 +84,12 @@ describe('tiers by kind of change', () => {
     [
       'refresh on use reaches Today, Forward and a person’s page',
       'src/app/_calendar/refresh-on-use.tsx',
-      ['today-screen', 'events', 'people', 'calendars'],
+      ['today-conflicts', 'today-screen', 'events', 'people', 'calendars'],
     ],
     [
       'To sort is used by Today',
       'src/app/(home)/sort/copy.ts',
-      ['capture-sort', 'today', 'today-screen'],
+      ['capture-sort', 'today', 'today-conflicts', 'today-screen'],
     ],
     [
       'task forms are used by To sort',
@@ -193,7 +194,15 @@ describe('the highest-risk path decides', () => {
   it('docs plus a screen is medium', () => {
     expect(pr('docs/HOME-VISION.md', 'src/app/(home)/people/page.tsx')).toMatchObject({
       tier: 'medium',
-      specs: ['capture-sort', 'people', 'regular-week', SMOKE, 'today', 'today-screen'].sort(),
+      specs: [
+        'capture-sort',
+        'people',
+        'regular-week',
+        SMOKE,
+        'today',
+        'today-conflicts',
+        'today-screen',
+      ].sort(),
     });
   });
   it('a screen plus an unknown path is high', () => {
@@ -201,7 +210,7 @@ describe('the highest-risk path decides', () => {
   });
   it('specs from several screens are unioned', () => {
     expect(pr('src/app/(home)/today/page.tsx', 'src/app/(home)/home/page.tsx').specs).toEqual(
-      ['capture-sort', 'home-tasks', SMOKE, 'today', 'today-screen'].sort(),
+      ['capture-sort', 'home-tasks', SMOKE, 'today', 'today-conflicts', 'today-screen'].sort(),
     );
   });
 });

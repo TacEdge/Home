@@ -297,6 +297,9 @@ describe('every insight is traced', () => {
       'c-2',
     ]);
     const pattern: Record<(typeof INSIGHT_RULES)[number], RegExp> = {
+      // The conflict engine's own sentences (tests/unit/conflicts/); none arise here.
+      'conflict.responsible': /^.+ is recorded as responsible for both .+, which overlap .+\.$/,
+      'conflict.overlap': /^.+ (has .+ at the same time|’s .+ overlap regularly).+\.$/,
       'busy_day.count': /^(Tomorrow has \w+ things on|\w+ things on today)\.$/,
       'busy_day.late': /^[\w ,]+ (both|all) have something on after 6( tomorrow)?\.$/,
       'preparation.birthday': /^.+’s birthday is (today|tomorrow|(next )?\w+day)\.$/,
@@ -319,6 +322,29 @@ describe('every insight is traced', () => {
                 name: 'Two',
                 lastSyncStatus: 'unreachable',
               }),
+            ],
+          },
+          at(`2026-10-${day}T07:00:00+13:00`),
+        ),
+        // Conflicts tomorrow (M6): an overlap for Milo and one Alex is responsible for twice.
+        run(
+          {
+            events: [
+              ...WED,
+              ...[
+                ['e-2026-art', '15:00', '16:00', 'attending', ID.milo],
+                ['e-2026-dentist', '15:30', '16:30', 'attending', ID.milo],
+                ['e-2026-meeting', '10:00', '11:00', 'responsible', ID.alex],
+                ['e-2026-shift', '10:30', '11:30', 'responsible', ID.alex],
+              ].map(([id, from, to, role, person]) =>
+                timed(
+                  id!,
+                  id!.slice(7),
+                  `2026-10-${String(Number(day) + 1)}T${from}:00+13:00`,
+                  `2026-10-${String(Number(day) + 1)}T${to}:00+13:00`,
+                  { people: [{ personId: person!, role: role as 'attending' | 'responsible' }] },
+                ),
+              ),
             ],
           },
           at(`2026-10-${day}T07:00:00+13:00`),

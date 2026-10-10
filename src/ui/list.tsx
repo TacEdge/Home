@@ -26,6 +26,7 @@ export function ItemRow({
   detail,
   who,
   needsYou,
+  after,
 }: {
   title: React.ReactNode;
   href?: string;
@@ -36,6 +37,8 @@ export function ItemRow({
   who?: { name: string; colour?: PersonColour | null }[];
   /** The one Sun mark: a person needs to decide something here. */
   needsYou?: boolean;
+  /** Anything said about the item, under the row and outside its link (M6: conflict marks). */
+  after?: React.ReactNode;
 }) {
   const body = (
     <>
@@ -83,6 +86,7 @@ export function ItemRow({
       ) : (
         <div className={row}>{body}</div>
       )}
+      {after}
     </li>
   );
 }

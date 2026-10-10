@@ -58,10 +58,13 @@ export function AgendaItemRow({
   item,
   timeZone,
   people,
+  after,
 }: {
   item: AgendaItem;
   timeZone: string;
   people: Map<string, Person>;
+  /** Said under the row (M6: Today's conflict marks on Also today). */
+  after?: React.ReactNode;
 }) {
   switch (item.kind) {
     case 'event':
@@ -72,6 +75,7 @@ export function AgendaItemRow({
           title={item.title}
           detail={item.days > 1 ? `Day ${item.day} of ${item.days}` : undefined}
           who={who(item, people)}
+          after={after}
         />
       ) : (
         <ItemRow
@@ -79,6 +83,7 @@ export function AgendaItemRow({
           {...timedRow(item, timeZone)}
           title={item.title}
           who={who(item, people)}
+          after={after}
         />
       );
     case 'birthday':

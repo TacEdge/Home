@@ -1,6 +1,12 @@
 import { agenda, type AgendaEventInput } from '@/domain/engines/agenda';
 import { insights, type InsightPerson, type InsightProject } from '@/domain/engines/insights';
-import { today, type TodayCalendar, type TodayTask } from '@/domain/engines/today';
+import { conflicts } from '@/domain/engines/conflicts';
+import {
+  conflictPlacements,
+  today,
+  type TodayCalendar,
+  type TodayTask,
+} from '@/domain/engines/today';
 import { addDays, isoDateInZone } from '@/lib/dates';
 
 // The synthetic fixture household (docs/concepts/README.md) as pure engine
@@ -176,18 +182,34 @@ export function run(h: Household, now: Date) {
     tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: 'open', dueDate: t.dueDate })),
     projects,
   });
+  const model = today({
+    now,
+    timeZone,
+    days,
+    events: h.events,
+    people,
+    tasks,
+    calendars,
+    capturesWaiting: h.capturesWaiting ?? 0,
+  });
+  // The page's composition (M6 Package 3): the conflict engine over the same
+  // eight days, today's said on their items where Today shows them.
+  const window = { from, to: addDays(from, 7) };
+  const found = conflicts({
+    now,
+    timeZone,
+    window,
+    days,
+    coverage: window,
+    events: h.events,
+    people,
+  });
+  const placed = conflictPlacements(model);
   return {
     days,
-    today: today({
-      now,
-      timeZone,
-      days,
-      events: h.events,
-      people,
-      tasks,
-      calendars,
-      capturesWaiting: h.capturesWaiting ?? 0,
-    }),
+    today: model,
+    conflicts: found,
+    placed,
     insights: insights({
       now,
       timeZone,
@@ -198,6 +220,8 @@ export function run(h: Household, now: Date) {
       projects,
       calendars,
       dismissed: h.dismissed,
+      conflicts: found,
+      placed,
     }),
   };
 }

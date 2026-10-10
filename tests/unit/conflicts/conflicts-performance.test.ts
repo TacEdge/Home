@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agenda, type AgendaEventInput } from '@/domain/engines/agenda';
 import { conflicts, type ConflictPerson } from '@/domain/engines/conflicts';
+import { insights } from '@/domain/engines/insights';
 import { addDays } from '@/lib/dates';
 import { ID, NZ, PEOPLE, ROUTINE, timed, WEDNESDAY } from '../today/household';
 
@@ -126,5 +127,40 @@ describe('conflict engine performance over 90 days (contract §3.7)', () => {
   it('standing identity keeps a recurring pair to one conflict however long the window', () => {
     const r = measure(household(60, 0));
     expect(r.instances).toBeGreaterThan(r.conflicts * 10); // ~13 Wednesdays each, one key
+  });
+
+  it('Today’s composition (M6 Package 3): conflicts and insights over eight days of a 300-event household', () => {
+    const events = household(60, 240);
+    const to = addDays(FROM, 7);
+    const t0 = performance.now();
+    const days = agenda({ from: FROM, to, timeZone: NZ, events });
+    const t1 = performance.now();
+    const found = conflicts({
+      now: NOW,
+      timeZone: NZ,
+      window: { from: FROM, to },
+      days,
+      coverage: { from: FROM, to },
+      events,
+      people: VISIBLE,
+    });
+    const r = insights({
+      now: NOW,
+      timeZone: NZ,
+      days,
+      events,
+      people: PEOPLE,
+      tasks: [],
+      projects: [],
+      calendars: [],
+      conflicts: found,
+    });
+    const t2 = performance.now();
+    console.info(
+      `Today (8 days, 300 events): ${found.length} conflicts, ${r.all.length} insights; ` +
+        `agenda ${(t1 - t0).toFixed(0)} ms, conflicts and insights ${(t2 - t1).toFixed(1)} ms`,
+    );
+    expect(r.shown.length).toBeLessThanOrEqual(3);
+    expect(t2 - t1).toBeLessThan(1_000);
   });
 });

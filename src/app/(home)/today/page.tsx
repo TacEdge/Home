@@ -3,11 +3,12 @@ import { requestNow } from '@/app/_agenda/now';
 import { todayInput } from '@/app/_agenda/today-input';
 import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
 import { listCaptures } from '@/domain/captures/service';
-import { LOOKAHEAD_DAYS } from '@/domain/engines/insights';
+import { conflictMarks, LOOKAHEAD_DAYS } from '@/domain/engines/insights';
+import { conflictsOver } from '@/domain/insights/conflicts';
 import { insightsFor, insightsInput } from '@/domain/insights/today';
-import { today } from '@/domain/engines/today';
+import { conflictPlacements, today } from '@/domain/engines/today';
 import { env, realDataGateOpen } from '@/lib/env';
-import { isoDateInZone } from '@/lib/dates';
+import { addDays, isoDateInZone } from '@/lib/dates';
 import { requireActor } from '@/trust/session';
 import type { FactLookup } from './facts';
 import { TodayView } from './today-view';
@@ -32,16 +33,25 @@ export default async function TodayPage() {
   ]);
   const waiting = captures.filter((c) => c.status === 'new' || c.status === 'proposed').length;
   const model = today(todayInput(agenda, now, timeZone, waiting));
-  // Worth knowing: the same records, the reader's own dismissals applied (one more query).
+  // Conflicts (M6 Package 3, contract §4.5): the conflict engine over the same
+  // agenda, today and the next seven days. Today's are said on their items
+  // where Today shows them; the rest are listed in Worth knowing.
+  const records = {
+    events: agenda.events,
+    people: [...agenda.people.values()],
+    records: agenda.records,
+  };
+  const found = conflictsOver(records, agenda.days, now, timeZone, {
+    from: date,
+    to: addDays(date, LOOKAHEAD_DAYS),
+  });
+  const placed = conflictPlacements(model);
+  // Worth knowing: the same records, the reader's own responses applied (one more query).
   const worth = await insightsFor(
     actor,
-    insightsInput(
-      { events: agenda.events, people: [...agenda.people.values()], records: agenda.records },
-      agenda.days,
-      now,
-      timeZone,
-    ),
+    insightsInput(records, agenda.days, now, timeZone, new Set(), { conflicts: found, placed }),
   );
+  const marks = conflictMarks(worth, worth.responded, placed, timeZone);
 
   const lookup: FactLookup = {
     days: agenda.days,
@@ -60,7 +70,7 @@ export default async function TodayPage() {
   return (
     <>
       {stale ? <RefreshOnUse /> : null}
-      <TodayView model={model} lookup={lookup} linked={linked} worth={worth} />
+      <TodayView model={model} lookup={lookup} linked={linked} worth={worth} marks={marks} />
     </>
   );
 }
