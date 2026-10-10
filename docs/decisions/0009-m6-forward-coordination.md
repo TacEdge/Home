@@ -101,7 +101,7 @@ Earlier decisions already settle much of the shape:
 
 ### Architecture
 
-8. **There is still one agenda engine.** The M3–M5 loader (`readAgendaInputs`, `loadAgenda`) and engine (`src/domain/engines/agenda.ts`) stay the only place that places, expands and orders items. Forward reads 90 days through them, in one read.
+8. **There is still one agenda engine.** The M3–M5 loader (`readAgendaInputs`, `loadAgenda`) and engine (`src/domain/engines/agenda.ts`) stay the only place that places, expands and orders items. Forward reads 90 days through them, in one read, and the engine is told the range the agenda covered (§32: it refuses an agenda that does not cover the whole horizon).
 
    Two pure engines are added under `src/domain/engines/`:
    - **`forward.ts`**: horizons, units, notable or usual, load bands, the headline and caps;
@@ -401,6 +401,35 @@ Earlier decisions already settle much of the shape:
         - one held row dropped;
         - "+ N" off by one;
         - a read handing Sam's records to Alex, simulated in the invariant test, because a temporary edit to the visibility predicate was not permitted in this environment.
+    - **After the Package 1 review (PR #60).**
+      - **Coverage invariant.** The agenda leaves empty days out, so an empty stretch and a stretch that was never loaded looked the same, and an eight-day agenda gave a Month of "Nothing recorded". The engine's input now carries `coverage`: the home-date range the agenda was computed over.
+        - **When it refuses:** `forward()` throws `IncompleteAgendaError` unless the coverage starts on or before today and ends on or after the horizon's last day. Both ends are checked.
+        - **What it never does:** fetch, expand or fill in anything; it stays pure.
+        - **Tests:**
+          - complete Week, Month and Season coverage composes;
+          - wider coverage composes and changes nothing;
+          - eight days are refused for Month and Season;
+          - coverage starting after today is refused;
+          - coverage ending one day short is refused;
+          - an empty agenda over full coverage composes as "Nothing recorded".
+      - **Finished overnight items.** A carry-over from last night that has already ended, judged by its own recorded end and `now`, no longer takes a visible slot.
+        - **How:** `selection()` fills the cap with entries that still count first, then shows the chosen ones in row order. The rest are held, in row order, with `more` exactly their number.
+        - **What stays:** the full model keeps the item, and the load-count rule is unchanged.
+        - **Test:** a finished gig with two appointments on the same day shows the appointments and holds the gig; while the gig is still running, it is shown.
+      - **Retention test.** It now uses the engine's own identities (`entryKey`) and includes a real project target on a day where the cap applies. The target survives grouping on every horizon, is on the surface (targets sort before timed events), and "+ N" is exact. No product change was needed.
+      - **Privacy.** The non-interference test adds a private weekly event of Sam's naming Milo, a household person both adults see. Alex's Week, Month and Season models are equal both deeply and byte for byte (headlines, counts, the usual and every fact). Milo's usual gains the event for Sam only.
+      - **Mutations,** each failing its tests, with the code restored after:
+        - the coverage check removed (4 tests);
+        - the old "first by row order" selection (1);
+        - project targets dropped in grouping (4);
+        - Alex's read replaced by Sam's (the invariant).
+    - **Carry-forwards, recorded and not changed now:**
+      - **Future-starting routines** are notable until they become active: the usual is the regular week as of today, so a weekly series beginning in three weeks counts as notable in Season.
+      - **The listed headline for a multi-day item carried in from before today** says "today" ("Camp today."). Its wording is for the Package 4 presentation review.
+      - **A scheduled task whose window spans midnight** is placed on its start day only.
+      - **Unit loads can add up to more than the headline count**, because an event spanning two units counts in each unit and once in the headline.
+      - **Category order within a row** (scheduled tasks before timed events, whatever their times) is to be judged from the Package 4 screenshots.
+      - **The bounded regular-week recurrence work is accepted:** the usual re-expands each weekly series over 7–14 days for each household person on it.
     - **Unchanged.**
       - No schema, migration or new dependency.
       - No Forward screen: the page stays the plain 30-day list, apart from the scheduled-task rows and the test clock.

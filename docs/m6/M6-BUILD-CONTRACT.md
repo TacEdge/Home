@@ -537,6 +537,8 @@ A person's Coming up shows that person's conflict marks on their items, with the
 
 Every unit in range is drawn. A unit's items are the agenda's items on its days. An occurrence carried over several days is counted once per unit (`occurrenceKey`).
 
+**Coverage invariant (ADR 0009 §32).** The engine is given the range of home dates the agenda was computed over (`coverage`). It composes only when that range starts on or before today and ends on or after the horizon's last day. Otherwise it refuses (`IncompleteAgendaError`). It never fetches, expands or fills in days. An absent day inside the coverage was loaded and is empty; a day outside it is never described at all.
+
 ### 5.2 Usual or notable (`forward.usual`, `forward.notable`)
 
 - **Usual:** an unchanged occurrence of a series that is in at least one household person's regular week (`profile.regularWeek`: a plain weekly or fortnightly series with that person on it).
@@ -562,6 +564,7 @@ Every unit in range is drawn. A unit's items are the agenda's items on its days.
   | Season | 3 per month |
 
   The rest are counted ("+ N") and held in place.
+- **Which are shown:** entries that still count fill the cap first, so a carry-over from last night that has already ended never takes a visible slot from something still to come (ADR 0009 §32). The shown entries keep row order, and the held ones stay in the model.
 - **Order within a unit:**
   1. items with a current conflict for the reader;
   2. birthdays;

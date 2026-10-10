@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { agenda, type AgendaEventInput, type AgendaTaskInput } from '@/domain/engines/agenda';
 import {
+  entryKey,
   FORWARD_RULES,
   forward,
+  IncompleteAgendaError,
   HORIZONS,
   unitsOf,
   type ForwardConflict,
@@ -49,6 +51,7 @@ function run(h: House, now: Date, horizon: Horizon = 'week'): ForwardModel {
     timeZone,
     horizon,
     days,
+    coverage: { from, to: addDays(from, 89) },
     events: h.events,
     people,
     calendars: h.calendars ?? [fresh(now)],
@@ -239,35 +242,56 @@ describe('notable and the usual (§5.2)', () => {
   it.each(HORIZONS)(
     '%s: nothing is lost — every agenda item in range is in exactly one place per unit',
     (h) => {
-      const m = run({ events: HOUSE, tasks: SCHEDULED }, WED_0703, h);
+      // A real project target (Saturday 17th), on a day with enough else that caps bite.
+      const projects = [
+        { id: 'pr-fence', title: 'Back fence', status: 'active', targetDate: '2026-10-17' },
+      ];
+      const crowd = Array.from({ length: 4 }, (_, k) =>
+        timed(
+          `e-sat${k}`,
+          `Sat ${k}`,
+          `2026-10-17T${10 + k}:00:00+13:00`,
+          `2026-10-17T${10 + k}:30:00+13:00`,
+          { people: att(ID.sam) },
+        ),
+      );
+      const events = [...HOUSE, ...crowd];
+      const m = run({ events, tasks: SCHEDULED, projects }, WED_0703, h);
       const days = agenda({
         from: '2026-10-14',
         to: m.to,
         timeZone: NZ,
-        events: HOUSE,
+        events,
         people: PEOPLE.map((p) => ({ id: p.id, name: p.name, dateOfBirth: p.dateOfBirth })),
         tasks: SCHEDULED,
+        projects,
       });
       for (const u of m.units) {
         const placed = [...u.notable, ...u.usual].map((e) => e.key);
         expect(new Set(placed).size).toBe(placed.length);
+        // The engine's own identities, so every kind (targets included) is compared exactly.
         const expected = new Set(
           days
             .filter((d) => d.date >= u.from && d.date <= u.to)
-            .flatMap((d) =>
-              d.items.map((i) =>
-                i.kind === 'event'
-                  ? `${i.eventId}:${i.occurrenceDate}`
-                  : i.kind === 'birthday'
-                    ? `birthday:${i.personId}:${i.date}`
-                    : `${i.kind}:${'taskId' in i ? i.taskId : ''}`,
-              ),
-            ),
+            .flatMap((d) => d.items.map(entryKey)),
         );
         expect(new Set(placed)).toEqual(expected);
         expect(u.shown.length + u.rest.length).toBe(u.notable.length);
         expect(u.more).toBe(u.rest.length);
       }
+      // The target survives grouping and the cap, with its exact identity.
+      const target = 'project_target:pr-fence:2026-10-17';
+      const unit = m.units.find((u) => u.from <= '2026-10-17' && u.to >= '2026-10-17')!;
+      expect(unit.notable.map((e) => e.key)).toContain(target);
+      expect(unit.notable.find((e) => e.key === target)!.facts).toEqual([
+        { kind: 'project', id: 'pr-fence' },
+      ]);
+      const cap = { week: 2, month: 3, season: 3 }[h];
+      expect(unit.notable.length).toBeGreaterThan(cap);
+      // Ordered by kind: the target comes before the timed events, so it is on the surface.
+      expect(unit.shown.map((e) => e.key)).toContain(target);
+      expect(unit.rest.map((e) => e.key)).not.toContain(target);
+      expect(unit.more).toBe(unit.notable.length - cap);
     },
   );
 });
@@ -730,6 +754,7 @@ describe('performance (measured, M6 contract §3.7)', () => {
         timeZone: NZ,
         horizon,
         days,
+        coverage: { from: '2026-10-14', to: '2027-01-11' },
         events,
         people: PEOPLE,
         calendars: [fresh(WED_0703)],
@@ -741,5 +766,117 @@ describe('performance (measured, M6 contract §3.7)', () => {
     );
     expect(models[2]!.counts.events).toBe(240 + 0); // every one-off once; series are usual
     expect(ms).toBeLessThan(1000);
+  });
+});
+
+describe('the coverage invariant (ADR 0009 §32, after the Package 1 review)', () => {
+  // The agenda leaves empty days out, so the engine is told what was loaded;
+  // a stretch that was never loaded is refused, never shown as "nothing recorded".
+  const compose = (horizon: Horizon, coverage: { from: string; to: string }, loaded = coverage) =>
+    forward({
+      now: WED_0703,
+      timeZone: NZ,
+      horizon,
+      days: agenda({ from: loaded.from, to: loaded.to, timeZone: NZ, events: LATER }),
+      coverage,
+      events: LATER,
+      people: PEOPLE,
+      calendars: [fresh(WED_0703)],
+    });
+  const LATER = [
+    ...ROUTINE,
+    timed('e-later', 'Later', '2026-10-30T10:00:00+13:00', '2026-10-30T11:00:00+13:00', {
+      people: att(ID.sam),
+    }),
+  ];
+
+  it.each([
+    ['week', '2026-10-20'],
+    ['month', '2026-11-12'],
+    ['season', '2027-01-11'],
+  ] as const)('complete %s coverage composes', (h, to) => {
+    expect(compose(h, { from: '2026-10-14', to }).to).toBe(to);
+  });
+
+  it('coverage wider than the horizon composes, and the extra days are not used', () => {
+    expect(compose('week', { from: '2026-10-01', to: '2027-01-11' }).counts).toEqual(
+      compose('week', { from: '2026-10-14', to: '2026-10-20' }).counts,
+    );
+  });
+
+  it('an eight-day agenda is refused for Month and Season; it is enough for Week', () => {
+    const eight = { from: '2026-10-14', to: '2026-10-21' };
+    expect(() => compose('month', eight)).toThrow(IncompleteAgendaError);
+    expect(() => compose('season', eight)).toThrow(IncompleteAgendaError);
+    expect(() => compose('week', eight)).not.toThrow();
+  });
+
+  it('coverage that starts after today is refused', () => {
+    expect(() => compose('week', { from: '2026-10-15', to: '2027-01-11' })).toThrow(
+      /agenda covers 2026-10-15\.\.2027-01-11, but the horizon needs 2026-10-14\.\.2026-10-20/,
+    );
+  });
+
+  it('coverage that ends one day before the horizon ends is refused', () => {
+    expect(() => compose('month', { from: '2026-10-14', to: '2026-11-11' })).toThrow(
+      IncompleteAgendaError,
+    );
+    expect(() => compose('month', { from: '2026-10-14', to: '2026-11-12' })).not.toThrow();
+  });
+
+  it('a sparse agenda over full coverage composes: absent days were loaded and empty', () => {
+    const m = forward({
+      now: WED_0703,
+      timeZone: NZ,
+      horizon: 'season',
+      days: [],
+      coverage: { from: '2026-10-14', to: '2027-01-11' },
+      events: [],
+      people: PEOPLE.filter((p) => p.id !== ID.nana),
+      calendars: [fresh(WED_0703)],
+    });
+    expect(m.headline.rule).toBe('forward.headline.nothing');
+    expect(m.units.every((u) => u.load.text === 'Nothing recorded')).toBe(true);
+  });
+
+  it('no false "nothing recorded": the event on 30 October is either counted or refused', () => {
+    expect(() => compose('month', { from: '2026-10-14', to: '2026-10-21' })).toThrow();
+    const m = compose('month', { from: '2026-10-14', to: '2026-11-12' });
+    expect(m.units[2]!.load.text).toBe('One thing recorded');
+    expect(m.headline.text).not.toMatch(/^Just the usual|^Nothing recorded/);
+  });
+});
+
+describe('finished overnight items (after the Package 1 review)', () => {
+  it('a carry-over from last night that has ended never displaces what is still to come', () => {
+    const late = timed(
+      'e-late',
+      'Late gig',
+      '2026-10-13T22:00:00+13:00',
+      '2026-10-14T01:00:00+13:00',
+      {
+        people: att(ID.alex),
+      },
+    );
+    const a = timed('e-a', 'Dentist', '2026-10-14T10:00:00+13:00', '2026-10-14T11:00:00+13:00', {
+      people: att(ID.alex),
+    });
+    const b = timed('e-b', 'Haircut', '2026-10-14T12:00:00+13:00', '2026-10-14T13:00:00+13:00', {
+      people: att(ID.alex),
+    });
+    const u = run({ events: [...ROUTINE, late, a, b] }, WED_0703).units[0]!;
+    expect(u.notable.map((e) => e.key)).toEqual([
+      'e-late:2026-10-13',
+      'e-a:2026-10-14',
+      'e-b:2026-10-14',
+    ]); // the full model, in row order, keeps it
+    expect(u.shown.map((e) => e.key)).toEqual(['e-a:2026-10-14', 'e-b:2026-10-14']);
+    expect(u.rest.map((e) => e.key)).toEqual(['e-late:2026-10-13']);
+    expect(u.more).toBe(1);
+    expect(u.load.count).toBe(2); // the count rule is unchanged
+    // While it is still running it counts, and it is on the surface again.
+    const early = run({ events: [...ROUTINE, late, a, b] }, at('2026-10-14T00:30:00+13:00'))
+      .units[0]!;
+    expect(early.shown.map((e) => e.key)).toEqual(['e-late:2026-10-13', 'e-a:2026-10-14']);
   });
 });

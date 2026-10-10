@@ -60,7 +60,16 @@ async function compose(actor: UserActor, now = NOW) {
   return Object.fromEntries(
     HORIZONS.map((horizon) => [
       horizon,
-      forward({ now, timeZone: ZONE, horizon, days, events: inputs.events, people, calendars }),
+      forward({
+        now,
+        timeZone: ZONE,
+        horizon,
+        days,
+        coverage: { from, to: addDays(from, 89) },
+        events: inputs.events,
+        people,
+        calendars,
+      }),
     ]),
   ) as Record<(typeof HORIZONS)[number], ReturnType<typeof forward>>;
 }
@@ -151,6 +160,23 @@ describe('non-interference (contract §8.2)', () => {
       [{ personId: id.sam, role: 'attending' }],
       deps,
     );
+    // A private weekly event naming a shared household person: the path most likely
+    // to reach another person's usual, since the usual is worked out per person.
+    await createEventWithPeople(
+      h.sam,
+      {
+        title: 'Private Milo weekly',
+        kind: 'activity',
+        visibility: 'private',
+        rrule: 'FREQ=WEEKLY;BYDAY=FR',
+        time: timed('2026-10-16T16:00:00+13:00', '2026-10-16T17:00:00+13:00'),
+      },
+      [
+        { personId: id.milo, role: 'attending' },
+        { personId: id.sam, role: 'responsible' },
+      ],
+      deps,
+    );
     for (const day of ['2026-10-16', '2026-11-05', '2026-12-18'])
       await createEventWithPeople(
         h.sam,
@@ -199,6 +225,8 @@ describe('non-interference (contract §8.2)', () => {
     const alexAfter = await compose(h.alex);
     for (const horizon of HORIZONS)
       expect(alexAfter[horizon], horizon).toEqual(alexBefore[horizon]);
+    // Byte for byte too: headlines, counts, the usual and every source reference.
+    expect(JSON.stringify(alexAfter)).toBe(JSON.stringify(alexBefore));
     expect(JSON.stringify(alexAfter)).not.toMatch(/Private|Secret/);
 
     // The same records reach their owner: the invariant is not vacuous.
@@ -209,6 +237,17 @@ describe('non-interference (contract §8.2)', () => {
     expect(samAfter.week.usual.map((w) => w.name)).toContain('Sam FE');
     expect(samBefore.week.usual.map((w) => w.name)).not.toContain('Sam FE');
     expect(JSON.stringify(samAfter.month)).toContain('Private weekly');
+    // Milo's usual changes for Sam, never for Alex.
+    const miloUsual = (m: typeof samAfter) =>
+      m.week.usual.find((w) => w.personId === id.milo)?.entries.map((e) => e.title) ?? [];
+    expect(miloUsual(samAfter)).toContain('Private Milo weekly');
+    expect(miloUsual(samBefore)).not.toContain('Private Milo weekly');
+    expect(miloUsual(alexAfter)).toEqual(miloUsual(alexBefore));
+    expect(
+      samAfter.season.units
+        .flatMap((u) => u.usual)
+        .some((e) => 'title' in e.item && e.item.title === 'Private Milo weekly'),
+    ).toBe(true);
   });
 });
 

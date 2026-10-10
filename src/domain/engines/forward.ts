@@ -93,8 +93,16 @@ export type ForwardInput = {
   now: Date;
   timeZone: string;
   horizon: Horizon;
-  /** The agenda engine's output from today, covering at least the horizon. */
+  /** The agenda engine's output. Days with nothing on are absent from it. */
   days: readonly AgendaDay[];
+  /**
+   * The range of home dates the agenda was computed over (its `from` and
+   * `to`, inclusive). The agenda leaves empty days out, so only this says
+   * which absent days were loaded and empty and which were never loaded. It
+   * must cover the whole horizon, or the engine refuses to compose (ADR 0009
+   * §32): an unloaded stretch is never presented as "nothing recorded".
+   */
+  coverage: { from: IsoDate; to: IsoDate };
   /** The events the agenda read, with their people: what the regular week is derived from. */
   events: readonly AgendaEventInput[];
   /** The reader's visible people, in the order People lists them. */
@@ -322,6 +330,25 @@ function spanLabel(from: IsoDate, to: IsoDate): string {
     : `${a.day} ${MONTH_SHORT[a.month - 1]}–${b.day} ${MONTH_SHORT[b.month - 1]}`;
 }
 
+/**
+ * Which notable entries are on the surface (ADR 0009 §32, after the Package 1
+ * review): those that still count first, so a carry-over from last night that
+ * has already ended (`counts: false`, by its own recorded end and `now`) never
+ * takes a visible slot from something still to come. Within each group, and
+ * on the surface, the row order holds. Everything else is held in `rest`, in
+ * row order; `more` is exactly its length. Nothing is ranked by importance.
+ */
+export function selection(
+  notable: readonly ForwardEntry[],
+  cap: number,
+): { shown: ForwardEntry[]; rest: ForwardEntry[]; more: number } {
+  const preferred = [...notable.filter((e) => e.counts), ...notable.filter((e) => !e.counts)];
+  const picked = new Set(preferred.slice(0, cap).map((e) => e.key));
+  const shown = notable.filter((e) => picked.has(e.key));
+  const rest = notable.filter((e) => !picked.has(e.key));
+  return { shown, rest, more: rest.length };
+}
+
 function bandOf(unit: ForwardUnit['unit'], count: number): 0 | 1 | 2 | 3 {
   const steps = unit === 'day' ? LOAD_BANDS.day : LOAD_BANDS.period;
   return steps.filter((s) => count >= s).length as 0 | 1 | 2 | 3;
@@ -342,10 +369,29 @@ function nameOf(i: AgendaItem): string {
   return i.kind === 'birthday' ? `${i.name}’s birthday` : i.title;
 }
 
+/** Thrown when the agenda handed over does not cover the whole horizon. */
+export class IncompleteAgendaError extends RangeError {
+  constructor(
+    readonly needed: { from: IsoDate; to: IsoDate },
+    readonly coverage: { from: IsoDate; to: IsoDate },
+  ) {
+    super(
+      `agenda covers ${coverage.from}..${coverage.to}, but the horizon needs ${needed.from}..${needed.to}`,
+    );
+    this.name = 'IncompleteAgendaError';
+  }
+}
+
 export function forward(input: ForwardInput): ForwardModel {
-  const { now, timeZone, horizon } = input;
+  const { now, timeZone, horizon, coverage } = input;
   const today = homeDate(now, timeZone);
   const to = addDays(today, HORIZON_DAYS[horizon] - 1);
+  // The coverage invariant: both ends of the horizon must have been loaded.
+  // Nothing is fetched, expanded or filled in here; a short agenda is refused.
+  parseIsoDate(coverage.from);
+  parseIsoDate(coverage.to);
+  if (coverage.from > today || coverage.to < to)
+    throw new IncompleteAgendaError({ from: today, to }, coverage);
   const inRange = input.days.filter((d) => d.date >= today && d.date <= to);
 
   // The usual (§5.2): unchanged occurrences of series in a household
@@ -403,9 +449,7 @@ export function forward(input: ForwardInput): ForwardModel {
       rule: 'forward.row',
       ...u,
       notable,
-      shown: notable.slice(0, cap),
-      rest: notable.slice(cap),
-      more: Math.max(0, notable.length - cap),
+      ...selection(notable, cap),
       usual,
       load: {
         rule: 'forward.load',
