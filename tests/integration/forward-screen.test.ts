@@ -427,6 +427,11 @@ describe('cross-surface: one response is a response everywhere, for its reader o
   it('Not useful from Milo’s page on another conflict: the same everywhere, audited with the kind only', async () => {
     const alexBefore = await pages(h.alex);
     const before = await counts();
+    const responds = async () =>
+      (await listAudit(h.sam, { limit: 200 }, deps)).rows
+        .filter((r) => r.event === 'insight_response.respond')
+        .map((r) => JSON.stringify(r.meta));
+    const metasBefore = await responds();
     expect(await respond(h.sam, key.piano, 'not_useful', 'person')).toMatchObject({
       response: 'not_useful',
       already: false,
@@ -451,14 +456,16 @@ describe('cross-surface: one response is a response everywhere, for its reader o
     expect([...today.shown, ...today.rest].map((i) => i.key)).not.toContain(key.piano);
     expect((await person(h.sam, id.milo)).marks.size).toBe(0);
 
-    const mine = (await listAudit(h.sam, { limit: 200 }, deps)).rows.filter(
-      (r) => r.event === 'insight_response.respond',
+    // Audited with the kind only. The audit log is kept across files (it is
+    // not domain data), so Sam's rows from other suites may be here too: this
+    // response adds exactly one row, and every one carries only a kind.
+    const metas = await responds();
+    expect(metas.length).toBe(metasBefore.length + 1);
+    expect(metas.filter((m) => m === '{"response":"not_useful"}')).toHaveLength(
+      metasBefore.filter((m) => m === '{"response":"not_useful"}').length + 1,
     );
-    expect(mine.map((r) => JSON.stringify(r.meta)).sort()).toEqual([
-      '{"response":"dismissed"}',
-      '{"response":"not_useful"}',
-    ]);
-    expect(JSON.stringify(mine)).not.toMatch(/Piano|Swim test|Art club|conflict\./);
+    for (const m of metas) expect(m).toMatch(/^\{"response":"(dismissed|not_useful)"\}$/);
+    expect(JSON.stringify(metas)).not.toMatch(/Piano|Swim test|Art club|conflict\./);
 
     const alexAfter = await pages(h.alex);
     for (const x of HORIZONS) expect(seen(alexAfter[x]), x).toBe(seen(alexBefore[x]));
