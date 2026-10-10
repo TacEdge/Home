@@ -1,5 +1,4 @@
-# Never deployed: reference prototype, docs, tests, CI, local tooling.
-prototype
+# Never deployed: docs, tests, CI, local tooling.
 docs
 tests
 .github

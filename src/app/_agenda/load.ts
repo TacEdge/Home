@@ -36,16 +36,21 @@ export function todayInHomeZone(): IsoDate {
   return isoDateInZone(new Date(), env.HOME_TIMEZONE);
 }
 
-/** The agenda from `from` for `days` days (Forward: today for 30). */
+/**
+ * The agenda from `from` for `days` days (Forward: today for 30). `today`
+ * is the home date the screen reads as today: the real one unless the
+ * screen took its now from the test time source (`requestNow`).
+ */
 export async function loadAgenda(
   actor: UserActor,
   from: IsoDate,
   days: number,
+  today: IsoDate = todayInHomeZone(),
 ): Promise<LoadedAgenda> {
   const to = addDays(from, days - 1);
   const { events, people, tasks, projects, records } = await readAgendaInputs(actor);
   return {
-    today: todayInHomeZone(),
+    today,
     from,
     to,
     days: agenda({

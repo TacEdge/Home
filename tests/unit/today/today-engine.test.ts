@@ -654,3 +654,50 @@ describe('quiet, first-run and incomplete are told apart', () => {
     expect(run({ events: WED, capturesWaiting: -1 }, now).today.toSort).toBe(0);
   });
 });
+
+describe('scheduled tasks on the shared agenda (M6 Package 1, ADR 0009 §26)', () => {
+  // The agenda now places open scheduled tasks; Today still says each task
+  // once, under To do, never under Also today or Earlier today.
+  it('a task scheduled today is in To do once and nowhere else, by day and in the evening', async () => {
+    const { agenda } = await import('@/domain/engines/agenda');
+    const { today } = await import('@/domain/engines/today');
+    for (const iso of ['2026-10-14T07:03:00+13:00', '2026-10-14T22:00:00+13:00']) {
+      const now = at(iso);
+      const days = agenda({
+        from: '2026-10-14',
+        to: '2026-10-21',
+        timeZone: NZ,
+        events: WED,
+        tasks: TASKS.map((t) => ({
+          id: t.id,
+          title: t.title,
+          status: 'open',
+          dueDate: t.dueDate,
+          scheduledStartsAt: t.scheduledStartsAt,
+          scheduledEndsAt: t.scheduledStartsAt
+            ? new Date(t.scheduledStartsAt.getTime() + 3_600_000)
+            : null,
+        })),
+      });
+      expect(days[0]!.items.some((i) => i.kind === 'task_scheduled')).toBe(true);
+      const m = today({
+        now,
+        timeZone: NZ,
+        days,
+        events: WED,
+        people: PEOPLE,
+        tasks: TASKS,
+        calendars: [fresh(now)],
+        capturesWaiting: 0,
+      });
+      expect(m.todo.all.filter((e) => e.task.id === 't-plumber')).toHaveLength(1);
+      expect(m.alsoToday.some((i) => i.kind === 'task_scheduled')).toBe(false);
+      expect((m.evening?.earlier ?? []).some((i) => i.kind === 'task_scheduled')).toBe(false);
+      expect(
+        m.personLines
+          .flatMap((l) => l.entries)
+          .some((e) => e.item.kind !== 'event' && e.item.kind !== 'birthday'),
+      ).toBe(false);
+    }
+  });
+});

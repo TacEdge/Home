@@ -82,7 +82,6 @@ export default defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
-    'prototype/**', // reference only; never linted, built or deployed
     'coverage/**',
     'playwright-report/**',
     'test-results/**',

@@ -85,6 +85,11 @@ export type InsightsInput = {
   calendars: readonly TodayCalendar[];
   /** The reader's own dismissed keys. */
   dismissed?: ReadonlySet<string>;
+  /**
+   * The last day the detectors look at (ADR 0009 §18): today and the next
+   * seven days unless a surface asks for its own window. Today's is the default.
+   */
+  through?: IsoDate;
 };
 
 export type Insights = {
@@ -136,7 +141,7 @@ function sinceWord(instant: Date, today: IsoDate, timeZone: string): string {
 export function insights(input: InsightsInput): Insights {
   const { now, timeZone, days, people } = input;
   const today = homeDate(now, timeZone);
-  const last = addDays(today, LOOKAHEAD_DAYS);
+  const last = input.through ?? addDays(today, LOOKAHEAD_DAYS);
   const household = new Set(people.filter((p) => p.inHousehold).map((p) => p.id));
   const routine = routineEvents(input.events, household);
   const found = new Map<string, Insight>();

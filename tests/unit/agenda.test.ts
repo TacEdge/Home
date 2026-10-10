@@ -282,3 +282,82 @@ describe('forPerson', () => {
     expect(forPerson(days, 'p-nobody')).toEqual([]);
   });
 });
+
+describe('scheduled tasks (M6 Package 1, ADR 0009 §26)', () => {
+  const task = (
+    id: string,
+    title: string,
+    startsAt: string | null,
+    endsAt: string | null,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    id,
+    title,
+    status: 'open',
+    dueDate: null,
+    scheduledStartsAt: startsAt ? new Date(startsAt) : null,
+    scheduledEndsAt: endsAt ? new Date(endsAt) : null,
+    ...extra,
+  });
+
+  it('an open task with a scheduled window is a timed item on the home day it starts', () => {
+    const items = agendaDay({
+      timeZone: NZ,
+      date: DAY,
+      tasks: [task('t-1', 'Call the plumber', '2026-10-13T21:00:00Z', '2026-10-13T22:00:00Z')],
+    });
+    expect(items).toEqual([
+      {
+        kind: 'task_scheduled',
+        date: DAY,
+        taskId: 't-1',
+        title: 'Call the plumber',
+        startsAt: new Date('2026-10-13T21:00:00Z'),
+        endsAt: new Date('2026-10-13T22:00:00Z'),
+      },
+    ]);
+  });
+
+  it('is placed by the home zone, not UTC: 23:30 UTC on the 13th is the 14th in Auckland', () => {
+    const t = task('t-1', 'Late call', '2026-10-13T23:30:00Z', '2026-10-14T00:00:00Z');
+    expect(agenda({ timeZone: NZ, from: '2026-10-13', to: '2026-10-14', tasks: [t] })).toEqual([
+      expect.objectContaining({ date: '2026-10-14' }),
+    ]);
+    expect(
+      agenda({ timeZone: 'UTC', from: '2026-10-13', to: '2026-10-14', tasks: [t] })[0]!.date,
+    ).toBe('2026-10-13');
+  });
+
+  it('sits among timed events by start, after an event at the same start', () => {
+    const items = agendaDay({
+      timeZone: NZ,
+      date: DAY,
+      events: [timed('e', 'Dentist', '2026-10-14T02:00:00Z', '2026-10-14T03:00:00Z')],
+      tasks: [
+        task('t-a', 'Ring school', '2026-10-14T02:00:00Z', '2026-10-14T02:15:00Z'),
+        task('t-b', 'Book WOF', '2026-10-14T01:00:00Z', '2026-10-14T01:15:00Z'),
+      ],
+    });
+    expect(items.map(label)).toEqual([
+      'task_scheduled:Book WOF',
+      'timed:Dentist',
+      'task_scheduled:Ring school',
+    ]);
+  });
+
+  it('done, dropped and unscheduled tasks are not placed; a due and scheduled task is both', () => {
+    const items = agendaDay({
+      timeZone: NZ,
+      date: DAY,
+      tasks: [
+        task('t-done', 'Done', '2026-10-14T01:00:00Z', '2026-10-14T02:00:00Z', { status: 'done' }),
+        task('t-drop', 'Dropped', '2026-10-14T01:00:00Z', '2026-10-14T02:00:00Z', {
+          status: 'dropped',
+        }),
+        task('t-none', 'Someday', null, null),
+        task('t-both', 'Both', '2026-10-14T01:00:00Z', '2026-10-14T02:00:00Z', { dueDate: DAY }),
+      ],
+    });
+    expect(items.map(label)).toEqual(['task_due:Both', 'task_scheduled:Both']);
+  });
+});

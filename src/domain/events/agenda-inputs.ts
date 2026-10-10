@@ -78,7 +78,14 @@ export async function readAgendaInputs(actor: UserActor, deps: Deps = {}): Promi
       ).people,
     })),
     people,
-    tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, dueDate: t.dueDate })),
+    tasks: tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      dueDate: t.dueDate,
+      scheduledStartsAt: t.scheduledStartsAt,
+      scheduledEndsAt: t.scheduledEndsAt,
+    })),
     projects: projects.map((p) => ({
       id: p.id,
       title: p.title,

@@ -87,7 +87,9 @@ describe('Activity follows the affected record (P-1)', () => {
       'person.update',
       'person.create',
     ]);
-  });
+    // Four Activity reads over the shared audit log, which grows with every suite before
+    // it; it once passed vitest's 5 s default in a full verify (M6 Package 1).
+  }, 30_000);
 
   it('archiving does not change who sees the record or its rows', async () => {
     const mine = await createPerson(h.sam, privateOf('sam'), deps);

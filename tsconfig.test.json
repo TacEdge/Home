@@ -15,5 +15,5 @@
     ".next-narrow/types/**/*.ts",
     ".next-narrow/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "prototype", ".next", ".next-*", "out"]
+  "exclude": ["node_modules", ".next", ".next-*", "out"]
 }

@@ -103,6 +103,15 @@ export function AgendaItemRow({
       return (
         <ItemRow href={`/tasks/${item.taskId}`} time="All day" title={item.title} detail="Due" />
       );
+    case 'task_scheduled':
+      return (
+        <ItemRow
+          href={`/tasks/${item.taskId}`}
+          time={clock(item.startsAt, timeZone)}
+          title={item.title}
+          detail={`Scheduled until ${clock(item.endsAt, timeZone)}`}
+        />
+      );
   }
 }
 

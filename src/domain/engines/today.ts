@@ -223,7 +223,10 @@ export function today(input: TodayInput): TodayModel {
   const routine = routineEvents(input.events, household);
   const isRoutine = (i: EventItem) => routine.has(i.eventId);
 
-  const todays = itemsOn(days, date).filter((i) => i.kind !== 'task_due');
+  // Tasks are said once, under To do (§5.5), whether due or scheduled.
+  const todays = itemsOn(days, date).filter(
+    (i) => i.kind !== 'task_due' && i.kind !== 'task_scheduled',
+  );
   const events = eventsOn(days, date);
   const timed = events.filter((i): i is TimedItem => !i.allDay);
   const unhealthy = unhealthyCalendars(input.calendars, now);
