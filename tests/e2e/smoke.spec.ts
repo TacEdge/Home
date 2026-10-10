@@ -58,7 +58,8 @@ test('Today and Forward render, and the switch moves between them', async ({ pag
   await page.getByRole('link', { name: 'Forward' }).first().click();
   await expect(page).toHaveURL(/\/forward$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Forward' })).toBeVisible();
-  await expect(page.getByText(SHARED)).toBeVisible();
+  // (The headline's "based on" list names it too: look in Coming up.)
+  await expect(page.locator('li[data-unit]').getByText(SHARED)).toBeVisible();
   await page.getByRole('link', { name: 'Today' }).first().click();
   await expect(page).toHaveURL(/\/today$/);
 });
@@ -79,8 +80,8 @@ test('two adults: Alex’s private record is Alex’s alone; the household’s i
   const alexPage = await alex.newPage();
   await signInAsFixtureAdult(alexPage, 'alex');
   await alexPage.goto('/forward');
-  await expect(alexPage.getByText(PRIVATE)).toBeVisible();
-  await expect(alexPage.getByText(SHARED)).toBeVisible();
+  await expect(alexPage.locator('li[data-unit]').getByText(PRIVATE)).toBeVisible();
+  await expect(alexPage.locator('li[data-unit]').getByText(SHARED)).toBeVisible();
   await alex.close();
 
   const sam = await browser.newContext();
@@ -91,7 +92,7 @@ test('two adults: Alex’s private record is Alex’s alone; the household’s i
     await expect(samPage.locator('body')).not.toContainText(PRIVATE);
   }
   await samPage.goto('/forward');
-  await expect(samPage.getByText(SHARED)).toBeVisible();
+  await expect(samPage.locator('li[data-unit]').getByText(SHARED)).toBeVisible();
   // Asked for directly, the private record does not exist for Sam.
   const res = await samPage.goto(`/events/${privateId}`);
   expect(res?.status()).toBe(404);

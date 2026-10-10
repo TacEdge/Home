@@ -3,6 +3,7 @@ import { allDayEvent, googleFeed, nzEvent, vevent } from '../fixtures/calendars/
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { addressFor, failFeed, writeFeed } from './calendar-feeds';
 import { fixtureAdultContext, signInAsFixtureAdult } from './fixture-adults';
+import { openFolds, unitFor, weekdayShort } from './forward-units';
 import { withDb } from './helpers';
 
 // Synced events across the screens (M4 contract §5.2; ADR 0007 §13, §14,
@@ -193,11 +194,12 @@ test('Today and Forward: synced events sit among the manual ones, in agenda orde
   expect(await page.locator('main').innerText()).not.toMatch(PROVIDER_WORDS);
   await expectAccessible(page, 'today with synced events');
 
-  await page.goto('/forward');
+  await page.goto('/forward?h=month');
+  await openFolds(page);
   const swims = page.getByRole('link', { name: /Swim squad/ });
-  expect(await swims.count()).toBeGreaterThanOrEqual(4); // weekly, over 30 days
-  await expect(page.getByRole('link', { name: /Board games/ })).toBeVisible();
-  await expect(page.getByRole('link', { name: /London call/ })).toBeVisible();
+  expect(await swims.count()).toBeGreaterThanOrEqual(4); // weekly, over 30 days: one in each week
+  await expect(page.getByRole('link', { name: /Board games/ }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /London call/ }).first()).toBeVisible();
   const main = await page.locator('main').innerText();
   expect(main).not.toMatch(PROVIDER_WORDS);
   expect(main).not.toMatch(/Updated|updated/); // freshness is not on every row
@@ -271,8 +273,17 @@ test('who’s going and the notes are HOME’s: changed from the event page, see
   await page.getByRole('button', { name: 'Add it' }).click();
   await expect(page.locator('p', { hasText: 'Goggles are in the blue bag.' })).toBeVisible();
 
-  await page.goto('/forward');
-  await expect(page.getByRole('link', { name: /Swim squad/ }).first()).toContainText('Milo');
+  // With people it is Milo's and Sam's usual: under The usual on Month, by name.
+  await page.goto('/forward?h=month');
+  await page.locator('section[aria-label="The usual"] summary').first().click();
+  await expect(
+    page
+      .locator('section[aria-label="The usual"]')
+      .locator('div')
+      .filter({ has: page.locator('h3', { hasText: /^Milo$/ }) })
+      .last()
+      .getByRole('link', { name: /Swim squad/ }),
+  ).toBeVisible();
   await page.goto('/today');
   // Milo is recorded on it now, so it is on Milo's line.
   await expect(
@@ -299,10 +310,24 @@ test('a calendar’s usual people show on its events that have none of their own
   const bins = await eventIdNamed('Recycling out');
   await page.goto(`/events/${bins}`);
   await expect(page.getByRole('link', { name: /Isla/ })).toContainText('Usually going');
-  await page.goto('/forward');
-  await expect(page.getByRole('link', { name: /Recycling out/ })).toContainText('Isla');
-  // Swimming has its own people, so Isla is not shown there.
-  await expect(page.getByRole('link', { name: /Swim squad/ }).first()).not.toContainText('Isla');
+  // Month: it is a row of its own (not a regular week), with Isla beside it.
+  await page.goto('/forward?h=month');
+  await openFolds(page);
+  await expect(
+    page
+      .locator('li[data-unit]')
+      .getByRole('link', { name: /Recycling out/ })
+      .first(),
+  ).toContainText('Isla');
+  const usual = page.locator('section[aria-label="The usual"]');
+  // Swimming has its own people, so Isla's usual does not hold it.
+  await expect(
+    usual
+      .locator('div')
+      .filter({ has: page.locator('h3', { hasText: /^Isla$/ }) })
+      .last()
+      .getByRole('link', { name: /Swim squad/ }),
+  ).toHaveCount(0);
   expect(
     (await q(`select count(*)::int as n from event_person where event_id = $1`, [bins]))[0]!.n,
   ).toBe(0); // derived, never written
@@ -323,10 +348,13 @@ test('a moved occurrence shows once at its new time, even while the series lacks
     ])
   )[0]!;
   expect(series.exdates).toBeNull(); // the partial state
-  await page.goto('/forward');
-  const thatDay = page.locator(`section[aria-labelledby="day-${in7.iso}"]`);
+  // Seven days out is past Week: Month, in the week that holds it (its row has the weekday, not the time).
+  await page.goto('/forward?h=month');
+  const thatDay = await unitFor(page, in7.iso);
   await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toHaveCount(1);
-  await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText('17:00');
+  await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText(
+    weekdayShort(in7.iso),
+  );
   // Its people came with the series' annotations? No: the moved one is its own
   // event; it shows the calendar's usual people instead.
   await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText('Isla');
@@ -334,9 +362,12 @@ test('a moved occurrence shows once at its new time, even while the series lacks
   // The series repairing its EXDATE later changes nothing.
   writeFeed(TOKEN, await feedOf('repaired'));
   await refreshNow(page, id);
-  await page.goto('/forward');
-  await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toHaveCount(1);
-  await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText('17:00');
+  await page.goto('/forward?h=month');
+  const again = await unitFor(page, in7.iso);
+  await expect(again.getByRole('link', { name: /Swim squad/ })).toHaveCount(1);
+  await expect(again.getByRole('link', { name: /Swim squad/ })).toContainText(
+    weekdayShort(in7.iso),
+  );
 });
 
 test('a failed refresh keeps the last-known events, with no alarm anywhere', async ({ page }) => {
@@ -345,10 +376,14 @@ test('a failed refresh keeps the last-known events, with no alarm anywhere', asy
   failFeed(TOKEN, 'unreachable');
   await refreshNow(page, id);
   await expect(page.getByText(/^Couldn’t update just now/)).toBeVisible();
-  await page.goto('/forward');
-  expect(await page.getByRole('link', { name: /Swim squad/ }).count()).toBeGreaterThanOrEqual(4);
-  const main = await page.locator('main').innerText();
-  expect(main).not.toMatch(/couldn’t|stale|broken|failed|error/i);
+  await page.goto('/forward?h=month');
+  await openFolds(page);
+  // Kept: the series (usual by now, so under The usual) and its moved time.
+  expect(await page.getByRole('link', { name: /Swim squad/ }).count()).toBeGreaterThanOrEqual(2);
+  // Forward's Worth knowing says the calendar didn't update, calmly (M5); the rows themselves
+  // carry no alarm.
+  const coming = await page.locator('section[aria-labelledby="forward-coming"]').innerText();
+  expect(coming).not.toMatch(/couldn’t|stale|broken|failed|error/i);
   await page.goto(`/events/${await eventIdNamed('Swim squad')}`);
   await expect(
     page.getByText(/From Sam’s squad calendar · updated (just now|\d+ min ago)/),
@@ -401,7 +436,8 @@ test('disconnecting takes the events off the agenda; reconnecting brings the sam
   await page.locator('summary', { hasText: 'Disconnect' }).click();
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
   await expect(page.getByText('Disconnected.', { exact: true })).toBeVisible();
-  await page.goto('/forward');
+  await page.goto('/forward?h=month');
+  await openFolds(page);
   await expect(page.getByRole('link', { name: /Swim squad/ })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Recycling out/ })).toHaveCount(0);
 
@@ -410,11 +446,17 @@ test('disconnecting takes the events off the agenda; reconnecting brings the sam
   await page.getByRole('button', { name: 'Reconnect' }).click();
   await page.waitForURL(/\?reconnected=1$/);
   await refreshNow(page, id);
-  await page.goto('/forward');
-  const swims = page.getByRole('link', { name: /Swim squad/ });
-  expect(await swims.count()).toBeGreaterThanOrEqual(4);
-  await expect(swims.first()).toContainText('Milo');
-  await expect(swims.first()).toHaveAttribute('href', `/events/${swimId}`); // the same row
+  await page.goto('/forward?h=month');
+  await openFolds(page);
+  // Back with its people: Milo's usual holds the same event.
+  const swims = page
+    .locator('section[aria-label="The usual"]')
+    .locator('div')
+    .filter({ has: page.locator('h3', { hasText: /^Milo$/ }) })
+    .last()
+    .getByRole('link', { name: /Swim squad/ });
+  await expect(swims).toHaveCount(1);
+  await expect(swims).toHaveAttribute('href', `/events/${swimId}`); // the same row
   await page.goto(`/events/${swimId}`);
   await expect(page.locator('p', { hasText: 'Goggles are in the blue bag.' })).toBeVisible();
 });
