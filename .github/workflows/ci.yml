@@ -3,16 +3,27 @@ name: CI
 # Every action is pinned to a commit SHA (version in the trailing comment);
 # Dependabot keeps the pins current and tests/unit/workflows.test.ts enforces it.
 
+# Risk-based browser verification (ADR 0010): every job always runs and
+# always reports, so the required checks never go missing or turn green by
+# being skipped. The browser job decides how much to run from the risk tier
+# of the change (scripts/ci-select.mts); pushes to main, the nightly run and
+# manual runs are always full regression.
 on:
   pull_request:
+    # labeled/unlabeled: adding `ci:full` re-runs with full regression.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
+  schedule:
+    - cron: '23 14 * * *' # nightly full regression on main (about 03:23 in Auckland)
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Per event, so the nightly run never cancels a push to main (or the reverse).
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -95,9 +106,13 @@ jobs:
       - run: node scripts/vercel-bundle-check.mjs
 
   e2e:
+    # The required check `End-to-end (Playwright)`. It never waits for the
+    # checks job and is never skipped at the job level: it always runs, picks
+    # its scope from the risk tier, and fails if the classifier fails or
+    # gives no recognisable answer. Tests run with one worker against this
+    # job's own database (playwright.config.ts), never in parallel on one.
     name: End-to-end (Playwright)
     runs-on: ubuntu-latest
-    needs: checks
     services:
       postgres:
         image: postgres:16
@@ -115,16 +130,44 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The classifier diffs the pull request against the base it targets.
+          fetch-depth: 0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - name: Select browser tests by risk tier
+        id: select
+        run: node scripts/ci-select.mts --ci
+      - name: Refuse an unrecognised selection
+        if: >-
+          steps.select.outputs.mode != 'none' &&
+          steps.select.outputs.mode != 'targeted' &&
+          steps.select.outputs.mode != 'full'
+        run: |
+          echo "::error::the risk classifier gave no recognisable mode; refusing to pass"
+          exit 1
+      - name: No browser tests needed (low risk)
+        if: steps.select.outputs.mode == 'none'
+        run: echo "Low-risk change (see the summary); lint, unit, integration and build run in the checks job."
+      - if: steps.select.outputs.mode == 'targeted' || steps.select.outputs.mode == 'full'
+        run: pnpm install --frozen-lockfile
       - name: Create the runtime/app role (same role model as production)
+        if: steps.select.outputs.mode == 'targeted' || steps.select.outputs.mode == 'full'
         run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/init-app-role.sql
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - if: steps.select.outputs.mode == 'targeted' || steps.select.outputs.mode == 'full'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser tests, full regression
+        if: steps.select.outputs.mode == 'full'
+        run: pnpm test:e2e
+      - name: Browser tests, selected specs and the smoke suite
+        if: steps.select.outputs.mode == 'targeted'
+        env:
+          # Spec paths the classifier checked exist (letters, digits, hyphens).
+          SPECS: ${{ steps.select.outputs.specs }}
+        run: pnpm exec playwright test $SPECS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
