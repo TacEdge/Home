@@ -86,3 +86,5 @@ The first question HOME must answer is:
 If yes, we grow HOME domain by domain. If no, we learn why before building more.
 
 Long-term, success is: fewer things slip, fewer last-minute scrambles, projects that actually get finished, and more intentional time together — with *less* effort spent managing it all.
+
+<!-- CI scenario (risk-based CI, ADR 0010): docs-only change. Not for merging. -->
