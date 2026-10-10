@@ -113,6 +113,11 @@ test('tomorrow’s conflict is listed in Worth knowing with the Sun mark; Dismis
   browser,
 }) => {
   const { context, page } = await open(browser, 'sam');
+  // Ranked after data_health (ADR 0009 §18): when other records rank first it is
+  // under Worth knowing's "+ N more", which a reader opens.
+  const worth = page.locator('section[aria-labelledby="today-worth"]');
+  const more = worth.locator('summary', { hasText: /^\+ \d+ more/ });
+  if ((await more.count()) > 0) await more.first().click();
   const row = page.locator('[data-insight="conflict.overlap"]', { hasText: 'tc Art' });
   await expect(row).toContainText(
     'Milo has tc Art and tc Piano at the same time tomorrow, 10:30–11:00.',
