@@ -144,8 +144,11 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   expect(rows.some((r) => r.startsWith('All day') && r.includes('Teacher-only day'))).toBe(true);
   // Forward's Today section has the same rows, in the same order (and whatever else the family has on).
   await page.goto('/forward');
+  await page.evaluate(() =>
+    document.querySelectorAll('main details').forEach((d) => d.setAttribute('open', '')),
+  );
   const forwardToday = await page
-    .locator('section[aria-labelledby="day-' + t.d + '"]')
+    .locator(`li[data-unit="${t.d}"]`)
     .getByRole('link')
     .allTextContents();
   expect(forwardToday.filter((r) => rows.includes(r))).toEqual(rows);

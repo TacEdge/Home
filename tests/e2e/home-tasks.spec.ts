@@ -73,8 +73,24 @@ test('a project: start, edit, mark done (folded on Home), archive and restore', 
   const url = page.url();
 
   // Its target date is on Forward, linked here.
-  await page.goto('/forward');
-  await expect(page.getByRole('link', { name: /Vege beds/ })).toHaveCount(0); // 2027 is past 30 days
+  // Season reaches 90 days: the target is there only while it is that near.
+  const daysAway = Number(
+    (
+      await withDb(
+        async (pool) =>
+          (
+            await pool.query(
+              `select (date '2027-01-31' - (now() at time zone 'Pacific/Auckland')::date) as n`,
+            )
+          ).rows[0] as { n: number },
+      )
+    ).n,
+  );
+  await page.goto('/forward?h=season');
+  await page.evaluate(() =>
+    document.querySelectorAll('main details').forEach((d) => d.setAttribute('open', '')),
+  );
+  await expect(page.getByRole('link', { name: /Vege beds/ })).toHaveCount(daysAway <= 89 ? 1 : 0);
   await page.goto(url);
 
   await page.getByRole('link', { name: 'Edit' }).click();

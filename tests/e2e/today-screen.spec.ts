@@ -741,11 +741,11 @@ test('the keyboard reaches every control in reading order, with a visible focus,
         page.locator('details').filter({ hasText: 'What this is based on' }),
       ).toHaveAttribute('open', '');
     }
-    if (el.text.startsWith('The next 30 days')) break;
+    if (el.text.startsWith('What’s coming up')) break;
   }
   expect(seen[0]).toContain('What this is based on');
   expect(seen.some((t) => t.startsWith('Alex'))).toBe(true);
-  expect(seen[seen.length - 1]).toContain('The next 30 days');
+  expect(seen[seen.length - 1]).toContain('What’s coming up');
   await context.close();
 });
 

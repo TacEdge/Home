@@ -223,7 +223,7 @@ beforeAll(async () => {
     d: string,
     from: string,
     to: string,
-    people: ReturnType<typeof att>,
+    people: { personId: string; role: 'attending' | 'responsible' }[],
   ) =>
     createEventWithPeople(who, { title, kind: 'activity', time: day(d, from, to) }, people, deps);
 
