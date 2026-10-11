@@ -2,7 +2,7 @@
 
 Status: **Accepted** (owner, 2026-10-11). The owner approved decisions D1–D19 as recommended, with five amendments (§41; contract §12.4). This takes effect when PR #70 (Package 0) merges. The contract is `docs/m7/M7-BUILD-CONTRACT.md`. Decisions marked "Approved — owner decision D*n* (2026-10-11)" are listed, with the options weighed, in contract §12.2.
 
-- **Implementation:** nothing is built. Package 1a (the forecast table, migration only) starts only when the owner says so.
+- **Implementation:** Package 0 merged (PR #70). Package 1a implemented, awaiting review: migration `0008_weather_forecast` creates `weather_forecast` exactly as §14 and contract §3.9 describe (see "Implementation" below). Nothing else is built; Package 1b waits until `0008` has run in Production and Preview.
 
 ## Context
 
@@ -386,6 +386,18 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     5. **Licensing.** The free API is used under Open-Meteo's non-commercial terms, for this household only; a commercial deployment would need its own licensing, review and decision (§11).
 
     The owner also approved Wellington's Civic Square as the synthetic test and Preview point (§13). Nothing else changed: no new table beyond `weather_forecast`, no new runtime dependency and no new insight rule.
+
+## Implementation
+
+### Package 1a: the forecast table (for review with its PR)
+
+42. **`weather_forecast`, migration `0008_weather_forecast` (migration only).** Built exactly as §14 and contract §3.9 describe; FAMILY-DATA-MODEL has the as-built entry. No decision changed.
+    - **Columns:** `id` (uuid, `gen_random_uuid()`); `provider` (text, not null); `fetched_at`, `first_hour`, `last_hour`, `last_attempt_at` (timestamptz, nullable); `hours` (`jsonb`, nullable; its row shape is Package 1b's); `location_fingerprint` and `last_attempt_status` (text, nullable); `created_at`, `updated_at` (timestamptz, not null, `now()`). Nothing else: no coordinate, elevation, location, user, creator or visibility column.
+    - **Constraints**, text plus `CHECK` as for every closed set in the schema (`src/db/schema/common.ts`), never a Postgres enum: `weather_forecast_provider_check` (`open_meteo`); `weather_forecast_last_attempt_status_check` (the six codes, or null); `weather_forecast_location_fingerprint_check` (`^[0-9a-f]{64}$`, or null); `weather_forecast_location_hours_check` (the fingerprint is null only while `hours` is null); `weather_forecast_provider_unique` (a `UNIQUE` constraint, the only index besides the primary key). No foreign key, trigger, seed or backfill; no existing table, type, grant or function changes.
+    - **Grants:** none in the migration. `home_app` has `SELECT`, `INSERT`, `UPDATE` and `DELETE` through `0002_app_role`'s default privileges, and no `TRUNCATE`; `tests/integration/app-role.test.ts` proves it.
+    - **Export:** excluded in `src/domain/export/spec.ts` with the reason "derived, non-personal forecast cache; fetched again on use".
+    - **Activity:** not registered in `src/trust/audit-subjects.ts`, which registers tables with a visibility column or an owner; this table has neither (`tests/unit/audit-subjects.test.ts`).
+    - **Migration-first:** no application code uses the table. `0008` runs in Production (**Migrate production database**, owner-approved) and in Preview (**Migrate preview database**) before Package 1b merges, and 1b's description links the run.
 
 ## Consequences
 

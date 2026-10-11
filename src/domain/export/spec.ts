@@ -272,6 +272,9 @@ export const EXCLUDED_TABLES: Record<string, string> = {
   // never exported (M4 contract §4.1), whatever happens to the rest.
   calendar_connection:
     'calendar credential infrastructure: the sealed address, its key id and fingerprint are never exported',
+  // M7 (migration 0008, ADR 0011 §14). A household-level cache of the
+  // provider's forecast: nothing either adult recorded.
+  weather_forecast: 'derived, non-personal forecast cache; fetched again on use',
 };
 
 /**

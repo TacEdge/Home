@@ -135,11 +135,11 @@ describe('runtime/app role (home_app)', () => {
     },
   );
 
-  it('gains no column-level grants and no privileges on any other table through 0007', async () => {
+  it('gains no column-level grants and no privileges on any other table through 0008', async () => {
     // No explicit column ACL on any table 0005 creates or alters.
     const cols = await db.execute(sql`
       select attrelid::regclass::text as table_name, attname from pg_attribute
-      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note', 'calendar_connection', 'calendar_source']::regclass[])
+      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note', 'calendar_connection', 'calendar_source', 'weather_forecast']::regclass[])
         and attacl is not null`);
     expect(cols.rows).toEqual([]);
     const tables = await db.execute(sql`
@@ -167,6 +167,7 @@ describe('runtime/app role (home_app)', () => {
       'task',
       'user',
       'verification',
+      'weather_forecast', // 0008
     ]);
   });
 
@@ -189,8 +190,9 @@ describe('runtime/app role (home_app)', () => {
     'insight_response',
     'calendar_connection',
     'calendar_source',
+    'weather_forecast',
   ])(
-    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0006–0007, through 0002's default privileges)",
+    "has exactly SELECT, INSERT, UPDATE and DELETE on %s (0006–0008, through 0002's default privileges)",
     async (table) => {
       const grants = await db.execute(
         sql`select privilege_type, is_grantable from information_schema.role_table_grants
@@ -240,10 +242,35 @@ describe('runtime/app role (home_app)', () => {
     'insight_response',
     'calendar_connection', // 0007
     'calendar_source', // 0007
+    'weather_forecast', // 0008
   ])('cannot ALTER, DROP or TRUNCATE %s', async (table) => {
     await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
     await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
     await expectPermissionDenied(db.execute(sql.raw(`truncate ${table}`)));
+  });
+
+  it('can SELECT, INSERT, UPDATE and DELETE weather_forecast: a cache, not append-only (0008; rolled back)', async () => {
+    const rollback = new Error('rollback');
+    await db
+      .transaction(async (tx) => {
+        await tx.execute(
+          sql`insert into weather_forecast (provider, last_attempt_status, last_attempt_at) values ('open_meteo', 'unreachable', now())`,
+        );
+        await tx.execute(
+          sql`update weather_forecast set last_attempt_status = 'ok', location_fingerprint = ${'0123456789abcdef'.repeat(4)}, hours = '[]'::jsonb, fetched_at = now(), updated_at = now()`,
+        );
+        const r = await tx.execute(
+          sql`select last_attempt_status, hours from weather_forecast where provider = 'open_meteo'`,
+        );
+        expect(r.rows).toEqual([{ last_attempt_status: 'ok', hours: [] }]);
+        await tx.execute(sql`delete from weather_forecast where provider = 'open_meteo'`);
+        const n = await tx.execute(sql`select count(*)::int as n from weather_forecast`);
+        expect(n.rows[0]?.n).toBe(0);
+        throw rollback;
+      })
+      .catch((e: unknown) => {
+        if (e !== rollback) throw e;
+      });
   });
 
   it('cannot disable or drop the kev_usage triggers', async () => {

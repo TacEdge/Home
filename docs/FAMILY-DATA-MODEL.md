@@ -277,9 +277,28 @@ Service (M2 Package 5b): `recordUsage` only inserts, with the provider's cost in
 Implementation (`0006`): `kev_usage` is append-only: `home_app` has only `SELECT` and `INSERT`, and a trigger refuses update, delete and truncate for every role, as for `audit_log`. It holds no content. Cost is the provider's cost in micro-US-dollars (`cost_usd_micros`, bigint); there is no NZD column or conversion in M2 (the NZ$ spend cap is M8's). `user_id` and `conversation_id` are plain values with no foreign key, so deleting a user or conversation never blocks on or rewrites the log. Token counts and cost are non-negative.
 
 ### WeatherCache
-Cached forecast (location, fetched_at, hourly JSON).
+Cached forecast. Built in **M7** as `weather_forecast`, migration `0008` (M7 Package 1a; contract §3.9, ADR 0011 §14, approved 2026-10-11, with the location fingerprint as amended at approval).
 
-*M7 (ADR 0011 §14, approved 2026-10-11):* built in M7 Package 1a as `weather_forecast`: one row per provider holding the latest good forecast (normalised UTC hours and `fetched_at`) and the last attempt's outcome. It has no coordinate or location column (the home location stays in private configuration; the row holds only `location_fingerprint`, a keyed HMAC of it, so a forecast for another location is never shown, as amended at approval on 2026-10-11) and no user or visibility column (it is household-level and holds nothing either adult recorded), and it is excluded from export. Package 1a writes the full entry.
+One household-level row per provider: the latest good forecast (normalised UTC hours and when they were fetched) and the outcome of the latest attempt.
+
+| Field | Notes |
+|---|---|
+| `id` | uuid |
+| `provider` | `open_meteo` (`CHECK`); unique (`weather_forecast_provider_unique`): one row per provider |
+| `fetched_at` | timestamptz, nullable: the last successful fetch |
+| `hours` | `jsonb`, nullable: the last success's normalised `ForecastHour` rows, each `[start, start + 1h)` in UTC. SQL does not constrain their shape; the forecast service's schema does (Package 1b) |
+| `location_fingerprint` | text, nullable: the location `hours` are for, as 64 lower-case hex characters (`weather_forecast_location_fingerprint_check`). Null only while `hours` is null (`weather_forecast_location_hours_check`), so hours always name their location. The keyed HMAC-SHA256 of ADR 0011 §14, computed by the forecast service in Package 1b under `HOME_WEATHER_LOCATION_KEY`; never a coordinate |
+| `first_hour`, `last_hour` | timestamptz, nullable: the span of `hours` |
+| `last_attempt_at` | timestamptz, nullable |
+| `last_attempt_status` | `ok` \| `unreachable` \| `rate_limited` \| `timeout` \| `too_large` \| `bad_response` (`CHECK`), nullable |
+| `created_at`, `updated_at` | timestamptz, default `now()` |
+
+- **No coordinate, elevation, location or address column.** The home location stays in private environment configuration (ADR 0011 §13). The row holds only the fingerprint, which identifies the location only to a holder of the key and cannot be reversed without it; a forecast for another location is never shown (ADR 0011 §15). A schema test asserts the exact column list.
+- **No `created_by`, `created_via` or `visibility`: an exception to the common fields (§2).** It is not a user-facing record and holds nothing either adult recorded: a forecast for the household, read by both adults through a service that requires an actor. For the same reason it has no user column, no foreign key, and no Activity registration (`src/trust/audit-subjects.ts` registers tables with a visibility column or an owner).
+- **Excluded from export,** with its reason (`src/domain/export/spec.ts`): derived and non-personal, fetched again on use.
+- **Not append-only.** `home_app` selects, inserts, updates and deletes it through `0002_app_role`'s default privileges; no trigger, no explicit grant.
+- **Retention:** at most one row per provider. A success replaces the hours and sets the fingerprint; a failure records only the attempt, unless the last success is more than 24 hours old (the hours are cleared) or the location has changed (the first attempt clears the hours, fingerprint, `fetched_at` and span, whatever its outcome). The forecast service applies these rules in Package 1b (ADR 0011 §14–15).
+- Indexes: the primary key and the unique provider only.
 
 ### InsightResponse
 The only persisted part of insights. Insights themselves are derived on read (see SYSTEM-ARCHITECTURE §2.6).
