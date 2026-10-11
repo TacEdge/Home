@@ -599,7 +599,7 @@ Every unit in range is drawn. A unit's items are the agenda's items on its days.
 | `forward.headline.first_run` | No calendars and no events at all | "HOME doesn't know your calendars yet." |
 | `forward.headline.nothing` | Nothing notable and nothing usual in range | "Nothing recorded in the next seven days." |
 | `forward.headline.usual` | Only usual items in range | "Just the usual in the next seven days." |
-| `forward.headline.listed` | One or two notable items (Week only) | "Parent interviews on Wednesday, then Nana Jo's birthday on Tuesday." |
+| `forward.headline.listed` | One or two notable items (Week only) | "Parent interviews on Wednesday, then Nana Jo's birthday on Tuesday." An event carried in from before today is named by when it ends: "Camp, until Friday." (ADR 0009 §36) |
 | `forward.headline.counted` | Otherwise | "{N} things in the next {seven days \| 30 days \| 90 days}, besides the usual." |
 | `forward.headline.conflicts` (second sentence) | Conflicts in range that are current for the reader, with no response from the reader | "There are two overlaps." / "There is one overlap." |
 | `forward.headline.qualified` (qualifier) | `data_health` fires for a visible calendar | "As far as HOME knows." on its own line |
@@ -627,7 +627,7 @@ Every unit in range is drawn. A unit's items are the agenda's items on its days.
   - Today's routine occurrences (`routine.regular_week`);
   - pairs where both occurrences are kind `work`;
   - two occurrences of the same event.
-- **Standing template:** "Milo's Swimming and Tutoring overlap regularly, 15:45–16:15; next on Wednesday 21 October." The wording is the same on every surface.
+- **Standing template:** "Milo's Swimming and Tutoring overlap regularly, 15:45–16:15; the next is on Wednesday 21 October." The wording is the same on every surface (owner's wording, ADR 0009 §36).
 - **Order:**
   1. `responsible`, then `overlap`;
   2. then the (next) overlap start;

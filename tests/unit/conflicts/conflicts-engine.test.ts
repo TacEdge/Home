@@ -307,7 +307,7 @@ describe('the contract’s identity and lifecycle tests (§5.7.4, engine level)'
     });
     expect(c!.instances.length).toBe(13); // every Wednesday in the window, one key
     expect(c!.text).toBe(
-      'Milo’s Swimming and Tutoring overlap regularly, 15:45–16:15; next today.',
+      'Milo’s Swimming and Tutoring overlap regularly, 15:45–16:15; the next is today.',
     );
   });
 

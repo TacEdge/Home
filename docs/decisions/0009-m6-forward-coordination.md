@@ -427,7 +427,7 @@ Earlier decisions already settle much of the shape:
         - Alex's read replaced by Sam's (the invariant).
     - **Carry-forwards, recorded and not changed now:**
       - **Future-starting routines** are notable until they become active: the usual is the regular week as of today, so a weekly series beginning in three weeks counts as notable in Season.
-      - **The listed headline for a multi-day item carried in from before today** says "today" ("Camp today."). Its wording is for the Package 4 presentation review.
+      - **The listed headline for a multi-day item carried in from before today** says "today" ("Camp today."). Its wording is for the Package 4 presentation review. (Decided in §36: "Camp, until Friday.")
       - **A scheduled task whose window spans midnight** is placed on its start day only.
       - **Unit loads can add up to more than the headline count**, because an event spanning two units counts in each unit and once in the headline.
       - **Category order within a row** (scheduled tasks before timed events, whatever their times) is to be judged from the Package 4 screenshots.
@@ -460,7 +460,7 @@ Earlier decisions already settle much of the shape:
     - **Explanation.** Each conflict carries both occurrences as recorded (event, occurrence, title, start, end and zone, whether it repeats, and the person's role on it), the person, the overlap, the rule, structural `facts` (the person and both event occurrences) and one sentence from §5.6's templates:
       - "Milo has Art club and Dentist at the same time tomorrow, 15:30–16:00."
       - "Alex is recorded as responsible for both Art club and Dentist, which overlap tomorrow, 15:30–16:00."
-      - "Milo’s Swimming and Tutoring overlap regularly, 15:45–16:15; next today."
+      - "Milo’s Swimming and Tutoring overlap regularly, 15:45–16:15; next today." (Reworded in §36: "…; the next is today.")
 
       A standing `conflict.responsible` combines the two. No sentence says why, where, who should change or that anyone is unavailable. Package 3 places these in insights; Package 4 presents them.
     - **Interpretations the contract needed** (for the domain review):
