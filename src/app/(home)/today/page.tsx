@@ -10,7 +10,7 @@ import { conflictPlacements, today } from '@/domain/engines/today';
 import { env, realDataGateOpen } from '@/lib/env';
 import { addDays, isoDateInZone } from '@/lib/dates';
 import { requireActor } from '@/trust/session';
-import type { FactLookup } from './facts';
+import type { FactLookup } from '@/app/_insights/facts';
 import { TodayView } from './today-view';
 
 export const dynamic = 'force-dynamic';

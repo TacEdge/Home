@@ -10,17 +10,17 @@ import {
 } from '@/domain/engines/today';
 import { occurrenceKey } from '@/domain/engines/day-facts';
 import type { ConflictMark } from '@/domain/engines/insights';
-import { ConflictMarks } from './conflict-marks';
+import { ConflictMarks } from '@/app/_insights/conflict-marks';
 import type { Person } from '@/domain/people/service';
 import { clockOf } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { Label } from '@/ui/page';
 import { PersonName, type PersonColour } from '@/ui/person-dot';
 import { toSortLine } from '../sort/copy';
-import { Disclosure } from './disclosure';
-import { FactsInPlace, type FactLookup } from './facts';
+import { Disclosure } from '@/app/_insights/disclosure';
+import { FactsInPlace, type FactLookup } from '@/app/_insights/facts';
 import { moreToDoLine, todayHeadline, todoDetail } from './copy';
-import { WorthKnowing } from './worth-knowing';
+import { WorthKnowing } from '@/app/_insights/worth-knowing';
 import type { Insights } from '@/domain/engines/insights';
 import type { Fact } from '@/domain/engines/day-facts';
 
@@ -175,7 +175,7 @@ export function TodayView({ model, lookup, linked, worth, marks = new Map() }: T
       )}
       <p className="text-ink-2">
         <Link href="/forward" className={link}>
-          The next 30 days ›
+          What’s coming up ›
         </Link>
       </p>
     </div>

@@ -46,7 +46,7 @@ export function timedRow(item: Timed, timeZone: string): { time: string; detail:
   return { time: 'All day', detail: `Day ${item.day} of ${item.days}` };
 }
 
-function who(item: AgendaItem, people: Map<string, Person>) {
+export function who(item: AgendaItem, people: Map<string, Person>) {
   if (item.kind !== 'event') return undefined;
   return item.people
     .map((p) => people.get(p.personId))
@@ -125,11 +125,14 @@ export function AgendaDays({
   today,
   timeZone,
   people,
+  after,
 }: {
   days: AgendaDay[];
   today: IsoDate;
   timeZone: string;
   people: Map<string, Person>;
+  /** Said under a row (M6: a person's conflict marks on their Coming up). */
+  after?: (item: AgendaItem) => React.ReactNode;
 }) {
   return (
     <>
@@ -138,7 +141,13 @@ export function AgendaDays({
           <Label id={`day-${d.date}`}>{dayLabel(d.date, today)}</Label>
           <List>
             {d.items.map((item, i) => (
-              <AgendaItemRow key={i} item={item} timeZone={timeZone} people={people} />
+              <AgendaItemRow
+                key={i}
+                item={item}
+                timeZone={timeZone}
+                people={people}
+                after={after?.(item)}
+              />
             ))}
           </List>
         </section>

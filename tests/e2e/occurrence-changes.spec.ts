@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { seedCalendar } from './calendar-feeds';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
+import { unitFor, weekdayShort } from './forward-units';
 import { withDb } from './helpers';
 
 // Changing one time of a repeating manual event (M4 contract §5.3, ADR
@@ -193,11 +194,17 @@ test('change one time: the form has that time; the changed time has its own page
   await expect(skipButton(page, d7)).toHaveCount(0);
   await shot(page, 'p8b-series-changed');
 
-  await page.goto('/forward');
-  const thatDay = page.locator(`section[aria-labelledby="day-${d7.iso}"]`);
-  await expect(thatDay.getByRole('link', { name: /Choir practice/ })).toHaveCount(1);
-  await expect(thatDay.getByRole('link', { name: /Choir practice/ })).toContainText('17:00');
-  await expect(thatDay.getByRole('link', { name: /Choir practice/ })).toContainText('Milo');
+  // Forward (Month, since that day is past the week): the changed time is a row of its own in
+  // its week, once, on its weekday, going to its own page. The unchanged times are the usual.
+  const [change] = await liveChangesOf(ids.choir);
+  await page.goto('/forward?h=month');
+  const thatWeek = await unitFor(page, d7.iso);
+  const changed = thatWeek.getByRole('link', { name: /Choir practice/ });
+  await expect(changed).toHaveCount(1);
+  await expect(changed).toHaveAttribute('href', `/events/${change!.id}`);
+  await expect(changed).toContainText(weekdayShort(d7.iso));
+  await expect(changed).toContainText('17:00–18:00'); // the changed time, on Month too
+  await expect(changed).toContainText('Milo');
 });
 
 test('changing it again updates the same change; moved to another day it moves on the series and Forward', async ({
@@ -223,17 +230,19 @@ test('changing it again updates the same change; moved to another day it moves o
     'Changed from the usual',
   );
   await expect(nextTimes(page).locator('li', { hasText: d7.long })).toHaveCount(0);
-  await page.goto('/forward');
-  await expect(
-    page.locator(`section[aria-labelledby="day-${d8.iso}"]`).getByRole('link', {
-      name: /Choir practice/,
-    }),
-  ).toHaveCount(1);
-  await expect(
-    page.locator(`section[aria-labelledby="day-${d7.iso}"]`).getByRole('link', {
-      name: /Choir practice/,
-    }),
-  ).toHaveCount(0);
+  await page.goto('/forward?h=month');
+  const moved = (await unitFor(page, d8.iso)).getByRole('link', { name: /Choir practice/ });
+  await expect(moved).toHaveCount(1);
+  await expect(moved).toHaveAttribute('href', `/events/${change!.id}`);
+  await expect(moved).toContainText(weekdayShort(d8.iso));
+  await expect(moved).toContainText('17:00–18:00');
+  // It is no longer in the week of the day it was moved from (when that is another week).
+  const before = await unitFor(page, d7.iso);
+  if (
+    (await before.getAttribute('data-unit')) !==
+    (await (await unitFor(page, d8.iso)).getAttribute('data-unit'))
+  )
+    await expect(before.getByRole('link', { name: /Choir practice/ })).toHaveCount(0);
 });
 
 test('skip and change never meet: a changed time has no Skip, a crafted skip is refused, a skipped time is not changed', async ({
@@ -296,17 +305,18 @@ test('back to the series puts the change away and the usual time returns; it can
     1,
   ); // never deleted
 
-  await page.goto('/forward');
+  // Forward: with no change the weeks hold no Choir row, and the usual time is under The usual.
+  await page.goto('/forward?h=month');
   await expect(
-    page.locator(`section[aria-labelledby="day-${d7.iso}"]`).getByRole('link', {
-      name: /Choir practice/,
-    }),
-  ).toContainText('16:00');
-  await expect(
-    page.locator(`section[aria-labelledby="day-${d8.iso}"]`).getByRole('link', {
-      name: /Choir practice/,
-    }),
+    (await unitFor(page, d7.iso)).getByRole('link', { name: /Choir practice/ }),
   ).toHaveCount(0);
+  await expect(
+    (await unitFor(page, d8.iso)).getByRole('link', { name: /Choir practice/ }),
+  ).toHaveCount(0);
+  await page.locator('section[aria-label="The usual"] summary').first().click();
+  await expect(
+    page.locator('section[aria-label="The usual"]').getByRole('link', { name: /Choir practice/ }),
+  ).toContainText('16:00');
 
   await page.goto(`/events/${change!.id}`);
   await expect(page.getByText(/put away$/)).toBeVisible();
@@ -408,12 +418,11 @@ test('privacy: the other adult reaches nothing of a private series, its change f
   expect(await page.textContent('main')).not.toContain('Alex only run');
   // Alex still has it, changed.
   page = alex.page;
-  await page.goto('/forward');
-  await expect(
-    page.locator(`section[aria-labelledby="day-${d7.iso}"]`).getByRole('link', {
-      name: /Alex only run/,
-    }),
-  ).toContainText('06:30');
+  await page.goto('/forward?h=month');
+  const mine = (await unitFor(page, d7.iso)).getByRole('link', { name: /Alex only run/ });
+  await expect(mine).toHaveCount(1);
+  await expect(mine).toHaveAttribute('href', `/events/${change!.id}`);
+  await expect(mine).toContainText('06:30');
   await alex.context.close();
   await sam.context.close();
 });

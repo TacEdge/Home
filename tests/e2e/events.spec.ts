@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
+import { openFolds } from './forward-units';
 import { withDb } from './helpers';
 
 // Events and Forward (M3 contract §3.3, §3.6), over the seeded synthetic
@@ -33,21 +34,30 @@ const homeToday = () =>
       ).rows[0] as { d: string; e: string },
   );
 
-test('Forward: the next 30 days grouped by day, in agenda order, with people', async ({ page }) => {
+test('Forward (Month): weeks in order, the usual with its times and people, the way through to an event', async ({
+  page,
+}) => {
   await signInAsFixtureAdult(page, 'sam');
-  await page.goto('/forward');
+  await page.goto('/forward?h=month');
   await expect(page.getByRole('heading', { level: 1, name: 'Forward' })).toBeVisible();
-  const ids = await page
-    .locator('section[aria-labelledby^="day-"]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('aria-labelledby')));
-  expect(ids.length).toBeGreaterThanOrEqual(4); // Wednesdays and Saturdays within 30 days
-  expect(ids).toEqual([...ids].sort()); // days in order
-  const swim = page.getByRole('link', { name: /Swimming/ }).first();
-  await expect(swim).toContainText('15:30');
-  await expect(swim).toContainText('Milo');
-  await expect(swim).toContainText('Sam');
-  await expect(page.getByRole('link', { name: /Football/ }).first()).toContainText('Isla');
+  const units = await page
+    .locator('li[data-unit]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-unit')));
+  expect(units.length).toBeGreaterThanOrEqual(4); // the next 30 days in weeks
+  expect(units).toEqual([...units].sort()); // weeks in order
+  // Swimming and Football are the family's usual: under The usual, not in the rows.
+  await page.locator('section[aria-label="The usual"] summary').first().click();
+  const usual = page.locator('section[aria-label="The usual"]');
+  const blockOf = (name: string) =>
+    usual
+      .locator('div')
+      .filter({ has: page.locator('h3', { hasText: new RegExp(`^${name}$`) }) })
+      .last();
+  await expect(blockOf('Milo')).toContainText(/Wednesday[\s\S]*15:30[\s\S]*Swimming/);
+  await expect(blockOf('Sam')).toContainText(/Wednesday[\s\S]*Swimming/);
+  await expect(blockOf('Isla')).toContainText(/Saturday[\s\S]*Football/);
   expect(await page.textContent('main')).not.toContain('canary-alex');
+  const swim = usual.getByRole('link', { name: /Swimming/ }).first();
   await swim.click();
   await expect(page).toHaveURL(/\/events\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Swimming' })).toBeVisible();
@@ -152,10 +162,15 @@ test('an all-day event over several days shows each day on Forward', async ({ pa
   await expect(page.locator('header').getByText(/ to /)).toBeVisible();
   const url = page.url();
   await page.goto('/forward');
-  const rows = page.getByRole('link', { name: /Camp rehearsal/ });
+  // Week has a unit for every day, and a several-day event is on each of its days.
+  await openFolds(page);
+  const rows = page.locator('li[data-unit]').getByRole('link', { name: /Camp rehearsal/ });
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toContainText('Day 1 of 3');
   await expect(rows.nth(2)).toContainText('Day 3 of 3');
+  await expect(
+    page.locator(`li[data-unit="${today.d}"]`).getByRole('link', { name: /Camp rehearsal/ }),
+  ).toContainText('Day 1 of 3');
   await page.goto(url);
   await openSummary(page, 'Archive');
   await page.getByRole('button', { name: 'Archive' }).click();
@@ -258,11 +273,13 @@ test('an overnight event is one event on both days of Forward; a private one sta
   const id = page.url().split('/').pop()!;
   try {
     await page.goto('/forward');
-    const first = page.locator(`section[aria-labelledby="day-${start}"] a[href="/events/${id}"]`);
-    const second = page.locator(`section[aria-labelledby="day-${next}"] a[href="/events/${id}"]`);
+    await openFolds(page);
+    // The unit of each day holds it once: the first says when it ends, the second where it began.
+    const first = page.locator(`li[data-unit="${start}"] a[href="/events/${id}"]`);
     await expect(first).toHaveCount(1);
     await expect(first).toContainText('23:00');
     await expect(first).toContainText(/until \w+day 01:00/);
+    const second = page.locator(`li[data-unit="${next}"] a[href="/events/${id}"]`);
     await expect(second).toHaveCount(1);
     await expect(second).toContainText('01:00');
     await expect(second).toContainText(/Ends · from \w+day 23:00/);
@@ -295,7 +312,8 @@ test('a crafted skip of a one-off event is refused, calmly', async ({ page }) =>
   }, nana);
   await page.locator('button[aria-label^="Skip "]').first().click();
   await expect(page.getByText('This happens once, so there’s nothing to skip.')).toBeVisible();
-  await page.goto('/forward');
+  await page.goto('/forward?h=month');
+  await openFolds(page);
   await expect(
     page.getByRole('link', { name: /Nana Jo’s birthday|Nana Jo's birthday/ }).first(),
   ).toBeVisible();

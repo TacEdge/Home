@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { FactLookup } from '@/app/(home)/today/facts';
+import type { FactLookup } from '@/app/_insights/facts';
 import { TodayView } from '@/app/(home)/today/today-view';
 import { todayInput } from '@/app/_agenda/today-input';
 import type { CalendarView } from '@/domain/calendar/service';
@@ -221,7 +221,7 @@ describe('the loader’s records become the engine’s input untouched', () => {
 describe('the view is presentation only', () => {
   const files = [
     'src/app/(home)/today/today-view.tsx',
-    'src/app/(home)/today/facts.tsx',
+    'src/app/_insights/facts.tsx',
     'src/app/_agenda/today-input.ts',
   ];
   it('reads no clock, imports no database, auth or Kev, and decides nothing by time', () => {

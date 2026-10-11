@@ -105,8 +105,25 @@ describe('horizons and units (§5.1)', () => {
       ['October', '2026-10-14', '2026-10-31'],
       ['November', '2026-11-01', '2026-11-30'],
       ['December', '2026-12-01', '2026-12-31'],
-      ['January 2027', '2027-01-01', '2027-01-11'],
+      ['1–11 Jan', '2027-01-01', '2027-01-11'],
     ]);
+  });
+
+  it('a month the horizon ends inside is labelled by the days it covers, never by its name (ADR 0009 §35)', () => {
+    // 90 days from 4 October end on 1 January: one day of January, said as one day.
+    expect(unitsOf('season', '2026-10-04').at(-1)).toEqual({
+      unit: 'month',
+      label: '1 Jan',
+      from: '2027-01-01',
+      to: '2027-01-01',
+    });
+    // Ending on a month's last day keeps the name: the whole month was looked at.
+    expect(unitsOf('season', '2026-10-03').at(-1)).toMatchObject({
+      label: 'December',
+      to: '2026-12-31',
+    });
+    // The first month runs from today, as every horizon does, and keeps its name.
+    expect(unitsOf('season', '2026-10-14')[0]!.label).toBe('October');
   });
 
   it.each(HORIZONS)('%s: units are contiguous and cover exactly the range', (h) => {
@@ -213,7 +230,61 @@ describe('notable and the usual (§5.2)', () => {
     expect(usual.has('e-book') || usual.has('e-tutor') || usual.has('e-nana')).toBe(false);
   });
 
-  it('a usual occurrence in a current conflict is notable, and first in its row', () => {
+  it('Month and Season rows are chronological (ADR 0009 §35): a conflict lists, it does not reorder; the trip and the milestone stay reachable', () => {
+    // A recurring conflict (Tutoring beside the usual Swimming), a family trip,
+    // a project milestone and a few ordinary commitments across the month.
+    const tutor = timed(
+      'e-tutor',
+      'Tutoring',
+      '2026-10-14T15:45:00+13:00',
+      '2026-10-14T16:30:00+13:00',
+      {
+        rrule: 'FREQ=WEEKLY;BYDAY=WE',
+        people: att(ID.milo),
+      },
+    );
+    const events = [
+      ...HOUSE,
+      tutor,
+      allDay('e-trip', 'Wellington trip', '2026-10-16', '2026-10-18', { people: att(ID.sam) }),
+      timed('e-call', 'London call', '2026-10-15T07:00:00+13:00', '2026-10-15T07:30:00+13:00', {
+        people: att(ID.alex),
+      }),
+      timed('e-dent', 'Dentist', '2026-10-15T15:30:00+13:00', '2026-10-15T16:30:00+13:00', {
+        people: att(ID.milo),
+      }),
+      timed('e-bee', 'Working bee', '2026-10-24T10:00:00+13:00', '2026-10-24T12:00:00+13:00', {
+        people: att(ID.alex),
+      }),
+    ];
+    const conflicts = [{ key: 'k', occurrences: ['e-swim:2026-10-14', 'e-tutor:2026-10-14'] }];
+    const projects = [{ id: 'pr-deck', title: 'Deck', status: 'active', targetDate: '2026-10-20' }];
+    for (const horizon of ['month', 'season'] as const) {
+      const m = run({ events, conflicts, projects }, WED_0703, horizon);
+      for (const u of m.units) {
+        // Every row, shown and folded, is in date order: a conflict does not pull its entries ahead.
+        const dates = u.notable.map((e) => e.date);
+        expect(dates, `${horizon} ${u.label}`).toEqual([...dates].sort());
+        expect(u.shown).toEqual(u.notable.slice(0, u.shown.length));
+      }
+      // Today's conflicted pair sits at its time (15:30), after Isla's 15:00 pickup: not pulled first.
+      const first = m.units[0]!;
+      expect(first.notable[0]!.key).toBe('e-pickup:2026-10-14');
+      expect(first.notable.findIndex((e) => e.conflicted)).toBeGreaterThan(0);
+      const all = m.units.flatMap((u) => [...u.shown, ...u.rest]).map((e) => e.key);
+      for (const id of ['e-trip', 'pr-deck', 'e-call', 'e-dent', 'e-bee'])
+        expect(
+          all.some((k) => k.includes(id)),
+          `${horizon} ${id}`,
+        ).toBe(true);
+      expect(m.units.flatMap((u) => u.notable).filter((e) => e.conflicted)).toHaveLength(2);
+    }
+    // Week keeps the conflicted entries first on their day (their marks are there).
+    const w = run({ events, conflicts, projects }, WED_0703, 'week');
+    expect(w.units[0]!.notable.slice(0, 2).every((e) => e.conflicted)).toBe(true);
+  });
+
+  it('a usual occurrence in a current conflict is notable, and first in its row on Week', () => {
     const dentist = timed(
       'e-dentist',
       'Dentist',
@@ -288,9 +359,13 @@ describe('notable and the usual (§5.2)', () => {
       ]);
       const cap = { week: 2, month: 3, season: 3 }[h];
       expect(unit.notable.length).toBeGreaterThan(cap);
-      // Ordered by kind: the target comes before the timed events, so it is on the surface.
-      expect(unit.shown.map((e) => e.key)).toContain(target);
-      expect(unit.rest.map((e) => e.key)).not.toContain(target);
+      // On Week, ordered by kind: the target comes before the timed events, so it is on the
+      // surface. On Month and Season the row is chronological (ADR 0009 §35), so it is on the
+      // surface or under "+ N" by its date, and in the model either way.
+      if (h === 'week') {
+        expect(unit.shown.map((e) => e.key)).toContain(target);
+        expect(unit.rest.map((e) => e.key)).not.toContain(target);
+      } else expect([...unit.shown, ...unit.rest].map((e) => e.key)).toContain(target);
       expect(unit.more).toBe(unit.notable.length - cap);
     },
   );
@@ -376,7 +451,7 @@ describe('rows and caps (§5.3)', () => {
     }
   });
 
-  it('within a unit: birthdays, all-day and multi-day, targets, tasks due, scheduled, timed', () => {
+  it('within a unit: on Week by kind (birthdays, all-day and multi-day, targets, tasks due, scheduled, timed); on Month by date, then the agenda’s order', () => {
     const camp = allDay('e-camp', 'Camp', '2026-10-19', '2026-10-22', { people: att(ID.milo) });
     const late = timed(
       'e-late',
@@ -387,34 +462,45 @@ describe('rows and caps (§5.3)', () => {
         people: att(ID.sam),
       },
     );
-    const m = run(
-      {
-        events: [...HOUSE, camp, late],
-        projects: [
-          { id: 'pr-fence', title: 'Back fence', status: 'active', targetDate: '2026-10-19' },
-        ],
-        tasks: [
-          { id: 't-due', title: 'Due thing', status: 'open', dueDate: '2026-10-19' },
-          {
-            id: 't-sch',
-            title: 'Scheduled thing',
-            status: 'open',
-            dueDate: null,
-            scheduledStartsAt: at('2026-10-19T05:00:00+13:00'),
-            scheduledEndsAt: at('2026-10-19T05:30:00+13:00'),
-          },
-        ],
-      },
-      WED_0703,
-      'month',
-    );
-    expect(m.units[1]!.notable.map((e) => e.key)).toEqual([
-      'birthday:p-nana:2026-10-20',
+    const house = {
+      events: [...HOUSE, camp, late],
+      projects: [
+        { id: 'pr-fence', title: 'Back fence', status: 'active', targetDate: '2026-10-19' },
+      ],
+      tasks: [
+        { id: 't-due', title: 'Due thing', status: 'open', dueDate: '2026-10-19' },
+        {
+          id: 't-sch',
+          title: 'Scheduled thing',
+          status: 'open',
+          dueDate: null,
+          scheduledStartsAt: at('2026-10-19T05:00:00+13:00'),
+          scheduledEndsAt: at('2026-10-19T05:30:00+13:00'),
+        },
+      ],
+    };
+    // Week, Monday the 19th: by kind, whatever the times.
+    const week = run(house, WED_0703, 'week');
+    expect(week.units[5]!.notable.map((e) => e.key)).toEqual([
       'e-camp:2026-10-19',
       'project_target:pr-fence:2026-10-19',
       'task_due:t-due',
       'task_scheduled:t-sch',
       'e-late:2026-10-19',
+    ]);
+    expect(week.units[6]!.notable.map((e) => e.key)).toEqual([
+      'birthday:p-nana:2026-10-20',
+      'e-camp:2026-10-19', // its second day
+    ]);
+    // Month, the week of the 19th: by date (the 20th's birthday last), then the agenda's order.
+    const month = run(house, WED_0703, 'month');
+    expect(month.units[1]!.notable.map((e) => e.key)).toEqual([
+      'e-camp:2026-10-19',
+      'project_target:pr-fence:2026-10-19',
+      'task_due:t-due',
+      'task_scheduled:t-sch',
+      'e-late:2026-10-19',
+      'birthday:p-nana:2026-10-20',
     ]);
   });
 
