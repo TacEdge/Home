@@ -3,6 +3,7 @@ import { Label } from '@/ui/page';
 import { Disclosure } from './disclosure';
 import { InsightExplanation } from './explanation';
 import type { FactLookup } from './facts';
+import { FOLDED_FULL } from './folds';
 import { DismissButton, NotUsefulButton } from './responses';
 
 // Worth knowing (M5 contract §4.1, ADR 0008 §33; Forward, M6 contract §4.1):
@@ -18,9 +19,6 @@ import { DismissButton, NotUsefulButton } from './responses';
 // carry their Why and forms: a long fold is bounded, so a page of many
 // conflicts stays light. Any beyond are still a sentence and a mark each, in
 // the engine's order, and the item each is about is on the page.
-
-/** How many insights inside "+ N more" are rendered in full (Why, Dismiss, Not useful). */
-export const FOLDED_FULL = 12;
 
 type Surface = 'today' | 'forward' | 'person';
 

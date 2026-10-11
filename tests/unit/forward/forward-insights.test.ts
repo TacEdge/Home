@@ -251,9 +251,13 @@ describe('Week marks (contract §4.5)', () => {
     const p = page({ events }, h);
     expect(p.marks.size).toBe(0);
     expect(listing(p).map((i) => i.key)).toEqual([p.found[0]!.key]);
-    // The row still leads with the conflicted entries, as the engine orders it.
+    // The row is chronological (ADR 0009 §35): the conflicted entries are flagged, not moved ahead.
     const row = p.model.units.find((u) => u.notable.some((e) => e.key === 'e-art:2026-10-16'))!;
-    expect(row.notable.slice(0, 2).map((e) => e.conflicted)).toEqual([true, true]);
+    expect(row.notable.map((e) => e.date)).toEqual([...row.notable.map((e) => e.date)].sort());
+    expect(row.notable.filter((e) => e.conflicted).map((e) => e.key)).toEqual([
+      'e-art:2026-10-16',
+      'e-dentist:2026-10-16',
+    ]);
   });
 
   it('the marks are on shared Forward rows only: with no placed entries, nothing is marked', () => {

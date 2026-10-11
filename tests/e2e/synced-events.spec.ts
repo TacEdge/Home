@@ -348,13 +348,14 @@ test('a moved occurrence shows once at its new time, even while the series lacks
     ])
   )[0]!;
   expect(series.exdates).toBeNull(); // the partial state
-  // Seven days out is past Week: Month, in the week that holds it (its row has the weekday, not the time).
+  // Seven days out is past Week: Month, in the week that holds it, with its weekday and its moved time.
   await page.goto('/forward?h=month');
   const thatDay = await unitFor(page, in7.iso);
   await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toHaveCount(1);
   await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText(
     weekdayShort(in7.iso),
   );
+  await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText('17:00');
   // Its people came with the series' annotations? No: the moved one is its own
   // event; it shows the calendar's usual people instead.
   await expect(thatDay.getByRole('link', { name: /Swim squad/ })).toContainText('Isla');
@@ -368,6 +369,7 @@ test('a moved occurrence shows once at its new time, even while the series lacks
   await expect(again.getByRole('link', { name: /Swim squad/ })).toContainText(
     weekdayShort(in7.iso),
   );
+  await expect(again.getByRole('link', { name: /Swim squad/ })).toContainText('17:00');
 });
 
 test('a failed refresh keeps the last-known events, with no alarm anywhere', async ({ page }) => {

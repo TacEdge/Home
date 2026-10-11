@@ -119,7 +119,7 @@ export type ForwardEntry = {
   item: AgendaItem;
   /** The first day of the unit it is on. */
   date: IsoDate;
-  /** In a current conflict for the reader (always notable, first in its row). */
+  /** In a current conflict for the reader (always notable; first in its row on Week). */
   conflicted: boolean;
   /**
    * Whether it counts towards the headline and the load (as Today's counts,
@@ -237,10 +237,13 @@ function factOf(i: AgendaItem): Fact {
 }
 
 /**
- * Row order (contract §5.3): by kind and time, never by importance. Items in
- * a conflict first; then birthdays; all-day and multi-day events; project
- * targets; tasks due; scheduled tasks; timed events. Then by day, then the
- * agenda's own order, then the key: a total order.
+ * Row order (contract §5.3): by kind and time, never by importance. On Week,
+ * items in a conflict first (their marks are on these rows); then birthdays;
+ * all-day and multi-day events; project targets; tasks due; scheduled tasks;
+ * timed events. Then by day, then the agenda's own order, then the key: a
+ * total order. On Month and Season (ADR 0009 §35) a row is chronological: by
+ * day, then the agenda's order, then the key. Conflicts are listed in Worth
+ * knowing there, and do not move an entry ahead of earlier commitments.
  */
 function rowRank(e: ForwardEntry): number {
   if (e.conflicted) return 0;
@@ -259,9 +262,9 @@ function rowRank(e: ForwardEntry): number {
   }
 }
 
-export function compareRow(a: ForwardEntry, b: ForwardEntry): number {
+export function compareRow(a: ForwardEntry, b: ForwardEntry, horizon: Horizon = 'week'): number {
   return (
-    rowRank(a) - rowRank(b) ||
+    (horizon === 'week' ? rowRank(a) - rowRank(b) : 0) ||
     compareIsoDates(a.date, b.date) ||
     compareAgendaItems(a.item, b.item) ||
     (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
@@ -308,13 +311,13 @@ export function unitsOf(
   while (from <= last) {
     const d = parseIsoDate(from);
     const nextMonth = addDays(from, daysInMonth(d.year, d.month) - d.day + 1);
-    const to = addDays(nextMonth, -1) < last ? addDays(nextMonth, -1) : last;
-    out.push({
-      unit: 'month',
-      label: d.year === year ? MONTHS[d.month - 1]! : `${MONTHS[d.month - 1]} ${d.year}`,
-      from,
-      to,
-    });
+    const end = addDays(nextMonth, -1);
+    const to = end < last ? end : last;
+    // A month the horizon ends inside is labelled by the days it covers
+    // ("1–11 Jan"), never by its name: HOME has looked at those days only.
+    // The first month runs from today, as every horizon does, and keeps its name.
+    const name = d.year === year ? MONTHS[d.month - 1]! : `${MONTHS[d.month - 1]} ${d.year}`;
+    out.push({ unit: 'month', label: to === end ? name : spanLabel(from, to), from, to });
     from = nextMonth;
   }
   return out;
@@ -434,7 +437,9 @@ export function forward(input: ForwardInput): ForwardModel {
           if (!seen.has(k)) seen.set(k, entryOf(i, d.date));
         }
     const all = [...seen.values()];
-    const notable = all.filter((e) => e.rule === 'forward.notable').sort(compareRow);
+    const notable = all
+      .filter((e) => e.rule === 'forward.notable')
+      .sort((a, b) => compareRow(a, b, horizon));
     const usual = all
       .filter((e) => e.rule === 'forward.usual')
       .sort(

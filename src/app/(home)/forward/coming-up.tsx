@@ -15,8 +15,10 @@ import { dateColumn } from './copy';
 // with its load as dots (ink, never the accent), the notable entries it chose
 // to show, the rest under "+ N", or what is recorded in words when there is
 // nothing. A row is the agenda's own row, with the day in the time column on
-// Month and Season. Week says its conflicts on the rows. Nothing here ranks,
-// counts or words anything of its own.
+// Month and Season and the recorded time under the title there, so a timed
+// commitment (a changed one too) keeps its time on every horizon. Week says
+// its conflicts on the rows. Nothing here ranks, counts or words anything of
+// its own.
 
 export type ComingUpProps = {
   model: Pick<ForwardModel, 'units' | 'horizon'>;
@@ -102,12 +104,22 @@ function ForwardRow({
 }) {
   const item = entry.item;
   const week = horizon === 'week';
+  const zone = lookup.timeZone;
   const col = (clock: string | undefined) =>
     week ? (clock ?? 'All day') : dateColumn(entry, horizon);
   switch (item.kind) {
     case 'event': {
       const timed = !item.allDay;
-      const row = timed ? timedRow(item, lookup.timeZone) : null;
+      const row = timed ? timedRow(item, zone) : null;
+      // Month and Season: the recorded times as the detail ("15:00–16:00"; a
+      // longer one says where it runs from or to). An all-day event has none.
+      const times = !timed
+        ? undefined
+        : item.days === 1
+          ? `${clockOf(item.startsAt, zone)}–${clockOf(item.endsAt, zone)}`
+          : item.day === 1
+            ? `from ${clockOf(item.startsAt, zone)}`
+            : `until ${clockOf(item.endsAt, zone)}`;
       return (
         <ItemRow
           href={`/events/${item.eventId}`}
@@ -120,7 +132,7 @@ function ForwardRow({
                 : item.days > 1
                   ? `Day ${item.day} of ${item.days}`
                   : undefined
-              : undefined
+              : times
           }
           who={who(item, lookup.people)}
           after={
@@ -167,9 +179,13 @@ function ForwardRow({
       return (
         <ItemRow
           href={`/tasks/${item.taskId}`}
-          time={col(clockOf(item.startsAt, lookup.timeZone))}
+          time={col(clockOf(item.startsAt, zone))}
           title={item.title}
-          detail={week ? `Scheduled until ${clockOf(item.endsAt, lookup.timeZone)}` : 'Scheduled'}
+          detail={
+            week
+              ? `Scheduled until ${clockOf(item.endsAt, zone)}`
+              : `Scheduled ${clockOf(item.startsAt, zone)}–${clockOf(item.endsAt, zone)}`
+          }
         />
       );
   }

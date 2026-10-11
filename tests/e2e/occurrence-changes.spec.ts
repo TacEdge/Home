@@ -203,6 +203,7 @@ test('change one time: the form has that time; the changed time has its own page
   await expect(changed).toHaveCount(1);
   await expect(changed).toHaveAttribute('href', `/events/${change!.id}`);
   await expect(changed).toContainText(weekdayShort(d7.iso));
+  await expect(changed).toContainText('17:00–18:00'); // the changed time, on Month too
   await expect(changed).toContainText('Milo');
 });
 
@@ -234,6 +235,7 @@ test('changing it again updates the same change; moved to another day it moves o
   await expect(moved).toHaveCount(1);
   await expect(moved).toHaveAttribute('href', `/events/${change!.id}`);
   await expect(moved).toContainText(weekdayShort(d8.iso));
+  await expect(moved).toContainText('17:00–18:00');
   // It is no longer in the week of the day it was moved from (when that is another week).
   const before = await unitFor(page, d7.iso);
   if (
@@ -420,6 +422,7 @@ test('privacy: the other adult reaches nothing of a private series, its change f
   const mine = (await unitFor(page, d7.iso)).getByRole('link', { name: /Alex only run/ });
   await expect(mine).toHaveCount(1);
   await expect(mine).toHaveAttribute('href', `/events/${change!.id}`);
+  await expect(mine).toContainText('06:30');
   await alex.context.close();
   await sam.context.close();
 });

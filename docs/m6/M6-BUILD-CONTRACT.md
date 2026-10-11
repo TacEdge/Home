@@ -441,7 +441,7 @@ The usual ›
 ```
 
 - The second insight is a **standing** `conflict.overlap` for Milo. Swimming and Tutoring are both unchanged occurrences of recurring series. It is said once, and a response to it holds every week (§5.7).
-- Swimming is in Milo's regular week, so it would be usual. It is drawn, and counted, in the weeks where it is in a current conflict (§5.2). Conflict items come first in each row (§5.3).
+- Swimming is in Milo's regular week, so it would be usual. It is drawn, and counted, in the weeks where it is in a current conflict (§5.2). On Month the row is chronological (§5.3): the conflicted items sit at their times, and the conflict is listed in Worth knowing.
 
 **Season (summary)**
 
@@ -533,7 +533,7 @@ A person's Coming up shows that person's conflict marks on their items, with the
 |---|---|---|---|
 | `week` (default) | today … today + 6 | day | "Wed 14", with "Today" and "Tomorrow" |
 | `month` | today … today + 29 | week, Monday to Sunday; the first runs from today to Sunday | "This week", then "19–25 Oct" |
-| `season` | today … today + 89 | calendar month, clipped to the range | "October" |
+| `season` | today … today + 89 | calendar month, clipped to the range | "October"; a month the range ends inside is labelled by its days, "1–11 Jan" (ADR 0009 §35) |
 
 Every unit in range is drawn. A unit's items are the agenda's items on its days. An occurrence carried over several days is counted once per unit (`occurrenceKey`).
 
@@ -565,7 +565,7 @@ Every unit in range is drawn. A unit's items are the agenda's items on its days.
 
   The rest are counted ("+ N") and held in place.
 - **Which are shown:** entries that still count fill the cap first, so a carry-over from last night that has already ended never takes a visible slot from something still to come (ADR 0009 §32). The shown entries keep row order, and the held ones stay in the model.
-- **Order within a unit:**
+- **Order within a unit, on Week:**
   1. items with a current conflict for the reader;
   2. birthdays;
   3. multi-day and all-day events;
@@ -575,7 +575,8 @@ Every unit in range is drawn. A unit's items are the agenda's items on its days.
   7. timed items by start;
 
   then the agenda's order. This is by kind and time, never by importance.
-- **Each item** reads as on the agenda (time, title, recorded people) in short form. Week names the time. Month and Season name the weekday or date.
+- **Order within a unit, on Month and Season** (approved refinement, Package 4; ADR 0009 §35): chronological, by day, then the agenda's order within the day, then the key. A conflict is listed in Worth knowing there and explained in its Why; it does not move its entries ahead of earlier commitments, so the row reads as a timeline and a trip or a target keeps its place. The usual stays the usual (§5.2): a row is not filled with every series occurrence to keep it in order.
+- **Each item** reads as on the agenda (time, title, recorded people) in short form. Week names the time in its column. Month and Season name the weekday or date in the column and keep a timed event's recorded time under it ("15:00–16:00"); an all-day event has no time.
 
 ### 5.4 Load indicators (`forward.load`; factual, provisional bands)
 
