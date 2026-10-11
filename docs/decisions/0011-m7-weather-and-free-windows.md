@@ -1,8 +1,8 @@
 # ADR 0011 — M7 Weather and Free Windows: scope, architecture and decisions
 
-Status: **Proposed**, 2026-10-11 (Package 0, awaiting owner approval). The contract is `docs/m7/M7-BUILD-CONTRACT.md`. Decisions marked "Proposed — owner decision D*n*" are listed, with their options, in contract §12.2. This ADR is accepted, as amended by those decisions, when the owner merges Package 0.
+Status: **Accepted** (owner, 2026-10-11). The owner approved decisions D1–D19 as recommended, with five amendments (§41; contract §12.4). This takes effect when PR #70 (Package 0) merges. The contract is `docs/m7/M7-BUILD-CONTRACT.md`. Decisions marked "Approved — owner decision D*n* (2026-10-11)" are listed, with the options weighed, in contract §12.2.
 
-- **Implementation:** nothing built. Package 1a (the forecast table, migration only) starts only after Package 0 merges and the owner says to start.
+- **Implementation:** nothing is built. Package 1a (the forecast table, migration only) starts only when the owner says so.
 
 ## Context
 
@@ -58,15 +58,15 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
    | Item | Why, or where it goes |
    |---|---|
    | Availability: "free", "available", "everyone can", "nothing on so…" | §5–§7. M7 states only what is recorded. |
-   | `alignment` ("both adults free") | §36. Proposed — owner decision D17. |
-   | A separate `weather_effect` insight | §36: folded into task openings. Proposed — owner decision D18. |
-   | Severe-weather warnings | §21. Proposed — owner decision D7. |
+   | `alignment` ("both adults free") | §36. Approved — owner decision D17 (2026-10-11). |
+   | A separate `weather_effect` insight | §36: folded into task openings. Approved — owner decision D18 (2026-10-11). |
+   | Severe-weather warnings | §21. Approved — owner decision D7 (2026-10-11). |
    | Travel time, transport buffers, location reasoning | ADR 0009 §20; no record supports them |
    | Weather deciding suitability ("a good day for…", "best") | §31: weather is a sentence, or a filter the family recorded on a task |
    | Kev tools (`find_free_windows`, `get_weather`), Kev phrasing or recommendations | M8. The engines are shaped so M8 can call them. |
    | Writing to calendars, creating or scheduling tasks, proposals | M9 and later; no write path is added |
    | Learning from responses, adaptive ranking, implicit preferences | ADR 0009 §17 |
-   | Weather or openings on Forward's Month and Season, or on a person's Coming up | §34. Proposed — owner decision D16. |
+   | Weather or openings on Forward's Month and Season, or on a person's Coming up | §34. Approved — owner decision D16 (2026-10-11). |
    | Planning-hours settings, a settings screen, `user.preferences` | §22: a code constant in M7 |
    | Push notifications, background jobs, stored insights | ROADMAP "Not yet" |
    | Real household data, or the real home location, anywhere but Production after the gate opens | §13, §40 |
@@ -115,11 +115,15 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
 
 ### Weather
 
-11. **Provider: Open-Meteo's free API, one adapter, no live fallback.** Proposed — owner decision D1.
+11. **Provider: Open-Meteo's free API, one adapter, no live fallback.** Approved — owner decision D1 (2026-10-11).
     - It is free for a private, non-commercial household app, with no key and no account. HOME's volume is under 1% of the free allowance.
     - The free limit is per IP, and Vercel's egress is shared, so occasional `429`s are expected. They are absorbed by the cache (§15).
     - **Named contingency,** decided by the owner on evidence if refusals recur: a MET Norway Locationforecast adapter (free; identified by User-Agent, not IP), or Open-Meteo's paid Standard tier (a key, a 99.9% target).
     - A second live provider is not built now. It would double the mapping, and it uses the same ECMWF model, so it adds availability but not skill.
+    - **Licensing** (amended at approval, §41). The free API is used under Open-Meteo's non-commercial terms, for this private household's HOME only. Any commercial deployment of HOME would need:
+      - appropriate commercial provider licensing (a paid Open-Meteo plan, at a price still unconfirmed, or another provider's commercial terms);
+      - a credential and `safe-fetch` policy review, because the paid service uses a key and a different host;
+      - a separate architecture decision, since CLAUDE.md rule 16 keeps HOME to this household.
 
 12. **The request and its normalisation.**
     - **One GET** to `https://api.open-meteo.com/v1/forecast` with:
@@ -132,41 +136,75 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **Normalisation:** each stored hour is `[start, start + 1h)` in UTC. Values the provider reports for the preceding hour (precipitation, its probability, gusts) are taken from the row stamped at the hour's end; instantaneous values (temperature, wind) from the row at its start. The adapter's contract test pins this mapping. A response that is malformed, non-monotonic, inconsistent in length or out of range is `bad_response`, and the stored forecast is unchanged.
     - **External content is data** (CLAUDE.md rule 7). The adapter parses numbers through a schema with bounds and never stores provider text.
 
-13. **The home location lives in private environment configuration.** Proposed — owner decision D2.
+13. **The home location lives in private environment configuration.** Approved — owner decision D2 (2026-10-11).
     - `HOME_LAT` and `HOME_LON`, and optionally `HOME_ELEVATION`, read only by `src/lib/env.ts`.
     - **Rounded at the boundary:** coordinates to two decimal places (about 0.7 km at New Zealand latitudes), elevation to 10 m. The exact values are never held anywhere else in the code.
     - **Never** in the repository, the database, exports, audit metadata, logs, the client or tests. `lat`, `lon`, `latitude`, `longitude`, `elevation` and `coordinates` join the logger's redacted keys, and no request URL is ever logged.
     - **Absent or invalid:** weather is simply absent: no request, no sentence, no error. HOME logs one boot line, `[home] weather location: set | absent | invalid`, never the value.
-    - **Tests, docs and Preview** use a public synthetic point (Wellington's Civic Square, `-41.29`, `174.78`), never the home's. The owner confirms in Package 0 that this point is not within a few kilometres of home; if it is, another public point replaces it before Package 1b, so the rounded home location can never coincide with a value in the repository.
-    - **Production:** the home location is real household data, so it is set only after the real-data gate opens (DEPLOY.md §E, new items in Package 5, §40).
+    - **The location key** (amended at approval, §41). `HOME_WEATHER_LOCATION_KEY` is a dedicated server-side secret (at least 32 random bytes, base64), read only by `src/lib/env.ts`. It keys the location fingerprint (§14) and does nothing else:
+      - never in the database, the repository, logs or the client;
+      - never shared with another purpose: a value equal to `HOME_CREDENTIALS_KEY` or `HOME_FINGERPRINT_KEY` is refused as invalid;
+      - a keyed hash is required because a plain hash of two-decimal coordinates could be reversed by enumerating them.
+    - **Location set, key absent or invalid:** weather is treated as unconfigured: no request, no forecast read, no words. The boot line reads `[home] weather location: set, key missing`, never a value. Daylight (§18), which needs no request, still comes from the configured location.
+    - **A rotated key** makes every stored fingerprint mismatch, which behaves exactly as a location change (§15). No key is ever stored, so rotation needs no data step.
+    - **Never logged:** the location, the canonical string, the key or any fingerprint input. The fingerprint itself is not logged either.
+    - **Tests, docs and Preview** use a public synthetic point (Wellington's Civic Square, `-41.29`, `174.78`), never the home's. The owner approved this point on 2026-10-11 as the synthetic test and Preview point. A test that needs a second location uses another public synthetic point (Christchurch's Cathedral Square, `-43.53`, `172.64`). Preview has its own Preview-only key.
+    - **Production:** the home location is real household data, so it and the location key are both set only after the real-data gate opens (DEPLOY.md §E, new items in Package 5, §40). Until then both stay unset and `HOME_REAL_DATA` stays closed.
 
-14. **The forecast cache: one household-level table, `weather_forecast`.** Proposed — owner decision D3.
-    - **Columns:** id; `provider` (`open_meteo`, `CHECK`, unique); `fetched_at` and `hours` (normalised `ForecastHour` rows, `jsonb`) for the latest good forecast; `first_hour` and `last_hour`; `last_attempt_at` and `last_attempt_status` for the latest attempt; `created_at` and `updated_at`.
-    - **No location column.** The row holds no coordinates, so a changed location replaces the forecast at the next refresh (within 60 minutes), as DEPLOY.md will say.
+14. **The forecast cache: one household-level table, `weather_forecast`.** Approved — owner decision D3 (2026-10-11).
+    - **Columns:** id; `provider` (`open_meteo`, `CHECK`, unique); `fetched_at` and `hours` (normalised `ForecastHour` rows, `jsonb`) for the latest good forecast; `location_fingerprint` for the location those hours are for; `first_hour` and `last_hour`; `last_attempt_at` and `last_attempt_status` for the latest attempt; `created_at` and `updated_at`.
+    - **The location fingerprint** (amended at approval, §41). `location_fingerprint` is the lower-case hex HMAC-SHA256, keyed by `HOME_WEATHER_LOCATION_KEY` (§13), of the canonical string `home-weather-location:v1|{provider}|{lat}|{lon}|{elevation}`:
+      - `provider` is `open_meteo`; `lat` and `lon` are the rounded values with exactly two decimals (`-41.29`); `elevation` is the rounded value in metres, or `none` when unset;
+      - every input that changes the request (provider, coordinates, elevation) is in it, and the version prefix lets the format change safely;
+      - the column is text, 64 hex characters (`CHECK` on the format), and may be null only while `hours` is null (`CHECK`).
+    - **No coordinate, elevation, location or user column.** The row holds no coordinates, only a keyed fingerprint that cannot be reversed without the key. A changed location is recognised on the next read, and no other place's forecast is ever shown (§15). Package 1a's schema test asserts the exact column list.
     - **No `created_by` or `visibility`.** It is not a user-facing record and holds nothing either adult recorded: a forecast for the household, read by both adults through a service that requires an actor. FAMILY-DATA-MODEL records the exception.
-    - **Retention:** at most one row per provider. A success replaces the hours. A failure leaves them, unless the last success is more than 24 hours old, when the hours are cleared.
+    - **Retention:** at most one row per provider. A success replaces the hours and sets the fingerprint. A failure leaves them, unless the last success is more than 24 hours old, when the hours are cleared. After a location change, the first attempt clears the old forecast whatever its outcome (§15).
     - **Export:** excluded, with its reason, in the export specification: it is derived, non-personal and fetched again on use. `export-completeness` holds.
     - **Grants:** `home_app` reads and writes it through the default privileges of `0002_app_role`. It is not append-only.
 
 15. **Refresh on use, and freshness.**
-    - **Rendering never fetches.** Today and Forward read the cache, render, and only then, when the location is set and the last attempt is 60 minutes old or more, ask `/weather/refresh` once. The page never waits. Without JavaScript, the cached forecast is shown with its time.
-    - **At most one request per 60 minutes:** measured from the last *attempt*, so failures never hammer the provider. After a `429`, the next attempt waits 3 hours. One refresh at a time, by an advisory lock (`home:weather_forecast`); a second caller answers `busy` and writes nothing.
-    - **A failure keeps the last good forecast.** Only the attempt columns change, and the failure is audited (§16).
-    - **Freshness, from `fetched_at`** (Proposed — owner decision D6):
+    - **Rendering never fetches.** Today and Forward read the cache, render, and only then, when the location is set and a refresh is due, ask `/weather/refresh` once. The page never waits. Without JavaScript, the cached forecast is shown with its time.
+    - **At most one request per 60 minutes:** measured from the last *attempt*, so failures never hammer the provider. The one exception is a location change, which makes a refresh due at once (below). After a `429`, the next attempt waits 3 hours. One refresh at a time, by an advisory lock (`home:weather_forecast`); a second caller answers `busy` and writes nothing.
+    - **A failure keeps the last good forecast.** Only the attempt columns change, and the failure is audited (§16). The exceptions are the 24-hour retention rule (§14) and the first attempt after a location change (below).
+    - **The forecast is for one location** (amended at approval, §41).
+      - **On read,** the service computes the configured fingerprint (§14) and compares it with the row's. A mismatch, or a row with hours and a different or absent fingerprint, means **no forecast**: no words, no stale line, no dry-weather matching, exactly as "none yet". Daylight is unchanged, because it comes from configuration, not the row. Another location's hours are never presented.
+      - **A mismatch makes a refresh due at once,** overriding the 60-minute interval, while the row still carries another location's fingerprint. The 3-hour wait after a `rate_limited` attempt still applies, as a courtesy to the provider; while it runs, no forecast is shown. Once an attempt has cleared the fingerprint (below), the normal interval governs the retries, so a failing provider is never called on every visit.
+      - **The first attempt after a mismatch,** whatever its outcome, clears the old forecast. On success it stores the new hours and the new fingerprint. On failure the hours and the fingerprint are null (as are `fetched_at`, `first_hour` and `last_hour`, which described the old forecast), and the attempt is recorded.
+      - **A rotated key** is a mismatch for every row, and behaves the same way.
+    - **Execution: request-bound only** (amended at approval, §41).
+      - The client POSTs `/weather/refresh` after render. All the work runs inside that request and finishes before the response. No background job, `after()`, `waitUntil()`, cron or queue. Rendering never calls the provider.
+      - **Duration:** the route sets `export const maxDuration = 30` (seconds), within every Vercel plan's limit. The provider fetch is capped at 10 seconds by `safe-fetch`, and the database work by a `statement_timeout` of 5 seconds, set locally in the transaction.
+      - **Sequence:**
+        1. the gate (`assertFamilyWritesOpen`), then the actor (`assertCanWrite`), then the configuration (a location and a valid key, else `not_configured`), before any query;
+        2. outside any transaction, read the row and decide: not due is `not_due`, with no request and no write;
+        3. open **one** transaction: `SET LOCAL statement_timeout = '5s'`, `SET LOCAL idle_in_transaction_session_timeout = '25s'`, then `pg_try_advisory_xact_lock` on `home:weather_forecast`; not acquired is `busy`, with nothing written; re-check that the refresh is due, inside the lock;
+        4. the provider fetch, inside that transaction (the M4 calendar-sync pattern: the lock must cover the fetch, or concurrent visits would each call the provider);
+        5. write the row and the one audit row, and commit;
+        6. respond `{ changed }`.
+      - **Lock scope:** a transaction-level advisory lock, released at commit or rollback. It holds one pooled connection for at most the fetch (10 seconds) plus bounded writes.
+      - **An interrupted request.** Every write happens after the fetch, inside the one transaction, so there is never partial state. If the function is stopped or the client disconnects before commit, nothing is committed: Postgres rolls the transaction back when the connection closes, and if the instance is merely frozen with the connection open, `idle_in_transaction_session_timeout` (25 seconds) ends the session, which rolls back and releases the lock. HOME does not rely on the request's abort signal to roll anything back. In every case nothing is recorded, `last_attempt_at` is unchanged, and the next visit retries under the normal rules; a provider answer that was lost costs one extra request at most.
+      - **Unchanged:** the 60-minute interval from the last attempt, 3 hours after `rate_limited`, single-flight, the last good forecast kept on failure, and the 3-, 12- and 24-hour freshness and retention rules.
+    - **Freshness, from `fetched_at`** (Approved — owner decision D6, 2026-10-11):
 
       | Age | Called | Behaviour |
       |---|---|---|
       | Under 3 hours | Fresh | Words shown; the time is in the Why, and on Forward's credit line |
       | 3 to 12 hours | Older | Words shown with their time in the sentence: "As of yesterday 21:00, …" |
       | Over 12 hours | Unusable | No forecast words anywhere. No dry-weather task is matched. Today says, in place of its weather sentence, "The forecast hasn't updated since {when}." |
-      | None yet | — | No forecast words and no stale line; the refresh is asked for after render |
+      | None yet, or for another location | — | No forecast words and no stale line; the refresh is asked for after render |
 
-16. **The refresh is gated and audited.** Proposed — owner decision D4.
+16. **The refresh is gated and audited.** Approved — owner decision D4 (2026-10-11).
     - **Gated:** the refresh is a write of household data (it reveals the home location to the provider), so it starts with `assertFamilyWritesOpen()` and `assertCanWrite`, before any query or request. In Production with the gate closed, it is refused even if a location is set. Kev cannot refresh.
     - **Audited:** each attempt that reaches the provider writes one `weather.refresh` row, with structural metadata only (`{ status, hours }`): no coordinates, URL, response or values.
     - **Visible only to the adult whose visit triggered it** (`visible_to_user_id`), because a household-visible row would tell one adult when the other opened HOME.
+    - **Structured codes only** (amended at approval, §41). The adapter and the service map every outcome to a closed set: `unreachable`, `rate_limited`, `timeout`, `too_large`, `bad_response`, `busy`, `not_due`, `real_data_closed` and `not_configured`.
+      - Raw errors, including fetch and undici errors whose messages or causes can carry the URL, are caught at the adapter boundary and never rethrown, logged, stored, audited or returned. An error the adapter cannot otherwise map is `unreachable`.
+      - An unexpected error elsewhere in the service is a generic failure: its transaction rolls back, nothing is recorded, no message propagates, and its log line carries the fixed code `unexpected`, which is never stored.
+      - **Never logged or returned:** raw or rounded coordinates, elevation, the provider request URL, any query string, the location key or canonical string, headers and response bodies.
+      - The route returns only `{ changed: boolean }`, or the existing refusal shapes of `/calendars/refresh` (signed out, cross-origin, gate closed), which carry no detail. Audit metadata stays `{ status, hours }`. A failure logs one event, `weather_refresh_failed`, with its code only.
 
-17. **Uncertainty: bands, thresholds and horizon.** Proposed — owner decisions D5 and D6.
+17. **Uncertainty: bands, thresholds and horizon.** Approved — owner decisions D5 and D6 (2026-10-11).
     - **Bands over a span of hours** (code constants):
 
       | Band | When |
@@ -191,20 +229,21 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **`openMeteoPolicy`:** approves exactly `https` `api.open-meteo.com` `/v1/forecast`, public addresses only; a frozen object like `googleCalendarPolicy`.
     - **Per-policy request:** headers come from the policy (`accept: application/json`, `user-agent: HOME-weather/1`), never a cookie, credential or HOME header. Limits: 10 seconds, 512 KiB, no redirects.
     - **A `429` gets its own code, `rate_limited`.** Everything else is unchanged, and the calendar policy and its tests are untouched.
+    - **Nothing raw crosses the adapter** (amended at approval, §41). The adapter turns every `safe-fetch` refusal and every thrown error into one of §16's codes. No error object, message, cause or URL leaves it.
     - **CSP is unchanged:** the fetch is server-side.
 
-20. **Attribution** (CC BY 4.0: "a link next to any location Open-Meteo data are displayed"). Proposed — owner decision D8.
+20. **Attribution** (CC BY 4.0: "a link next to any location Open-Meteo data are displayed"). Approved — owner decision D8 (2026-10-11).
     - **One credit per page that shows forecast words,** beside them:
       - **Today:** a small muted "Open-Meteo" link directly after the weather sentence, or, when there is no sentence, after the first opening that cites the forecast;
       - **Forward Week:** beside the Coming up label, with the forecast's time: "Forecast as of 06:55 · Open-Meteo".
     - **An opening's Why** that cites the forecast repeats the link.
     - Links use `rel="noreferrer"`, so HOME's address is never sent. BRAND.md gains a line for it (Package 4).
 
-21. **No severe-weather warnings in M7.** Proposed — owner decision D7. If wanted later, MetService's public CAP feed is the official source. Its terms require that warning text is not altered, so HOME would show it verbatim, credited, and never paraphrased by Kev. That would be its own decision and package.
+21. **No severe-weather warnings in M7.** Approved — owner decision D7 (2026-10-11). If wanted later, MetService's public CAP feed is the official source. Its terms require that warning text is not altered, so HOME would show it verbatim, credited, and never paraphrased by Kev. That would be its own decision and package.
 
 ### Gaps
 
-22. **A gap** is a maximal stretch, inside **planning hours** on a home date, where no recorded commitment in the chosen scope (§23) overlaps. Proposed — owner decision D9.
+22. **A gap** is a maximal stretch, inside **planning hours** on a home date, where no recorded commitment in the chosen scope (§23) overlaps. Approved — owner decision D9 (2026-10-11).
     - **Planning hours:** 08:00–20:00 home time, a code constant. No settings screen, no schema.
     - **On today,** a gap's displayed start is clipped to `now`. Its identity is not (§27).
     - Gaps are computed per request, from the agenda the page already loaded, and stored nowhere.
@@ -212,8 +251,8 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
 23. **What blocks a gap.** A commitment blocks the stretch it overlaps, `[start, end)`, clipped to planning hours.
     - **A person's scope:** the timed occurrences that person is on (attending or responsible, as the agenda shows: own annotations, else the calendar's usual people, or a changed occurrence's series people); all-day events they are on (their whole planning day, every day the event covers); and scheduled tasks assigned to them.
     - **The household's scope:** the union of every visible household person's scope, plus occurrences and scheduled tasks with no household person on them.
-    - **A timed event with no household person** (nobody recorded, or only people outside the household) blocks the household scope: it is recorded for the household, and HOME does not guess whose it is. It does not block a person's scope, but a person's gap that overlaps one names it in its Why. Proposed — owner decision D11.
-    - **An all-day event with no household person** (a public holiday, a birthday recorded as an event) does not block. It is named in the day's Why. Proposed — owner decision D12.
+    - **A timed event with no household person** (nobody recorded, or only people outside the household) blocks the household scope: it is recorded for the household, and HOME does not guess whose it is. It does not block a person's scope, but a person's gap that overlaps one names it in its Why. Approved — owner decision D11 (2026-10-11).
+    - **An all-day event with no household person** (a public holiday, a birthday recorded as an event) does not block. It is named in the day's Why. Approved — owner decision D12 (2026-10-11).
     - **Never block:** birthdays from people's records; project target dates; tasks due; tasks with no scheduled window; zero-length occurrences; skipped occurrences.
     - **Kind is never read.** School and work series block like any other recorded commitment; HOME neither invents nor exempts routine.
     - **No buffers:** no travel time, no transport, no spacing around commitments.
@@ -224,7 +263,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **Instants are compared in UTC; stretches are named in home wall time.** Both Pacific/Auckland changes happen at 02:00–03:00, outside planning hours, so a planning day is twelve hours on every date. Tests prove boundaries on both change days, including an occurrence that spans the change.
     - **An event kept in another zone** blocks the home-time stretch its instants cover.
 
-25. **Coverage: what HOME can vouch for.** Proposed — owner decision D13. For the reader, from the calendars they can see (the M5 health rules, ADR 0008 §18):
+25. **Coverage: what HOME can vouch for.** Approved — owner decision D13 (2026-10-11). For the reader, from the calendars they can see (the M5 health rules, ADR 0008 §18):
 
     | Coverage | When | Gaps |
     |---|---|---|
@@ -234,7 +273,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
 
     Like Forward and conflicts, the engine is given the agenda's coverage range and refuses a range it does not cover.
 
-26. **Lengths.** The engine returns gaps of 60 minutes or more (a floor in its interface, for M8's later use). Openings need two hours or more. Proposed — owner decision D10.
+26. **Lengths.** The engine returns gaps of 60 minutes or more (a floor in its interface, for M8's later use). Openings need two hours or more. Approved — owner decision D10 (2026-10-11).
 
 27. **Identity and determinism.**
     - **A gap's key:** `gap:{scope}:{date}:{HHMM}-{HHMM}`, where scope is `household` or a person id, and the times are the stretch's home wall-clock bounds before clipping to `now`. Built from ids and times only.
@@ -248,7 +287,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
 
 ### Openings
 
-29. **Two families, weekends only.** Proposed — owner decision D14.
+29. **Two families, weekends only.** Approved — owner decision D14 (2026-10-11).
     - **A candidate** is a household gap, intersected with daylight (when known) and planning hours, of two hours or more, on Saturday or Sunday, within today to today + 6, on a day whose coverage is `recorded` or `partial`.
     - **A plain opening** says that nothing is recorded, with the forecast as an extra sentence when it is usable.
     - **A task opening** matches the candidate to a waiting task (§30).
@@ -277,7 +316,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **A change to the stretch's bounds** (a commitment added, moved or removed, a calendar refresh with new times, a different daylight edge) is a new key, eligible again. Anything else keeps the key.
     - **Current** while its end is after `now` and its remaining length is still two hours or more. Keys carry the opening's date, not the viewing date, so midnight changes nothing.
 
-34. **Where openings appear, how many, in what order.** Proposed — owner decisions D15 and D16.
+34. **Where openings appear, how many, in what order.** Approved — owner decisions D15 and D16 (2026-10-11).
 
     | Surface | Openings | Shown |
     |---|---|---|
@@ -295,8 +334,8 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **No new table, column or response value.**
 
 36. **`alignment` and `weather_effect`.**
-    - **`alignment` is deferred** (Proposed — owner decision D17). "Both adults have nothing recorded" is unknowable to either adult: each sees only their own private events, so the statement would be wrong for one of them, and computing it from both would leak. A later design would need the owner to decide whether private events may contribute an anonymous "something recorded" block, and that is a privacy decision of its own.
-    - **`weather_effect` is folded into task openings** (Proposed — owner decision D18). Its two cases were "a task needing dry weather" (now the task opening, which appears and disappears with the forecast) and "an outdoor event" (no record says an event is outdoors; HOME would have to guess from titles). "The painting's better Saturday" is a recommendation, which M7 does not make.
+    - **`alignment` is deferred** (Approved — owner decision D17, 2026-10-11). "Both adults have nothing recorded" is unknowable to either adult: each sees only their own private events, so the statement would be wrong for one of them, and computing it from both would leak. A later design would need the owner to decide whether private events may contribute an anonymous "something recorded" block, and that is a privacy decision of its own.
+    - **`weather_effect` is folded into task openings** (Approved — owner decision D18, 2026-10-11). Its two cases were "a task needing dry weather" (now the task opening, which appears and disappears with the forecast) and "an outdoor event" (no record says an event is outdoors; HOME would have to guess from titles). "The painting's better Saturday" is a recommendation, which M7 does not make.
 
 ### Experience
 
@@ -308,7 +347,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
       | State | Today | Forward Week |
       |---|---|---|
       | No location | No sentence, no credit | No phrases, no credit |
-      | Location, no forecast yet | No sentence; refresh after render | No phrases |
+      | Location, no forecast yet (or one for another location) | No sentence; refresh after render | No phrases |
       | Older forecast | Sentence with its time | Phrases; credit line with its time |
       | Unusable forecast | "The forecast hasn't updated since {when}." | No phrases |
       | First run (no calendar) | Sentence if there is a forecast; no openings | Phrases if there is a forecast; no openings |
@@ -323,7 +362,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
 
 ### Process
 
-39. **Packages:** seven, numbered 0, 1a, 1b, 2, 3, 4 and 5 (contract §2). Proposed — owner decision D19.
+39. **Packages:** seven, numbered 0, 1a, 1b, 2, 3, 4 and 5 (contract §2). Approved — owner decision D19 (2026-10-11).
     - **0:** this ADR and the contract.
     - **1a:** the `weather_forecast` migration, alone (migration-first).
     - **1b:** weather: provider interface, adapter, fake, `safe-fetch` policy, cache service, refresh route and client, env, logger redaction, the weather and daylight engines. No screen.
@@ -335,23 +374,32 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     Each package follows ADR 0010's tiers (contract §2.3). Package 1b's application code merges only after 1a has run in Production and Preview. Review is high for 1a, 1b, 2, 3 and 5, and medium for 4. Package 1a cannot start until the owner merges Package 0 and says to start.
 
 40. **Production.** M7 is built and accepted on synthetic data, and `HOME_REAL_DATA` stays closed.
-    - It adds one migration (Package 1a) and **one Production setting**, the home location, the first since M4's keys.
-    - The location is set in Production only after the gate opens, and the refresh is refused while the gate is closed.
-    - Package 5 adds DEPLOY.md §E items and the environment table's rows for `HOME_LAT`, `HOME_LON` and `HOME_ELEVATION` (contract §10.2).
+    - It adds one migration (Package 1a) and **two Production settings**, the home location and its location key (§13), the first since M4's keys.
+    - The location and the key are set in Production only after the gate opens, and the refresh is refused while the gate is closed.
+    - Package 5 adds DEPLOY.md §E items and the environment table's rows for `HOME_LAT`, `HOME_LON`, `HOME_ELEVATION` and `HOME_WEATHER_LOCATION_KEY` (contract §10.2).
+
+41. **Amendments at approval (2026-10-11).** The owner approved D1–D19 as recommended, with five amendments, written into the decisions above and into the contract (§12.4 lists the sections):
+    1. **Location identity.** D3 becomes "A, with a keyed location fingerprint": a `location_fingerprint` column, keyed by a new secret, `HOME_WEATHER_LOCATION_KEY`. A changed location shows no forecast until the next successful refresh, never another place's forecast (§13, §14, §15).
+    2. **Refresh execution.** Request-bound only, with a bounded duration, one transaction holding the lock across the fetch, and stated guarantees for an interrupted request (§15).
+    3. **Error handling.** A closed set of codes; raw errors never cross the adapter; nothing location-bearing is logged, stored, audited or returned (§16, §19).
+    4. **Unassigned events.** The contract uses §23's definition of a timed event with no household person, unchanged here; no new visibility rule is needed (contract §5.4).
+    5. **Licensing.** The free API is used under Open-Meteo's non-commercial terms, for this household only; a commercial deployment would need its own licensing, review and decision (§11).
+
+    The owner also approved Wellington's Civic Square as the synthetic test and Preview point (§13). Nothing else changed: no new table beyond `weather_forecast`, no new runtime dependency and no new insight rule.
 
 ## Consequences
 
-- **ROADMAP.** The M7 row records Package 0 and this ADR; once the owner decides, it records the narrowing (§36, §3). The M6 row shows M6 accepted.
+- **ROADMAP.** The M7 row records Package 0's approval, this ADR and the narrowing (§36, §3). The M6 row shows M6 accepted.
 - **SYSTEM-ARCHITECTURE §2.2, §2.4 and §2.6.** Annotated, not rewritten:
   - `windows` is built as the gap engine;
   - `free_window` becomes `open_window`;
   - `alignment` is deferred, and `weather_effect` is folded into task openings;
   - the weather cache is a table refreshed on use, and the §2.6 examples are superseded.
-- **FAMILY-DATA-MODEL.** The WeatherCache entry is annotated as `weather_forecast` (§14), with no location column. Package 1a writes the full entry.
+- **FAMILY-DATA-MODEL.** The WeatherCache entry is annotated as `weather_forecast` (§14), with a keyed location fingerprint and no coordinate or location column. Package 1a writes the full entry.
 - **KEV-AGENT-MODEL.** `find_free_windows` and `get_weather` stay M8's. They will call these engines, and their results keep M7's "nothing recorded" language, never availability.
 - **Concepts and BRAND.** In Package 4:
   - `docs/concepts/TODAY.md` gains its "As built" annotation (M5's and M7's);
   - `docs/concepts/FORWARD.md` gains M7's weather line;
   - BRAND.md gains the credit link and supersedes its "looks best" example for M7.
-- **DEPLOY.md.** Package 5 adds the §E items and the environment variables (§40).
-- **CLAUDE.md.** The status line records M6's acceptance and M7's Package 0. Rule 5's "free windows" are the gap engine. No rule changes.
+- **DEPLOY.md.** Package 5 adds the §E items and the environment variables, including `HOME_WEATHER_LOCATION_KEY` (§40).
+- **CLAUDE.md.** The status line records M6's acceptance and M7's Package 0, approved by the owner. Rule 5's "free windows" are the gap engine. No rule changes.

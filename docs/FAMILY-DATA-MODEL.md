@@ -279,7 +279,7 @@ Implementation (`0006`): `kev_usage` is append-only: `home_app` has only `SELECT
 ### WeatherCache
 Cached forecast (location, fetched_at, hourly JSON).
 
-*M7 (ADR 0011 §14, proposed 2026-10-11):* built in M7 Package 1a as `weather_forecast`: one row per provider holding the latest good forecast (normalised UTC hours and `fetched_at`) and the last attempt's outcome. It has no location column (the home location stays in private configuration) and no user or visibility column (it is household-level and holds nothing either adult recorded), and it is excluded from export. Package 1a writes the full entry.
+*M7 (ADR 0011 §14, proposed 2026-10-11):* built in M7 Package 1a as `weather_forecast`: one row per provider holding the latest good forecast (normalised UTC hours and `fetched_at`) and the last attempt's outcome. It has no coordinate or location column (the home location stays in private configuration; the row holds only `location_fingerprint`, a keyed HMAC of it, so a forecast for another location is never shown, as amended at approval on 2026-10-11) and no user or visibility column (it is household-level and holds nothing either adult recorded), and it is excluded from export. Package 1a writes the full entry.
 
 ### InsightResponse
 The only persisted part of insights. Insights themselves are derived on read (see SYSTEM-ARCHITECTURE §2.6).

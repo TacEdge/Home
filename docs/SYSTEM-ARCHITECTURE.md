@@ -117,7 +117,7 @@ interface CalendarProvider {
 #### Weather
 Open-Meteo (free, no key, good NZ coverage), hourly forecast for the home location, cached ~1 hour.
 
-*M7 (ADR 0011, proposed 2026-10-11):* behind a HOME-defined `WeatherProvider`; requested in UTC (`timeformat=unixtime`, never `timezone`, whose fixed offset ignores DST); cached in one household-level `weather_forecast` row, refreshed on use at most hourly and never while rendering, with the last good forecast kept on failure; the home location in private environment configuration, rounded to two decimal places and never stored or logged; daylight computed locally.
+*M7 (ADR 0011, proposed 2026-10-11):* behind a HOME-defined `WeatherProvider`; requested in UTC (`timeformat=unixtime`, never `timezone`, whose fixed offset ignores DST); cached in one household-level `weather_forecast` row, refreshed on use at most hourly (at once after a location change) and never while rendering, with the last good forecast kept on failure; the home location in private environment configuration, rounded to two decimal places and never stored or logged (the row holds only a keyed fingerprint of it, so another place's forecast is never shown); daylight computed locally.
 
 No background job infrastructure in V0.1: syncs happen lazily on use with a staleness threshold (M4 contract §3.3). A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
 
