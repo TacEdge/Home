@@ -103,11 +103,23 @@ Scenario: the fixture family on Wednesday 5 May 2027 (NZST), with synthetic reco
 
 - **Query counts (CI, through the real services):** Forward's read is the agenda read plus one responses query, constant after 20 more events, 3 tasks, a project and a second calendar (`forward-screen.test.ts`); the 90-day conflicts read is 7 queries, constant after 20 more events (`conflict-insights.test.ts`); the Today page adds no query to its read (ADR 0009 §34).
 - **Engine time (this package, re-measured):** at 300 synthetic events, the 90-day agenda about 170 ms cold and 58 ms for all three Forward compositions; the conflict engine 24–29 ms at 300 events and 138–181 ms at 1,200; Today's conflicts and insights over eight days about 6 ms.
-- **Render time (this package; contract §3.7 and criterion 9):** PERF_PLACEHOLDER
+- **Render time (this package; contract §3.7 and criterion 9):** measured on the production build (`next build` of 6ede099, `next start` on this dev container, a signed session for Sam, twelve warm samples per path, server round trip in ms):
+
+  | Path | Fixture household: median / p90 | With 300 more events over 90 days: median / p90 |
+  |---|---|---|
+  | `/today` | 20 / 26 | 68 / 74 |
+  | `/forward` (Week) | 24 / 36 | 184 / 228 |
+  | `/forward?h=month` | 24 / 30 | 157 / 188 |
+  | `/forward?h=season` | 30 / 36 | 273 / 327 |
+  | `/people/{milo}` | 25 / 27 | 213 / 258 |
+
+  Well under a second on every path, as §3.7 expected. The development server (what the browser specs run against) is several times slower: the same walkthrough measured Season at 3.6 s with the 300 events, which is React's development mode and on-demand compilation, not the product. The 300 extra events are synthetic one-offs spread over the ninety days with Sam, Alex and Milo in turn; they and the session row were removed afterwards.
 
 ## 7. Regression
 
-REGRESSION_PLACEHOLDER
+- **Full local verification (`pnpm verify`, this package, on 6ede099 plus these documents):** lint (0 errors, the one pre-existing warning), typecheck, unit **82 files / 1,554 tests**, integration **41 files / 755 tests**, build, boot, csp and the full browser suite **218 passed (21.8 min)**, all green, with one exception: in the integration step `calendar-sync.test.ts › recovery: a person a disconnected household calendar names can be made private once the owner lets them go` timed out at its 5 s limit while the assessor's unit suites and mutation runs were loading the same machine; re-run alone it passes in 4 s (45 tests), as did `people-privacy.test.ts` after the same kind of timeout in Package 4's run. Neither test is touched by M6; both are M3/M4 tests with the default 5 s limit, and neither reproduces on a quiet machine.
+- **CI:** PR #67's full regression on b5e84ba, 218 e2e passed; main at 6ede099 after the merge, lint/typecheck/unit/integration, bundle build and secret scan green (the e2e job was still running when the assessor read it). This package's own CI run is on its PR.
+- **M1–M5 suites kept:** every earlier spec runs in the full regression; the intentional M6 changes to older specs are recorded in ADR 0009 §34–§35 (one Today spec names the Dismiss form explicitly; Today's footer reads "What’s coming up ›"; the specs that read the old 30-day Forward list now read Week or Month by unit).
 
 ## 8. Outstanding defects
 
@@ -154,4 +166,4 @@ Transport (ADR §20), `conflict.away` and "both adults away" (§24–§25), shee
 
 ## 11. Acceptance status
 
-STATUS_PLACEHOLDER
+**M6 is recommended for acceptance on synthetic data once the evidence gaps in §8 are closed (B).** Nothing in the code breaks the contract; the gaps are tests that are owed, not behaviour, plus the owner's screenshot review and the two copy questions in §9. Operational acceptance on the family's real records is DEPLOY.md §E items 18–19, which wait on the gate and the earlier items. `HOME_REAL_DATA` stays closed; nothing was merged or closed by this package, and M7 does not start until the owner says so.
