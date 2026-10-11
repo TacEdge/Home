@@ -2,7 +2,7 @@
 
 Status: **Accepted**, 2026-10-09. The owner approved the product decisions on PR #59 (§20–§29, as refined there) and accepted this ADR and the contract (`docs/m6/M6-BUILD-CONTRACT.md`) by merging Package 0.
 
-- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) has merged (PR #67). Package 5 (acceptance, `docs/m6/M6-ACCEPTANCE.md`) is in review, its evidence fixes and the owner's two wording decisions merged (PR #69).
+- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) has merged (PR #67). Package 5 (acceptance, `docs/m6/M6-ACCEPTANCE.md`) has merged (PR #68), with its evidence fixes and the owner's two wording decisions (PR #69, §36). M6 is technically accepted on synthetic data; its operational acceptance waits on DEPLOY.md §E items 18–19.
 - **Refinements on PR #59:**
   - `conflict.away` removed (§12, §24);
   - conflict identity and lifecycle defined precisely (§13);
