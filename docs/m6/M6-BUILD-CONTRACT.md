@@ -2,7 +2,7 @@
 
 Status: **Approved**, 2026-10-09 (Package 0, PR #59, merged by the owner; product decisions in §12.2).
 
-- **Progress:** Package 1 (Forward groundwork and engine, ADR 0009 §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) is in review. Package 5 does not start until the owner says so.
+- **Progress:** Package 1 (Forward groundwork and engine, ADR 0009 §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) has merged (PR #67). Package 5 (acceptance, `M6-ACCEPTANCE.md`) is in review; M6 closes only when the owner accepts it.
 
 The architecture decisions are recorded in ADR 0009 (`docs/decisions/0009-m6-forward-coordination.md`).
 
