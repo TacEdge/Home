@@ -377,7 +377,7 @@ function nameOf(i: AgendaItem): string {
  * A listed item in the headline (§5.5, `forward.headline.listed`): its name
  * and its day ("Swimming today", "Nana Jo’s birthday on Tuesday"). An event
  * carried in from before today is named by when it ends, so it never reads
- * as starting today (ADR 0009 §35, owner's decision): "Camp, until Friday",
+ * as starting today (ADR 0009 §36, owner's decision): "Camp, until Friday",
  * "Camp, until tomorrow", "Camp, ending today"; past a week, its date.
  */
 function listedPart(e: ForwardEntry, today: IsoDate): string {

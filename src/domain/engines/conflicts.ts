@@ -223,7 +223,7 @@ function sentence(
       c.rule === 'conflict.responsible'
         ? `${name} is recorded as responsible for both ${a.title} and ${b.title}, which overlap regularly`
         : `${name}’s ${a.title} and ${b.title} overlap regularly`;
-    // "…; the next is today.", "…; the next is on Wednesday 21 October." (owner's wording, ADR 0009 §35)
+    // "…; the next is today.", "…; the next is on Wednesday 21 October." (owner's wording, ADR 0009 §36)
     return `${lead}, ${span}; the next is ${day}.`;
   }
   return c.rule === 'conflict.responsible'
