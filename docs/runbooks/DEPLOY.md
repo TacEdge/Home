@@ -210,6 +210,13 @@ M5 (Intelligent Today) items. M5 is technically accepted on synthetic data (`doc
 | 16 | **Today on a real day**: each adult opens Today on a weekday morning and in the evening; the headline, each person's lines and To do match what is recorded; nothing private to the other adult appears; Worth knowing, Why and Dismiss work, and a dismissal on one adult's Today does not change the other's. | M5 works on the family's real records, privately. |
 | 17 | **The five-second check**: the owner confirms, on their own phone, that a real day can be understood in about five seconds (concepts README design tests 1–3, 7), noting anything that reads wrong. Usefulness itself is evaluated in the M10 trial (ADR 0008 §22). | The approved design holds on real days. |
 
+M6 (Forward Coordination) items. M6 is assessed on synthetic data (`docs/m6/M6-ACCEPTANCE.md`) and adds no Production setting, key or migration; these close its operational acceptance on the family's real records, after the gate opens (item 11), the first real calendar (item 14) and Today's items (16–17).
+
+| # | Item | Proves |
+|---|---|---|
+| 18 | **Forward on a real week**: each adult opens Week and Month; the rows match what is recorded; nothing private to the other adult appears; a real overlap, if any, is marked with correct facts (the person, both commitments, the overlap's times); Dismiss and Not useful work and stay one adult's. | M6 works on the family's real records, privately. |
+| 19 | **The anticipation check**: the owner confirms, on their own phone, that the coming week and month can be understood at a glance without alarm (concepts README design tests 2, 4, 7), noting anything that reads wrong. Usefulness itself, the `not_useful` review and the evidence for transport at M9 planning are evaluated in the M10 trial (ADR 0009 §17, §20), including whether conflicts are worth their marks. | The approved Forward design holds on real weeks. |
+
 **Evidence required before `HOME_REAL_DATA=open`.** Each item is recorded here with its date and the owner's initials, as counts and yes/no observations only, never record contents, credentials, hosts or addresses.
 
 | Item | Evidence to record |
@@ -227,5 +234,7 @@ M5 (Intelligent Today) items. M5 is technically accepted on synthetic data (`doc
 | 15 | The date; no address, calendar id, title or place in the logs (yes/no). |
 | 16 | The date; for each adult (initials): headline and lines matched the records (yes/no); nothing of the other adult's private records seen (yes/no); Dismiss worked and stayed one adult's (yes/no). |
 | 17 | The date; understood in about five seconds (yes/no); anything that read wrong, in general terms only (no record contents). |
+| 18 | The date; for each adult (initials): Week and Month rows matched the records (yes/no); nothing of the other adult's private records seen (yes/no); an overlap was marked with correct facts (yes/no/none recorded); Dismiss and Not useful worked and stayed one adult's (yes/no). |
+| 19 | The date; the week and month understood at a glance without alarm (yes/no); anything that read wrong, in general terms only (no record contents). |
 
 Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.
