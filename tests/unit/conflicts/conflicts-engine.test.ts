@@ -311,6 +311,31 @@ describe('the contract’s identity and lifecycle tests (§5.7.4, engine level)'
     );
   });
 
+  // The owner's wording (ADR 0009 §36): "…; the next is today." / "tomorrow" / "on {date}".
+  it.each([
+    ['2026-10-14T07:03:00+13:00', 'today'],
+    ['2026-10-13T07:03:00+13:00', 'tomorrow'],
+    ['2026-10-19T07:03:00+13:00', 'on Wednesday 21 October'],
+  ])(
+    'a standing conflict’s sentence names its next date: now %s → “the next is %s”',
+    (iso, day) => {
+      const now = new Date(iso);
+      const events = [swimming(), tutoring({ people: [...att(ID.milo), ...resp(ID.alex)] })];
+      const cs = run({ events, now });
+      expect(about(cs, ID.milo).map((c) => c.text)).toEqual([
+        `Milo’s Swimming and Tutoring overlap regularly, 15:45–16:15; the next is ${day}.`,
+      ]);
+      expect(about(cs, ID.alex).map((c) => c.text)).toEqual([
+        `Alex is recorded as responsible for both Swimming and Tutoring, which overlap regularly, 15:45–16:15; the next is ${day}.`,
+      ]);
+      // Wording only: the keys are the same whatever the day.
+      expect(keys(cs).sort()).toEqual([
+        'conflict.overlap:p-milo:e-swim.e-tutor:w1545-1615',
+        'conflict.responsible:p-alex:e-swim.e-tutor:w1545-1615',
+      ]);
+    },
+  );
+
   it('T2: Alex made responsible on Tutoring too: Milo’s key unchanged; a new standing responsible conflict for Alex', () => {
     const cs = run({
       events: [swimming(), tutoring({ people: [...att(ID.milo), ...resp(ID.alex)] })],
@@ -612,6 +637,105 @@ describe('a standing window and the clocks', () => {
     const offsets = new Set(cs[0]!.instances.map((i) => i.overlap.from.getUTCHours()));
     expect(offsets).toEqual(new Set([2, 3])); // NZDT then NZST: same wall clock, two UTC hours
   });
+  it('a home-zone series keeps its key across the September DST change (NZ, 27 Sep 2026)', () => {
+    // Wednesdays 16 September (NZST, UTC+12) to 14 October (NZDT, UTC+13).
+    const swim = timed(
+      'e-swim',
+      'Swimming',
+      '2026-09-16T15:30:00+12:00',
+      '2026-09-16T16:15:00+12:00',
+      { rrule: WEEKLY_WE, people: att(ID.milo) },
+    );
+    const tutor = timed(
+      'e-tutor',
+      'Tutoring',
+      '2026-09-16T15:45:00+12:00',
+      '2026-09-16T16:30:00+12:00',
+      { rrule: WEEKLY_WE, people: att(ID.milo) },
+    );
+    const cs = run({ events: [swim, tutor], now: new Date('2026-09-16T07:00:00+12:00'), days: 29 });
+    expect(keys(cs)).toEqual(['conflict.overlap:p-milo:e-swim.e-tutor:w1545-1615']);
+    expect(cs[0]!.instances.map((i) => i.when)).toEqual([
+      '2026-09-16',
+      '2026-09-23',
+      '2026-09-30',
+      '2026-10-07',
+      '2026-10-14',
+    ]);
+    // 15:45 NZST is 03:45 UTC; 15:45 NZDT is 02:45 UTC: same wall clock, one key.
+    expect(cs[0]!.instances.map((i) => i.overlap.from.getUTCHours())).toEqual([3, 3, 2, 2, 2]);
+  });
+
+  it('an occurrence-level overlap on the DST-start night (27 Sep 2026) is keyed by its UTC instants', () => {
+    // 01:00–04:00 against 01:45–03:30 on the home wall clock; 02:00 NZST becomes 03:00 NZDT.
+    const a = timed('e-a', 'Night run', '2026-09-27T01:00:00+12:00', '2026-09-27T04:00:00+13:00', {
+      people: att(ID.sam),
+    });
+    const b = timed('e-b', 'Flight', '2026-09-27T01:45:00+12:00', '2026-09-27T03:30:00+13:00', {
+      people: att(ID.sam),
+    });
+    const cs = run({ events: [a, b], now: new Date('2026-09-26T12:00:00+12:00'), days: 3 });
+    expect(keys(cs)).toEqual(['conflict.overlap:p-sam:e-a.e-b:20260926T1345Z-20260926T1430Z']);
+    expect(cs[0]!).toMatchObject({ identity: 'occurrence', when: '2026-09-27' });
+    expect(cs[0]!.overlap).toEqual({
+      from: new Date('2026-09-26T13:45:00Z'),
+      to: new Date('2026-09-26T14:30:00Z'), // 45 minutes, though the wall clock reads 01:45–03:30
+    });
+    expect(cs[0]!.text).toBe(
+      'Sam has Night run and Flight at the same time tomorrow, 01:45–03:30.',
+    );
+  });
+
+  // ADR 0009 §33, "The DST-change night": an occurrence keeps its length, so on
+  // the night the clocks change, a standing pair's overlap ends at a different
+  // home wall clock. That week alone has a second standing key.
+  it('the DST-end night (5 Apr 2026): a second standing key for that week alone, w0130-0230 beside w0130-0330', () => {
+    const WEEKLY_SU = 'FREQ=WEEKLY;BYDAY=SU';
+    const a = timed('e-a', 'Watch', '2026-03-22T01:00:00+13:00', '2026-03-22T04:00:00+13:00', {
+      rrule: WEEKLY_SU,
+      people: att(ID.sam),
+    });
+    const b = timed('e-b', 'Shift', '2026-03-22T01:30:00+13:00', '2026-03-22T03:30:00+13:00', {
+      rrule: WEEKLY_SU,
+      people: att(ID.sam),
+    });
+    const cs = run({ events: [a, b], now: new Date('2026-03-21T12:00:00+13:00'), days: 28 });
+    expect(keys(cs).sort()).toEqual([
+      'conflict.overlap:p-sam:e-a.e-b:w0130-0230',
+      'conflict.overlap:p-sam:e-a.e-b:w0130-0330',
+    ]);
+    const night = cs.find((c) => c.key.endsWith('w0130-0230'))!;
+    expect(night.identity).toBe('standing');
+    expect(night.instances.map((i) => i.when)).toEqual(['2026-04-05']);
+    // 01:30 NZDT (12:30 UTC) for two hours of Shift: 02:30 NZST.
+    expect(night.overlap).toEqual({
+      from: new Date('2026-04-04T12:30:00Z'),
+      to: new Date('2026-04-04T14:30:00Z'),
+    });
+    const usual = cs.find((c) => c.key.endsWith('w0130-0330'))!;
+    expect(usual.instances.map((i) => i.when)).toEqual(['2026-03-22', '2026-03-29', '2026-04-12']);
+  });
+
+  it('the DST-start night (27 Sep 2026): the same pair’s second key is w0130-0430', () => {
+    const WEEKLY_SU = 'FREQ=WEEKLY;BYDAY=SU';
+    const a = timed('e-a', 'Watch', '2026-09-13T01:00:00+12:00', '2026-09-13T04:00:00+12:00', {
+      rrule: WEEKLY_SU,
+      people: att(ID.sam),
+    });
+    const b = timed('e-b', 'Shift', '2026-09-13T01:30:00+12:00', '2026-09-13T03:30:00+12:00', {
+      rrule: WEEKLY_SU,
+      people: att(ID.sam),
+    });
+    const cs = run({ events: [a, b], now: new Date('2026-09-12T12:00:00+12:00'), days: 28 });
+    expect(keys(cs).sort()).toEqual([
+      'conflict.overlap:p-sam:e-a.e-b:w0130-0330',
+      'conflict.overlap:p-sam:e-a.e-b:w0130-0430',
+    ]);
+    expect(cs.find((c) => c.key.endsWith('w0130-0430'))!.instances.map((i) => i.when)).toEqual([
+      '2026-09-27',
+    ]);
+  });
+
   it('a series kept in another zone moves on the home clock when that zone changes: two windows, two standing conflicts', () => {
     // A London series at 04:00–05:00 BST/GMT against a home series at 16:00–17:00 NZDT.
     const call = timed('e-call', 'Call', '2026-10-21T04:00:00+01:00', '2026-10-21T05:00:00+01:00', {

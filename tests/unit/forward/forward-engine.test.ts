@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { agenda, type AgendaEventInput, type AgendaTaskInput } from '@/domain/engines/agenda';
+import {
+  agenda,
+  type AgendaDay,
+  type AgendaEventInput,
+  type AgendaTaskInput,
+} from '@/domain/engines/agenda';
 import {
   entryKey,
   FORWARD_RULES,
@@ -68,6 +73,27 @@ const allText = (m: ForwardModel) => [
   m.headline.conflicts?.text ?? '',
   ...m.units.flatMap((u) => [u.label, u.load.text]),
 ];
+
+/** A seeded generator (mulberry32), as the conflict engine's T19: the same seed, the same sequence. */
+function mulberry32(seed: number): () => number {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Fisher–Yates over a copy. */
+function shuffle<T>(xs: readonly T[], random: () => number): T[] {
+  const out = [...xs];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 describe('horizons and units (§5.1)', () => {
   it('Week: seven days, Today and Tomorrow, then weekday and date', () => {
@@ -228,6 +254,40 @@ describe('notable and the usual (§5.2)', () => {
     expect([...notable]).toEqual(expect.arrayContaining(['e-book', 'e-tutor', 'e-nana']));
     const usual = new Set(m.units.flatMap((u) => u.usual.map((e) => e.key.split(':')[0])));
     expect(usual.has('e-book') || usual.has('e-tutor') || usual.has('e-nana')).toBe(false);
+  });
+
+  it('a fortnightly series with a household person is usual on its on-weeks across Month and Season, absent on off-weeks, never notable (P1-6)', () => {
+    const lessons = timed(
+      'e-guitar',
+      'Guitar',
+      '2026-10-13T16:00:00+13:00',
+      '2026-10-13T16:45:00+13:00',
+      { kind: 'activity', rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU', people: att(ID.milo) },
+    );
+    const onWeeks = (h: Horizon) => {
+      const m = run({ events: [...HOUSE, lessons] }, WED_0703, h);
+      const keys = (rule: 'notable' | 'usual') =>
+        m.units.flatMap((u) => u[rule].map((e) => e.key)).filter((k) => k.startsWith('e-guitar:'));
+      expect(keys('notable')).toEqual([]);
+      return keys('usual');
+    };
+    expect(onWeeks('month')).toEqual(['e-guitar:2026-10-27', 'e-guitar:2026-11-10']);
+    expect(onWeeks('season')).toEqual([
+      'e-guitar:2026-10-27',
+      'e-guitar:2026-11-10',
+      'e-guitar:2026-11-24',
+      'e-guitar:2026-12-08',
+      'e-guitar:2026-12-22',
+      'e-guitar:2027-01-05',
+    ]);
+    // Off-weeks (20 October, 3 November, …) have nothing of it.
+    expect(
+      onWeeks('season').some((k) => k.endsWith('2026-10-20') || k.endsWith('2026-11-03')),
+    ).toBe(false);
+    const m = run({ events: [...HOUSE, lessons] }, WED_0703);
+    expect(m.usual.find((w) => w.name === 'Milo')!.entries.map((e) => e.eventId)).toContain(
+      'e-guitar',
+    );
   });
 
   it('Month and Season rows are chronological (ADR 0009 §35): a conflict lists, it does not reorder; the trip and the milestone stay reachable', () => {
@@ -504,18 +564,85 @@ describe('rows and caps (§5.3)', () => {
     ]);
   });
 
-  it.each(HORIZONS)('%s: input order never changes the model', (h) => {
-    const events = [...HOUSE, ...many];
-    const a = run({ events, tasks: SCHEDULED }, WED_0703, h);
-    for (let n = 0; n < 5; n++) {
-      const shuffled = [...events].sort(() => (n % 2 ? 1 : -1)).reverse();
-      const b = run(
-        { events: shuffled, tasks: [...SCHEDULED].reverse(), people: [...PEOPLE] },
-        WED_0703,
-        h,
+  // Determinism (contract §8.1, matrix U-10): a seeded Fisher–Yates (the
+  // conflict engine's T19 helper) over events, tasks, projects and people, and
+  // over the items within each of the agenda's days. Every seed gives the
+  // same model, deeply and byte for byte, on every horizon. Two inputs keep
+  // the order their contracts give them: the agenda's days are in date order
+  // (`agenda()`'s documented output; Forward places a multi-day occurrence at
+  // its first day in that order), and Forward's people are in People order
+  // (`ForwardInput.people`; The usual lists people in it). The people the
+  // agenda is given are shuffled.
+  it.each(HORIZONS)('%s: seeded shuffles of every input give an identical model', (h) => {
+    const events = [
+      ...HOUSE,
+      ...many,
+      allDay('e-camp', 'Camp', '2026-10-19', '2026-10-22', { people: att(ID.milo) }),
+      timed('e-shift', 'Night shift', '2026-10-15T22:00:00+13:00', '2026-10-16T06:00:00+13:00', {
+        people: att(ID.sam),
+      }),
+    ];
+    const projects = [
+      { id: 'pr-fence', title: 'Back fence', status: 'active', targetDate: '2026-10-17' },
+      { id: 'pr-shed', title: 'Shed', status: 'active', targetDate: '2026-11-03' },
+    ];
+    const from = '2026-10-14';
+    const to = addDays(from, 89);
+    const compose = (
+      ev: AgendaEventInput[],
+      tasks: AgendaTaskInput[],
+      pr: typeof projects,
+      people: typeof PEOPLE,
+      shuffleItems?: (d: AgendaDay[]) => AgendaDay[],
+    ) => {
+      const placed = agenda({
+        from,
+        to,
+        timeZone: NZ,
+        events: ev,
+        people: people.map((p) => ({ id: p.id, name: p.name, dateOfBirth: p.dateOfBirth })),
+        tasks,
+        projects: pr,
+      });
+      return forward({
+        now: WED_0703,
+        timeZone: NZ,
+        horizon: h,
+        days: shuffleItems ? shuffleItems(placed) : placed,
+        coverage: { from, to },
+        events: ev,
+        people: PEOPLE,
+        calendars: [fresh(WED_0703)],
+        conflicts: [{ key: 'k', occurrences: ['e-board:2026-10-14', 'e-pickup:2026-10-14'] }],
+      });
+    };
+    const base = compose(events, SCHEDULED, projects, PEOPLE);
+    expect(base.counts.notable).toBeGreaterThan(5);
+    const SEEDS = [1, 7, 42, 2026, 31337, 65_000, 123_457, 999_983];
+    const orders = new Set<string>();
+    for (const seed of SEEDS) {
+      const random = mulberry32(seed);
+      const ev = shuffle(events, random);
+      const tasks = shuffle(SCHEDULED, random);
+      const pr = shuffle(projects, random);
+      const people = shuffle(PEOPLE, random);
+      orders.add(ev.map((e) => e.id).join(','));
+      const out = compose(ev, tasks, pr, people, (placed) =>
+        placed.map((d) => ({ ...d, items: shuffle(d.items, random) })),
       );
-      expect(b).toEqual(a);
+      expect(out).toEqual(base);
+      expect(JSON.stringify(out)).toBe(JSON.stringify(base));
     }
+    // The shuffles really are different orders, not the input and not only its reverse.
+    expect(orders.size).toBe(SEEDS.length);
+    orders.delete(events.map((e) => e.id).join(','));
+    orders.delete(
+      [...events]
+        .reverse()
+        .map((e) => e.id)
+        .join(','),
+    );
+    expect(orders.size).toBeGreaterThanOrEqual(SEEDS.length - 2);
   });
 });
 
@@ -617,6 +744,48 @@ describe('the headline (§5.5)', () => {
     );
   });
 
+  // The owner's wording (ADR 0009 §36, contract §5.5): an event carried in
+  // from before today is named by when it ends; one starting today is not.
+  it.each([
+    ['2026-10-17', 'Camp, until Friday.'], // last day Friday 16
+    ['2026-10-16', 'Camp, until tomorrow.'],
+    ['2026-10-15', 'Camp, ending today.'],
+    ['2026-10-20', 'Camp, until Monday.'], // six days on: a weekday is still unambiguous
+    ['2026-10-22', 'Camp, until Wednesday 21 October.'], // seven days on: its date
+    ['2026-10-24', 'Camp, until Friday 23 October.'],
+  ])(
+    'listed: a multi-day event carried in from Monday, ending before %s, is named by its end',
+    (end, text) => {
+      const camp = allDay('e-camp', 'Camp', '2026-10-12', end, { people: att(ID.milo) });
+      const m = run({ events: [...ROUTINE, camp], people: NO_BIRTHDAYS }, WED_0703);
+      expect(m.headline).toMatchObject({ rule: 'forward.headline.listed', text });
+      expect(m.headline.facts).toEqual([
+        { kind: 'event', id: 'e-camp', occurrenceDate: '2026-10-12' },
+      ]);
+    },
+  );
+
+  it('listed: a multi-day event starting today is unchanged ("Camp today."); a timed one carried in is named by its end', () => {
+    const today = allDay('e-camp', 'Camp', '2026-10-14', '2026-10-17', { people: att(ID.milo) });
+    expect(run({ events: [...ROUTINE, today], people: NO_BIRTHDAYS }, WED_0703).headline.text).toBe(
+      'Camp today.',
+    );
+    const timedCamp = timed(
+      'e-camp',
+      'Camp',
+      '2026-10-13T09:00:00+13:00',
+      '2026-10-16T15:00:00+13:00',
+      { people: att(ID.milo) },
+    );
+    expect(
+      run({ events: [...ROUTINE, timedCamp], people: NO_BIRTHDAYS }, WED_0703).headline.text,
+    ).toBe('Camp, until Friday.');
+    // Beside another listed item: each is worded by its own rule.
+    expect(run({ events: [...ROUTINE, timedCamp] }, WED_0703).headline.text).toBe(
+      'Camp, until Friday, then Nana Jo’s birthday on Tuesday.',
+    );
+  });
+
   it('counted, besides the usual when there is any; numbers in words to ten', () => {
     expect(run({ events: HOUSE }, WED_0703).headline.text).toBe(
       'Three things in the next seven days, besides the usual.',
@@ -658,12 +827,28 @@ describe('the headline (§5.5)', () => {
   });
 
   it('no character, availability or need words anywhere, on any horizon or day', () => {
+    // The full list: M5 contract §8.1 and M6 contract §5.5 (matrix U-13). The
+    // household's own titles and names are exempt, as recorded.
     const forbidden =
-      /\b(busy|easy|full|calm|stressful|overwhelming|packed|steady|clear|free|available|quiet|needs?|should|probably|covered|sorted|away|unavailable|double-booked|can['’]t|clash)\b/i;
+      /\b(needs?|needs you|nobody['’]?s down|lift|pick(ing)? up|drop(ping)? off|taking|driving|free|available|out|easy|busy|full|calm|covered|sorted|nothing needs|should|probably|nothing prepared|packed|steady|clear|quiet|stressful|overwhelming|away|unavailable|in two places|double-booked|can['’]t|clash|worth deciding|nothing planned)\b|\bwho\?/i;
+    const conflicts = [{ key: 'k', occurrences: ['e-board:2026-10-14', 'e-pickup:2026-10-14'] }];
+    const carried = allDay('e-camp', 'Camp', '2026-10-12', '2026-10-17', { people: att(ID.milo) });
+    let checked = 0;
     for (const h of HORIZONS)
-      for (const events of [[], ROUTINE, HOUSE])
+      for (const events of [[], ROUTINE, HOUSE, [...ROUTINE, carried]])
         for (const iso of ['2026-10-14T07:03:00+13:00', '2026-10-17T21:00:00+13:00'])
-          for (const t of allText(run({ events }, at(iso), h))) expect(t).not.toMatch(forbidden);
+          for (const calendars of [[fresh(at(iso))], []]) {
+            const m = run({ events, calendars, conflicts }, at(iso), h);
+            const own = (t: string) =>
+              [...events.map((e) => e.title), ...PEOPLE.map((p) => p.name)]
+                .sort((a, b) => b.length - a.length)
+                .reduce((x, name) => x.split(name).join(''), t);
+            for (const t of allText(m)) {
+              expect(own(t), t).not.toMatch(forbidden);
+              checked++;
+            }
+          }
+    expect(checked).toBeGreaterThan(200);
   });
 });
 
@@ -740,6 +925,52 @@ describe('time zones, DST and overnight (shared agenda)', () => {
     const now = at('2026-04-02T08:00:00+13:00');
     const m = run({ events: [] }, now, 'month');
     expect(m.units[0]).toMatchObject({ from: '2026-04-02', to: '2026-04-05' });
+  });
+
+  it('across the NZ DST end (5 Apr 2026) with a weekly 09:00 series: on its days at 09:00, NZDT then NZST; unit counts unchanged', () => {
+    const work = timed('e-w', 'Work', '2026-03-02T09:00:00+13:00', '2026-03-02T14:30:00+13:00', {
+      kind: 'work',
+      rrule: 'FREQ=WEEKLY;BYDAY=MO,TH',
+      people: att(ID.alex),
+    });
+    const now = at('2026-04-02T08:00:00+13:00'); // Thursday
+    const placedAt = (m: ForwardModel) =>
+      m.units
+        .flatMap((u) => u.usual)
+        .map((e) => [
+          e.date,
+          e.item.kind === 'event' && !e.item.allDay ? e.item.startsAt.toISOString() : '',
+        ]);
+    const week = run({ events: [work] }, now, 'week');
+    expect(week.units.map((u) => [u.from, u.to])).toEqual(
+      unitsOf('week', '2026-04-02').map((u) => [u.from, u.to]),
+    );
+    expect(week.units).toHaveLength(7);
+    // Thursday 2 April, 09:00 NZDT (UTC+13); Monday 6 April, 09:00 NZST (UTC+12).
+    expect(placedAt(week)).toEqual([
+      ['2026-04-02', '2026-04-01T20:00:00.000Z'],
+      ['2026-04-06', '2026-04-05T21:00:00.000Z'],
+    ]);
+    expect(week.units.map((u) => u.usual.length)).toEqual([1, 0, 0, 0, 1, 0, 0]);
+    expect(week.units.every((u) => u.load.count === 0)).toBe(true);
+
+    const season = run({ events: [work] }, now, 'season');
+    expect(season.units.map((u) => [u.label, u.from, u.to])).toEqual([
+      ['April', '2026-04-02', '2026-04-30'],
+      ['May', '2026-05-01', '2026-05-31'],
+      ['June', '2026-06-01', '2026-06-30'],
+    ]);
+    // Every Monday and Thursday: 9 in April (from the 2nd), 8 in May, 9 in June.
+    expect(season.units.map((u) => u.usual.length)).toEqual([9, 8, 9]);
+    const all = placedAt(season);
+    expect(all[0]).toEqual(['2026-04-02', '2026-04-01T20:00:00.000Z']);
+    for (const [date, start] of all.slice(1)) {
+      expect(isoDateInZone(new Date(start!), NZ)).toBe(date);
+      expect(new Date(start!).getUTCHours()).toBe(21); // 09:00 NZST
+    }
+    // Nothing of the series is notable on either horizon.
+    for (const m of [week, season])
+      expect(m.units.flatMap((u) => u.notable).some((e) => e.key.startsWith('e-w:'))).toBe(false);
   });
 
   it.each([
