@@ -142,6 +142,8 @@ All tools have Zod schemas, run server-side through domain services under the Ac
 | `get_context(subject?, include_sensitive?)` | Context records; `include_sensitive` only returns what this user can see and is audited. |
 | `get_insights(from, to)` | Deterministic insight candidates for the range, with their facts, minus those this user dismissed. |
 
+*M7 (ADR 0011, proposed 2026-10-11):* `find_free_windows` and `get_weather` stay M8's tools. They will call M7's gap engine, openings and forecast service as the requesting user, and their results keep M7's language: what is recorded, for whom, and the forecast with its time, never that anyone is free or available.
+
 ### The capture tool (executes immediately, tightly constrained)
 
 | Tool | Behaviour |
