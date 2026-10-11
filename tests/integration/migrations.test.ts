@@ -2987,3 +2987,309 @@ async function rolledBackAs(on: Db, fn: (tx: Db) => Promise<void>) {
       if (e !== rollback) throw e;
     });
 }
+
+// ---------------------------------------------------------------------------
+// 0008: weather_forecast (M7 Package 1a, migration only; contract §3.9,
+// ADR 0011 §14). A household-level forecast cache: no coordinate, no user,
+// no visibility; the location is only a keyed fingerprint.
+// ---------------------------------------------------------------------------
+
+/** A synthetic fingerprint: 64 lower-case hex characters, not derived from any location. */
+const WEATHER_FP = '0123456789abcdef'.repeat(4);
+const WEATHER_ATTEMPT_STATUSES = [
+  'ok',
+  'unreachable',
+  'rate_limited',
+  'timeout',
+  'too_large',
+  'bad_response',
+];
+
+describe('0008: weather_forecast table and columns', () => {
+  it('has exactly the contract columns, types, nullability and defaults', async () => {
+    expect(await columnsOf('weather_forecast')).toEqual([
+      ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+      ['provider', 'text', 'NO', null],
+      ['fetched_at', TS, 'YES', null],
+      ['hours', 'jsonb', 'YES', null],
+      ['location_fingerprint', 'text', 'YES', null],
+      ['first_hour', TS, 'YES', null],
+      ['last_hour', TS, 'YES', null],
+      ['last_attempt_at', TS, 'YES', null],
+      ['last_attempt_status', 'text', 'YES', null],
+      ['created_at', TS, 'NO', 'now()'],
+      ['updated_at', TS, 'NO', 'now()'],
+    ]);
+  });
+
+  it('has no coordinate, elevation, location, address, user, person, creator or visibility column', async () => {
+    const names = (await columnsOf('weather_forecast')).map(([name]) => name);
+    // The fingerprint is the one permitted reference to the location: a keyed hash.
+    const others = names.filter((n) => n !== 'location_fingerprint');
+    for (const n of others)
+      expect(n).not.toMatch(
+        /lat|lon|elevation|location|coord|address|user|person|owner|created_by|visibility/i,
+      );
+    expect(names).toContain('location_fingerprint');
+  });
+
+  it('0008 only creates weather_forecast: no other table, column, index, trigger, grant or type', async () => {
+    const text = readFileSync(join(MIGRATIONS, '0008_weather_forecast.sql'), 'utf8');
+    const statements = text
+      .split('--> statement-breakpoint')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatch(/^CREATE TABLE "weather_forecast" \(/);
+    expect(text).not.toMatch(
+      /\b(ALTER|DROP|RENAME|UPDATE|DELETE|INSERT|GRANT|REVOKE|TRIGGER|FUNCTION|INDEX|TYPE|EXTENSION|REFERENCES)\b/,
+    );
+  });
+});
+
+describe('0008: weather_forecast constraints, indexes and grants', () => {
+  it('has the provider, status, fingerprint-format and fingerprint-while-hours CHECKs, and nothing else', async () => {
+    const r = await db.execute(sql`
+      select conname, contype from pg_constraint
+      where conrelid = 'weather_forecast'::regclass order by 1`);
+    expect(r.rows.map((x) => `${x.conname} ${x.contype}`)).toEqual([
+      'weather_forecast_last_attempt_status_check c',
+      'weather_forecast_location_fingerprint_check c',
+      'weather_forecast_location_hours_check c',
+      'weather_forecast_pkey p',
+      'weather_forecast_provider_check c',
+      'weather_forecast_provider_unique u',
+    ]);
+  });
+
+  it('is indexed only by its primary key and the unique provider', async () => {
+    const r = await db.execute(sql`
+      select indexname, indexdef from pg_indexes
+      where tablename = 'weather_forecast' order by 1`);
+    expect(r.rows.map((x) => x.indexname)).toEqual([
+      'weather_forecast_pkey',
+      'weather_forecast_provider_unique',
+    ]);
+    expect(String(r.rows[0]?.indexdef)).toMatch(/UNIQUE INDEX .* USING btree \(id\)$/);
+    expect(String(r.rows[1]?.indexdef)).toMatch(/UNIQUE INDEX .* USING btree \(provider\)$/);
+  });
+
+  it('has no foreign key, no trigger and no column-level grant; home_app has SELECT, INSERT, UPDATE and DELETE, nothing more', async () => {
+    const fks = await db.execute(sql`
+      select count(*)::int as n from pg_constraint
+      where contype = 'f' and (conrelid = 'weather_forecast'::regclass or confrelid = 'weather_forecast'::regclass)`);
+    expect(fks.rows[0]?.n).toBe(0);
+    const t = await admin.db.execute(sql`
+      select count(*)::int as n from pg_trigger
+      where tgrelid = 'weather_forecast'::regclass and not tgisinternal`);
+    expect(t.rows[0]?.n).toBe(0);
+    const cols = await db.execute(sql`
+      select attname from pg_attribute
+      where attrelid = 'weather_forecast'::regclass and attacl is not null`);
+    expect(cols.rows).toEqual([]);
+    const grants = await db.execute(sql`
+      select privilege_type, is_grantable from information_schema.role_table_grants
+      where grantee = 'home_app' and table_name = 'weather_forecast' order by 1`);
+    expect(grants.rows).toEqual(
+      ['DELETE', 'INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+        privilege_type,
+        is_grantable: 'NO',
+      })),
+    );
+  });
+});
+
+describe('0008: weather_forecast constraint behaviour for the runtime role (each case rolled back)', () => {
+  /** Expects a failure inside a savepoint, so the case can go on after it. */
+  const expectIn = (tx: Db, q: ReturnType<typeof sql>, code: string) =>
+    expectCode(
+      tx.transaction(async (sp) => {
+        await sp.execute(q);
+      }),
+      code,
+    );
+  /** Inserts a row in a savepoint and removes it, so the unique provider never gets in the way. */
+  const accepts = async (tx: Db, q: ReturnType<typeof sql>) => {
+    await tx.transaction(async (sp) => {
+      await sp.execute(q);
+      await sp.execute(sql`delete from weather_forecast`);
+    });
+  };
+  const row = (fingerprint: string | null, hours: string | null, status: string | null = null) =>
+    sql`insert into weather_forecast (provider, location_fingerprint, hours, last_attempt_status)
+        values ('open_meteo', ${fingerprint}, ${hours}::jsonb, ${status})`;
+
+  it('applies the defaults: an id, created and updated now, and everything else empty', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(sql`insert into weather_forecast (provider) values ('open_meteo')`);
+      const r = await tx.execute(sql`
+        select id is not null as has_id, created_at = now() as created_now, updated_at = now() as updated_now,
+               fetched_at, hours, location_fingerprint, first_hour, last_hour, last_attempt_at, last_attempt_status
+        from weather_forecast`);
+      expect(r.rows).toEqual([
+        {
+          has_id: true,
+          created_now: true,
+          updated_now: true,
+          fetched_at: null,
+          hours: null,
+          location_fingerprint: null,
+          first_hour: null,
+          last_hour: null,
+          last_attempt_at: null,
+          last_attempt_status: null,
+        },
+      ]);
+    }));
+
+  it('accepts only the open_meteo provider, and requires one', () =>
+    rolledBack(async (tx) => {
+      for (const provider of ['met_norway', 'Open_Meteo', 'open-meteo', ''])
+        await expectIn(
+          tx,
+          sql`insert into weather_forecast (provider) values (${provider})`,
+          '23514',
+        );
+      await expectIn(tx, sql`insert into weather_forecast (provider) values (null)`, '23502');
+      await accepts(tx, sql`insert into weather_forecast (provider) values ('open_meteo')`);
+    }));
+
+  it('holds one row per provider (UNIQUE)', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(sql`insert into weather_forecast (provider) values ('open_meteo')`);
+      await expectIn(
+        tx,
+        sql`insert into weather_forecast (provider) values ('open_meteo')`,
+        '23505',
+      );
+      const r = await tx.execute(sql`select count(*)::int as n from weather_forecast`);
+      expect(r.rows[0]?.n).toBe(1);
+    }));
+
+  it('accepts a fingerprint only as 64 lower-case hex characters', () =>
+    rolledBack(async (tx) => {
+      await accepts(tx, row(WEATHER_FP, '[]'));
+      await accepts(tx, row('f'.repeat(64), null));
+      for (const bad of [
+        WEATHER_FP.toUpperCase(),
+        `${WEATHER_FP.slice(0, 63)}A`,
+        WEATHER_FP.slice(0, 63),
+        `${WEATHER_FP}0`,
+        `${WEATHER_FP.slice(0, 63)}g`,
+        `${WEATHER_FP.slice(0, 62)} 0`,
+        `${WEATHER_FP}\n`,
+        `fp1.${WEATHER_FP.slice(4)}`,
+        '-41.29,174.78',
+        '',
+      ])
+        await expectIn(tx, row(bad, '[]'), '23514');
+    }));
+
+  it('keeps the fingerprint null only while hours are null', () =>
+    rolledBack(async (tx) => {
+      // Hours with no location they are for: refused.
+      await expectIn(tx, row(null, '[]'), '23514');
+      await expectIn(tx, row(null, '[{"start":"2026-10-12T00:00:00Z"}]'), '23514');
+      // A JSON null is still hours as far as SQL is concerned: refused too.
+      await expectIn(tx, row(null, 'null'), '23514');
+      // No forecast and no location: accepted (the state after a location change).
+      await accepts(tx, row(null, null));
+      // A location and no hours, and a location with its hours: accepted.
+      await accepts(tx, row(WEATHER_FP, null));
+      await accepts(tx, row(WEATHER_FP, '[{"start":"2026-10-12T00:00:00Z"}]'));
+    }));
+
+  it('clearing the fingerprint without clearing the hours is refused', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(row(WEATHER_FP, '[]'));
+      await expectIn(tx, sql`update weather_forecast set location_fingerprint = null`, '23514');
+      await tx.execute(sql`update weather_forecast set location_fingerprint = null, hours = null`);
+      const r = await tx.execute(sql`select location_fingerprint, hours from weather_forecast`);
+      expect(r.rows).toEqual([{ location_fingerprint: null, hours: null }]);
+    }));
+
+  it('accepts each of the six attempt statuses and none; refuses anything else', () =>
+    rolledBack(async (tx) => {
+      for (const status of [...WEATHER_ATTEMPT_STATUSES, null])
+        await accepts(tx, row(null, null, status));
+      for (const status of ['error', 'OK', 'busy', 'not_due', 'partial', ''])
+        await expectIn(tx, row(null, null, status), '23514');
+    }));
+
+  it('is not append-only: home_app updates and deletes its row', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(row(WEATHER_FP, '[]', 'ok'));
+      await tx.execute(
+        sql`update weather_forecast set last_attempt_status = 'timeout', last_attempt_at = now(), updated_at = now()`,
+      );
+      const r = await tx.execute(sql`select last_attempt_status from weather_forecast`);
+      expect(r.rows).toEqual([{ last_attempt_status: 'timeout' }]);
+      await tx.execute(sql`delete from weather_forecast`);
+      const n = await tx.execute(sql`select count(*)::int as n from weather_forecast`);
+      expect(n.rows[0]?.n).toBe(0);
+    }));
+});
+
+describe('0008 upgrades the production schema (0000–0007) in place', () => {
+  it('applies on top of 0007 with existing data, changing nothing that was there', async () => {
+    const name = 'home_upgrade_0008_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const production = migrationsUpTo('0007_calendar_schema');
+    try {
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upAdmin.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up8', 'Sam', 'sam@example.test')`,
+      );
+      await upAdmin.db.execute(
+        sql`insert into person (name, role, created_by, created_via) values ('Milo', 'child', 'u-up8', 'ui')`,
+      );
+      await upAdmin.db.execute(sql`
+        insert into event (created_by, created_via, title, kind, all_day, start_date, end_date)
+        values ('u-up8', 'ui', 'School holidays', 'school', true, '2026-10-20', '2026-10-24')`);
+      await upAdmin.db.execute(
+        sql`insert into audit_log (actor_via, event) values ('system', 'test.upgrade_0008')`,
+      );
+      const tablesOf = async () =>
+        (
+          await upAdmin.db.execute(sql`
+            select table_name from information_schema.tables
+            where table_schema = 'public' order by 1`)
+        ).rows.map((r) => String(r.table_name));
+      /** Every table's columns and rows, so any change to an existing table shows. */
+      const snapshot = async (tables: string[]) => {
+        const out: Record<string, unknown> = {};
+        for (const t of tables) {
+          const cols = await upAdmin.db.execute(sql`
+            select column_name, data_type, is_nullable, column_default from information_schema.columns
+            where table_schema = 'public' and table_name = ${t} order by ordinal_position`);
+          const rows = await upAdmin.db.execute(sql.raw(`select * from "${t}" order by 1`));
+          out[t] = { cols: cols.rows, rows: rows.rows };
+        }
+        return out;
+      };
+      const tablesBefore = await tablesOf();
+      expect(tablesBefore).not.toContain('weather_forecast');
+      const before = await snapshot(tablesBefore);
+
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      const tablesAfter = await tablesOf();
+      expect(tablesAfter.filter((t) => !tablesBefore.includes(t))).toEqual(['weather_forecast']);
+      expect(tablesAfter).toHaveLength(tablesBefore.length + 1);
+      expect(await snapshot(tablesBefore)).toEqual(before);
+      const n = await upAdmin.db.execute(sql`select count(*)::int as n from weather_forecast`);
+      expect(n.rows[0]?.n).toBe(0);
+    } finally {
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+});

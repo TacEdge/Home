@@ -2,7 +2,7 @@
 
 Status: **Approved** by the owner on 2026-10-11: decisions D1–D19 as recommended (§12.2), with five amendments (§12.4). The approval takes effect when PR #70 (Package 0) merges.
 
-- **Progress:** nothing is built. Package 1a (the forecast table, migration only) starts only when the owner says so.
+- **Progress:** Package 0 merged (PR #70). **Package 1a in review** (migration `0008_weather_forecast`, the `weather_forecast` table only; migration-only PR). Its migration must run in Production and Preview (owner, **Migrate production database** and **Migrate preview database**) before Package 1b merges. Package 1b not started; nothing else built.
 
 The architecture decisions are recorded in ADR 0011 (`docs/decisions/0011-m7-weather-and-free-windows.md`).
 
@@ -423,7 +423,7 @@ type OpeningRule = 'open_window.plain' | 'open_window.task';
 
 ### 3.9 Schema
 
-One new table, in Package 1a (ADR 0011 §14; D3, as amended at approval, §12.4). This is a requirement for Package 1a; the table is not built yet.
+One new table, in Package 1a (ADR 0011 §14; D3, as amended at approval, §12.4). Built in Package 1a as migration `0008_weather_forecast` (in review); the Drizzle definition is `src/db/schema/weather.ts`.
 
 | Column | Notes |
 |---|---|

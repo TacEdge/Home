@@ -135,4 +135,12 @@ describe('export completeness', () => {
       expect.arrayContaining(['recurrenceParentId', 'recurrenceOriginal']),
     );
   });
+
+  it('the weather forecast cache is excluded, with its reason, and never exported', () => {
+    expect(EXCLUDED_TABLES.weather_forecast).toBe(
+      'derived, non-personal forecast cache; fetched again on use',
+    );
+    expect(exportedTables.has('weather_forecast')).toBe(false);
+    expect('weather_forecast' in EXCLUDED_COLUMNS).toBe(false);
+  });
 });
