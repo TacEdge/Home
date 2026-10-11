@@ -9,7 +9,13 @@ import { googleFeed, nzEvent, SYNTHETIC_ADDRESS } from '../fixtures/calendars/go
 import { TODAY } from '../fixtures/calendars/sequences';
 import { NotPermittedError } from '@/domain/common/errors';
 import { createEventWithPeople } from '@/domain/events/service';
-import { dismissInsight, insightsFor, insightsInput, readInsights } from '@/domain/insights/today';
+import {
+  dismissInsight,
+  insightsFor,
+  insightsInput,
+  readInsights,
+  respondToInsight,
+} from '@/domain/insights/today';
 import { createPerson } from '@/domain/people/service';
 import { createProject } from '@/domain/projects/service';
 import { createTask } from '@/domain/tasks/service';
@@ -257,6 +263,76 @@ describe('dismiss', () => {
         else process.env[k] = v;
     }
     expect(await rowsFor(h.sam.userId, key.fence)).toHaveLength(0);
+    expect(await auditCount()).toBe(audits);
+  });
+});
+
+// Not useful on an insight that is not a conflict (M6 contract §5.9, ADR 0009
+// §17; acceptance R-3): a household birthday nobody has responded to. It hides
+// the insight for that adult only, is audited with the kind and nothing else,
+// is idempotent, and is refused from a surface that never lists birthdays.
+describe('Not useful on a birthday', () => {
+  let birthday = '';
+  const samAudits = async () =>
+    (
+      await admin.db.execute(
+        sql`select meta from audit_log where event = 'insight_response.respond' and actor_user_id = ${h.sam.userId} order by at`,
+      )
+    ).rows.map((r) => r.meta);
+
+  beforeAll(async () => {
+    const aunty = await createPerson(
+      h.sam,
+      { name: 'Aunty WK', role: 'other', inHousehold: false, dateOfBirth: '1971-10-19' },
+      deps,
+    );
+    birthday = `preparation.birthday:${aunty.id}:2026-10-19`;
+  });
+
+  it('is refused from Forward and from a person’s page, where birthdays are never listed; nothing is written', async () => {
+    const audits = await auditCount();
+    for (const surface of ['forward', 'person'] as const)
+      expect(
+        await outcome(respondToInsight(h.sam, birthday, 'not_useful', surface, NOW, ZONE, deps)),
+      ).toBe('not_eligible');
+    expect(await rowsFor(h.sam.userId, birthday)).toHaveLength(0);
+    expect(await auditCount()).toBe(audits);
+  });
+
+  it('from Today: hidden from Sam’s list, still listed for Alex; one row, one audit entry with the kind only', async () => {
+    expect(keysOf(await readInsights(h.sam, NOW, ZONE, deps)).listed).toContain(birthday);
+    const alexBefore = await readInsights(h.alex, NOW, ZONE, deps);
+    expect(keysOf(alexBefore).listed).toContain(birthday);
+    const audits = await auditCount();
+    const before = await samAudits();
+    expect(await respondToInsight(h.sam, birthday, 'not_useful', 'today', NOW, ZONE, deps)).toEqual(
+      { key: birthday, response: 'not_useful', already: false },
+    );
+    const sam = await readInsights(h.sam, NOW, ZONE, deps);
+    expect(keysOf(sam).listed).not.toContain(birthday);
+    expect([...sam.shown, ...sam.rest].map((i) => i.key)).not.toContain(birthday);
+    expect(keysOf(sam).all).toContain(birthday); // still derived, never deleted
+    expect(await readInsights(h.alex, NOW, ZONE, deps)).toEqual(alexBefore);
+    const rows = await rowsFor(h.sam.userId, birthday);
+    expect(rows.map((r) => r.response)).toEqual(['not_useful']);
+    expect(await rowsFor(h.alex.userId, birthday)).toHaveLength(0);
+    // Exactly one audit row, and its meta is exactly the kind.
+    expect(await auditCount()).toBe(audits + 1);
+    const after = await samAudits();
+    expect(after).toHaveLength(before.length + 1);
+    expect(JSON.stringify(after.at(-1))).toBe('{"response":"not_useful"}');
+  });
+
+  it('again writes nothing; and Forward and a person’s page still refuse it', async () => {
+    const audits = await auditCount();
+    expect(await respondToInsight(h.sam, birthday, 'not_useful', 'today', NOW, ZONE, deps)).toEqual(
+      { key: birthday, response: 'not_useful', already: true },
+    );
+    for (const surface of ['forward', 'person'] as const)
+      expect(
+        await outcome(respondToInsight(h.sam, birthday, 'not_useful', surface, NOW, ZONE, deps)),
+      ).toBe('not_eligible');
+    expect(await rowsFor(h.sam.userId, birthday)).toHaveLength(1);
     expect(await auditCount()).toBe(audits);
   });
 });

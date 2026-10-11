@@ -11,8 +11,10 @@ import {
   restoreEvent,
   returnOccurrenceToSeries,
   skipEventOccurrence,
+  updateEvent,
 } from '@/domain/events/service';
 import { forwardConflicts, readConflicts } from '@/domain/insights/conflicts';
+import { respondedKeys } from '@/domain/insights/service';
 import { readInsights, respondToInsight } from '@/domain/insights/today';
 import { createPerson } from '@/domain/people/service';
 import { listAudit } from '@/trust/audit';
@@ -175,6 +177,26 @@ describe('conflicts are insights for both adults, with the same keys', () => {
   });
 });
 
+// A stale key is refused (acceptance R-1, matrix P3-4): eligibility is the
+// reader's current conflicts, re-derived at `now`, so a key whose overlap has
+// ended is refused and nothing is written.
+describe('a stale key', () => {
+  it('R-1: once the Thursday overlap has ended (16:00), responding to it is refused; no row, no audit', async () => {
+    const ended = new Date('2026-10-15T16:00:00+13:00');
+    expect(keysOf((await conflictsOf(h.sam, ended)).all)).not.toContain(key.thursday);
+    const audits = await auditCount();
+    for (const response of ['dismissed', 'not_useful'] as const)
+      expect(
+        await outcome(respondToInsight(h.sam, key.thursday, response, 'today', ended, ZONE, deps)),
+      ).toBe('not_eligible');
+    expect(await rowsFor(h.sam.userId, key.thursday)).toHaveLength(0);
+    expect(await auditCount()).toBe(audits);
+    // A minute before it ends it is still current, and so still eligible (not answered here).
+    const running = new Date('2026-10-15T15:59:00+13:00');
+    expect(keysOf((await conflictsOf(h.sam, running)).current)).toContain(key.thursday);
+  });
+});
+
 describe('responses: per adult, everywhere, audited with the kind only (T17)', () => {
   it('T17: Alex dismisses the Thursday conflict; it is gone for Alex only', async () => {
     expect(await respond(h.alex, key.thursday)).toMatchObject({ already: false });
@@ -286,6 +308,66 @@ describe('the lifecycle through the event services (contract §5.7.3; §5.7.4 T3
     expect(keysOf(alex.all)).toContain(key.thursday);
     expect(alex.responded[key.thursday]).toBe('dismissed');
     expect(keysOf(alex.current)).not.toContain(key.thursday);
+  });
+});
+
+// Material changes through the real event service (contract §5.7.4 T13 and
+// T9; acceptance R-1, R-11): a moved commitment is a new key; the old key is
+// refused, and an old response stays stored, matching nothing.
+describe('material changes through updateEvent (T13, T9)', () => {
+  const art = () => key.thursday.replace(/:2026.*$/, '');
+
+  it('T13: Dentist moves to 15:45–16:45: the old T11 key is refused and nothing is written; the new key is accepted', async () => {
+    await updateEvent(
+      h.alex,
+      id.dentist,
+      { time: timed('2026-10-15T15:45:00+13:00', '2026-10-15T16:45:00+13:00') },
+      deps,
+    );
+    const moved = `${art()}:20261015T0245Z-20261015T0300Z`;
+    const sam = await conflictsOf(h.sam);
+    expect(keysOf(sam.all)).not.toContain(key.thursday);
+    expect(keysOf(sam.current)).toContain(moved);
+    const audits = await auditCount();
+    expect(await outcome(respond(h.sam, key.thursday))).toBe('not_eligible');
+    expect(await rowsFor(h.sam.userId, key.thursday)).toHaveLength(0);
+    expect(await auditCount()).toBe(audits);
+    expect(await respond(h.sam, moved)).toMatchObject({ key: moved, already: false });
+    expect(await auditCount()).toBe(audits + 1);
+    expect(keysOf((await conflictsOf(h.sam)).current)).not.toContain(moved);
+    // Moved back: T11's key returns, with Alex's dismissal from T17 (and the later tests' fixture).
+    await updateEvent(
+      h.alex,
+      id.dentist,
+      { time: timed('2026-10-15T15:30:00+13:00', '2026-10-15T16:30:00+13:00') },
+      deps,
+    );
+    const alex = await conflictsOf(h.alex);
+    expect(keysOf(alex.all)).toContain(key.thursday);
+    expect(alex.responded[key.thursday]).toBe('dismissed');
+  });
+
+  it('T9: Tutoring’s series moves to 16:00–16:45: a new standing key w1600-1615, eligible; Sam’s old dismissal is kept and matches nothing', async () => {
+    const [old] = await rowsFor(h.sam.userId, key.standing);
+    expect(old!.response).toBe('dismissed');
+    await updateEvent(
+      h.alex,
+      id.tutor,
+      { time: timed('2026-10-14T16:00:00+13:00', '2026-10-14T16:45:00+13:00') },
+      deps,
+    );
+    const moved = key.standing.replace(/w1545-1615$/, 'w1600-1615');
+    const sam = await conflictsOf(h.sam);
+    expect(keysOf(sam.all)).toContain(moved);
+    expect(keysOf(sam.all)).not.toContain(key.standing);
+    expect(keysOf(sam.current)).toContain(moved);
+    expect(sam.responded[moved]).toBeUndefined();
+    expect(await respondedKeys(h.sam, [moved], deps)).toEqual({});
+    // The old response is still stored, unchanged, and matches no conflict.
+    expect(await rowsFor(h.sam.userId, key.standing)).toEqual([old]);
+    expect(sam.all.some((c) => c.key === key.standing)).toBe(false);
+    // Eligible: Alex (who never answered either key) can respond to it.
+    expect(await respond(h.alex, moved)).toMatchObject({ key: moved, already: false });
   });
 });
 

@@ -88,6 +88,18 @@ describe('the conflict family (ADR 0009 §18)', () => {
     expect(conflictsOf(r)).toEqual([]);
   });
 
+  // The window's edge (matrix P3-1): Today looks across eight days, today to today+7.
+  it('Today’s window edge: a conflict at today+7 is a Today insight; at today+8 it is not', () => {
+    const edge = run({ events: pair(addDays('2026-10-14', 7), ID.milo) }, WED_0703);
+    expect(conflictsOf(edge).map((i) => i.key)).toEqual([
+      'conflict.overlap:p-milo:e-art.e-dentist:20261021T0230Z-20261021T0300Z',
+    ]);
+    expect(listed(edge).map((i) => i.key)).toContain(conflictsOf(edge)[0]!.key);
+    const past = run({ events: pair(addDays('2026-10-14', 8), ID.milo) }, WED_0703);
+    expect(past.conflicts).toEqual([]);
+    expect(conflictsOf(past)).toEqual([]);
+  });
+
   it('a response (Dismiss or Not useful alike) hides it: not listed, not counted', () => {
     const events = pair('2026-10-15', ID.milo);
     const key = run({ events }, WED_0703).conflicts[0]!.key;
