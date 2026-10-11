@@ -71,7 +71,7 @@ The structured truth of HOME. Plain domain services (TypeScript modules) over Po
   - `agenda` — merges manual and synced events, expands recurrence, resolves time zones, returns a day/range view.
   - `conflicts` — detects overlaps involving the same person, double-booked responsibilities (e.g. two pickups at once), unassigned responsibilities, and "both adults away" situations.
   - `windows` — finds free windows of a given duration for given people, optionally constrained by daylight and dry-weather forecast.
-    - *M7 (ADR 0011, proposed 2026-10-11):* built as the gap engine (`gaps.ts`): stretches inside planning hours where nothing is recorded, for the household or a person, among the records the reader can see. Daylight and the forecast are applied by the `open_window` insight. It never states that anyone is free or available.
+    - *M7 (ADR 0011, approved 2026-10-11):* built as the gap engine (`gaps.ts`): stretches inside planning hours where nothing is recorded, for the household or a person, among the records the reader can see. Daylight and the forecast are applied by the `open_window` insight. It never states that anyone is free or available.
   - `profile` — derives age from date of birth and a person's "regular week" from their recurring events. (No school-year inference in V0.1.)
   - `staleness` — decides whether a context record should be treated as possibly out of date. Staleness periods are heuristics: stale context is never expired or deleted, only treated cautiously.
   - `insights` — runs a set of small detectors over the other engines' output and produces ranked **insight candidates** (see §2.6).
@@ -117,7 +117,7 @@ interface CalendarProvider {
 #### Weather
 Open-Meteo (free, no key, good NZ coverage), hourly forecast for the home location, cached ~1 hour.
 
-*M7 (ADR 0011, proposed 2026-10-11):* behind a HOME-defined `WeatherProvider`; requested in UTC (`timeformat=unixtime`, never `timezone`, whose fixed offset ignores DST); cached in one household-level `weather_forecast` row, refreshed on use at most hourly (at once after a location change) and never while rendering, with the last good forecast kept on failure; the home location in private environment configuration, rounded to two decimal places and never stored or logged (the row holds only a keyed fingerprint of it, so another place's forecast is never shown); daylight computed locally.
+*M7 (ADR 0011, approved 2026-10-11):* behind a HOME-defined `WeatherProvider`; requested in UTC (`timeformat=unixtime`, never `timezone`, whose fixed offset ignores DST); cached in one household-level `weather_forecast` row, refreshed on use at most hourly (at once after a location change) and never while rendering, with the last good forecast kept on failure; the home location in private environment configuration, rounded to two decimal places and never stored or logged (the row holds only a keyed fingerprint of it, so another place's forecast is never shown); daylight computed locally.
 
 No background job infrastructure in V0.1: syncs happen lazily on use with a staleness threshold (M4 contract §3.3). A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
 
@@ -154,7 +154,7 @@ V0.1 detectors (each a small pure function with tests):
 | `alignment` | Two schedules align in a way worth noticing (e.g. both adults free the same evening) | "You're both free Thursday evening." |
 | `data_health` | A calendar hasn't synced recently | "Alex's calendar hasn't updated since yesterday." |
 
-*M7 (ADR 0011, proposed 2026-10-11):* `free_window` is built as `open_window`, worded as what is recorded ("Nothing is recorded for the household on Saturday, 10:00–19:30."), never "clear" or "free"; `weather_effect` is folded into task openings; `alignment` is deferred, because each adult sees only their own private events. The example sentences for these three kinds, which the M5 and M6 forbidden-phrase tests reject, are superseded.
+*M7 (ADR 0011, approved 2026-10-11):* `free_window` is built as `open_window`, worded as what is recorded ("Nothing is recorded for the household on Saturday, 10:00–19:30."), never "clear" or "free"; `weather_effect` is folded into task openings; `alignment` is deferred, because each adult sees only their own private events. The example sentences for these three kinds, which the M5 and M6 forbidden-phrase tests reject, are superseded.
 
 Rules:
 - Detectors are deterministic; **code computes, Kev explains**. Every insight carries the facts it was derived from and a template sentence, so Today renders fully even when Kev is unavailable.
