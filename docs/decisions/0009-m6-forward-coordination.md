@@ -2,7 +2,7 @@
 
 Status: **Accepted**, 2026-10-09. The owner approved the product decisions on PR #59 (§20–§29, as refined there) and accepted this ADR and the contract (`docs/m6/M6-BUILD-CONTRACT.md`) by merging Package 0.
 
-- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) has merged (PR #67). Package 5 (acceptance, `docs/m6/M6-ACCEPTANCE.md`) is in review.
+- **Implementation:** Package 1 (Forward groundwork and engine, §32) has merged (PR #60), and so has Package 2 (the conflict engine, §33, PR #65). Package 3 (conflict insights, Not useful and Today, §34) has merged (PR #66). Package 4 (the Forward screen and Coming up marks, §35) has merged (PR #67). Package 5 (acceptance, `docs/m6/M6-ACCEPTANCE.md`) is in review, its evidence fixes and the owner's two wording decisions merged (PR #69).
 - **Refinements on PR #59:**
   - `conflict.away` removed (§12, §24);
   - conflict identity and lifecycle defined precisely (§13);
@@ -654,7 +654,7 @@ Earlier decisions already settle much of the shape:
     - **Caveats, recorded:**
       - **Month and Season rows carry no mark.** The conflict is listed above with its Why; the owner may prefer a mark there too, from the screenshots.
       - **Season's items beyond the first three per month** sit under "+ N"; a month with many one-offs reads as a count. That is the contract's cap.
-      - **For Package 5's review (accepted as minor, not changed here):** the "Camp today." wording for a multi-day item carried in; scheduled tasks ahead of earlier timed events on Week; the "+ N" fold label having no context of its own for a screen reader; a recurring conflict marked at its next pair only on Coming up (§13); Worth knowing's fold past twelve showing sentences only.
+      - **For Package 5's review (accepted as minor, not changed here):** the "Camp today." wording for a multi-day item carried in (decided in §36: "Camp, until Friday."); scheduled tasks ahead of earlier timed events on Week; the "+ N" fold label having no context of its own for a screen reader; a recurring conflict marked at its next pair only on Coming up (§13); Worth knowing's fold past twelve showing sentences only.
       - **The usual is per person, not per unit.** A usual occurrence is reachable through its series in The usual ›, not as a row on its day; the old 30-day list showed it on its day.
       - **Bounded folds.** Beyond twelve folded insights or marks a reader responds to the first ones to reach the rest.
     - **Unchanged.** No schema, migration, dependency, transport, weather, Kev, external write, adaptive ranking or new insight rule. The conflict engine and its keys are untouched.
