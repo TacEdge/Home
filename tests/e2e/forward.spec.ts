@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
+import { seedCalendar } from './calendar-feeds';
 import { fixtureAdultContext, VIEWPORTS, type Adult } from './fixture-adults';
 import { withDb } from './helpers';
 
@@ -573,4 +574,381 @@ test('nothing in the 30 days is lost on Month: every record is a row link, folde
   await expect(usual.getByRole('link', { name: /Swimming/ }).first()).toBeVisible();
   await expect(usual.getByRole('link', { name: /Football/ }).first()).toBeVisible();
   await context.close();
+});
+
+// ---------------------------------------------------------------------------
+// M6 final acceptance: evidence (R-3, R-5, R-6 here; R-2 in its own describe below).
+
+test('a birthday insight’s Not useful, without JavaScript: gone from Today for Sam, still listed for Alex', async ({
+  browser,
+}) => {
+  // Saturday 8 May is within the week; no fixture person's birthday is.
+  const [person] = await q(
+    `insert into person (name, role, in_household, date_of_birth, created_by, created_via, visibility)
+     values ('fw Aunty Pip', 'other', false, '1960-05-08', 'fixture-sam', 'ui', 'household') returning id`,
+  );
+  const text = 'fw Aunty Pip’s birthday is Saturday.';
+  const rowOf = (page: Page) =>
+    page.locator('section[aria-labelledby="today-worth"] li[data-insight="preparation.birthday"]', {
+      hasText: text,
+    });
+  try {
+    const { context, page } = await open(browser, 'sam', '/today', { js: false });
+    const worth = page.locator('section[aria-labelledby="today-worth"]');
+    const more = worth.locator('summary', { hasText: /^\+ \d+ more/ });
+    if ((await more.count()) > 0) await more.first().click();
+    const row = rowOf(page);
+    await expect(row).toHaveCount(1);
+    await row.locator('summary', { hasText: 'Why' }).click();
+    await row.getByRole('button', { name: `Not useful: ${text}` }).click();
+    await page.waitForURL(/\/today$/);
+    await openAll(page);
+    await expect(rowOf(page)).toHaveCount(0);
+    await expect(page.locator('main')).not.toContainText(text);
+    await context.close();
+
+    const alex = await open(browser, 'alex', '/today');
+    await alex.page.waitForLoadState('networkidle');
+    await openAll(alex.page);
+    await expect(rowOf(alex.page)).toHaveCount(1);
+    await alex.context.close();
+  } finally {
+    await q(`delete from insight_response where insight_key like $1`, [
+      `preparation.birthday:${person!.id}:%`,
+    ]);
+    await q(`update person set archived_at = now() where id = $1`, [person!.id]);
+  }
+});
+
+test('privacy, rendered: Alex’s Today, Forward (every horizon) and Milo’s page read the same before and after Sam adds private records', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const paths = [
+    '/today',
+    '/forward',
+    '/forward?h=month',
+    '/forward?h=season',
+    `/people/${ids.milo}`,
+  ];
+  const read = async (adult: Adult, list: string[]) => {
+    const { context, page } = await open(browser, adult, list[0]);
+    const out: Record<string, string> = {};
+    for (const path of list) {
+      await page.goto(path);
+      await page.waitForLoadState('networkidle');
+      await openAll(page);
+      out[path] = await page.locator('main').innerText();
+    }
+    await context.close();
+    return out;
+  };
+  const alexBefore = await read('alex', paths);
+  const samBefore = (await read('sam', ['/forward']))['/forward'];
+
+  const made: { events: string[]; task?: string; project?: string } = { events: [] };
+  try {
+    // Sam's private records: an event overlapping a household event Sam is on (fw Sam school
+    // run, Friday 09:30–10:30), a scheduled task in the week and a project with a target date.
+    made.events.push(
+      await event({
+        title: 'fw R5 private appointment',
+        people: ['Sam'],
+        visibility: 'private',
+        start: at('2027-05-07', '10:00'),
+        end: at('2027-05-07', '11:00'),
+      }),
+    );
+    made.task = (
+      await q(
+        `insert into task (title, status, scheduled_starts_at, scheduled_ends_at, needs, created_by, created_via, visibility)
+         values ('fw R5 private task', 'open', $1::timestamptz, $2::timestamptz, '[]', 'fixture-sam', 'ui', 'private') returning id`,
+        [at('2027-05-10', '12:00'), at('2027-05-10', '12:30')],
+      )
+    )[0]!.id;
+    made.project = (
+      await q(
+        `insert into project (title, status, target_date, created_by, created_via, visibility)
+         values ('fw R5 private project', 'active', $1, 'fixture-sam', 'ui', 'private') returning id`,
+        ['2027-05-09'],
+      )
+    )[0]!.id;
+
+    const alexAfter = await read('alex', paths);
+    for (const path of paths) expect(alexAfter[path], path).toBe(alexBefore[path]);
+
+    // Not vacuous: Sam's own Forward did change.
+    const samAfter = (await read('sam', ['/forward']))['/forward']!;
+    expect(samAfter).not.toBe(samBefore);
+    expect(samAfter).toContain('fw R5 private appointment');
+    expect(samAfter).toContain('fw R5 private task');
+  } finally {
+    await q(`update event set archived_at = now() where id = any($1::uuid[])`, [made.events]);
+    if (made.task) await q(`update task set archived_at = now() where id = $1`, [made.task]);
+    if (made.project)
+      await q(`update project set archived_at = now() where id = $1`, [made.project]);
+  }
+});
+
+const HORIZON_PATHS = {
+  week: '/forward',
+  month: '/forward?h=month',
+  season: '/forward?h=season',
+} as const;
+const URL_OF = {
+  week: /\/forward$/,
+  month: /\/forward\?h=month$/,
+  season: /\/forward\?h=season$/,
+} as const;
+const NEXT = { week: 'month', month: 'season', season: 'week' } as const;
+const LABEL = { week: 'Week', month: 'Month', season: 'Season' } as const;
+
+for (const name of ['phone', 'desktop'] as const) {
+  test(`without JavaScript at ${name}: on every horizon the links navigate, a row’s “+ N” opens, Why opens, Dismiss lands back on the same horizon`, async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const { context, page } = await open(browser, 'sam', '/forward', {
+      js: false,
+      viewport: VIEWPORTS[name],
+    });
+    const nav = page.getByRole('navigation', { name: 'Horizon' });
+    for (const h of ['week', 'month', 'season'] as const) {
+      await page.goto(HORIZON_PATHS[h]);
+      await expect(nav.getByRole('link', { name: LABEL[h] })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      // The horizon link to the next one navigates, as a plain link.
+      await nav.getByRole('link', { name: LABEL[NEXT[h]] }).click();
+      await page.waitForURL(URL_OF[NEXT[h]]);
+      await expect(nav.getByRole('link', { name: LABEL[NEXT[h]] })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      await expect(nav.getByRole('link', { name: LABEL[h] })).not.toHaveAttribute(
+        'aria-current',
+        /./,
+      );
+      await page.goto(HORIZON_PATHS[h]);
+
+      // A row's "+ N" opens its fold.
+      const fold = page
+        .locator('li[data-unit] details')
+        .filter({ has: page.locator(':scope > summary', { hasText: /^\+ \d+/ }) })
+        .first();
+      const folded = fold.locator('a[href]').first();
+      await expect(folded, `${h}: folded link`).toBeHidden();
+      await fold.locator(':scope > summary').click();
+      await expect(folded, `${h}: folded link`).toBeVisible();
+
+      if (h === 'week') {
+        // Week: a mark's Why, then its Dismiss.
+        const mark = unit(page, TOMORROW).locator('[data-conflict]', {
+          hasText: 'overlaps fw Dentist 15:30 · Milo',
+        });
+        await mark.locator('summary', { hasText: 'Why' }).click();
+        await expect(
+          mark.getByText(
+            'Milo is recorded on both of these, and their times overlap from 15:30 to 16:00.',
+          ),
+        ).toBeVisible();
+        await mark.getByRole('button', { name: /^Dismiss:/ }).click();
+        await page.waitForURL(URL_OF.week);
+        await expect(unit(page, TOMORROW).locator('[data-conflict]')).toHaveCount(0);
+      } else {
+        // Month and Season: Worth knowing's first row, its Why, then its Dismiss.
+        const first = worthOf(page).locator(':scope > ul > li[data-insight]').first();
+        const said = ((await first.locator(':scope > p').textContent()) ?? '').trim();
+        expect(said.length, `${h}: first Worth knowing row`).toBeGreaterThan(0);
+        await first.locator('summary', { hasText: 'Why' }).click();
+        await expect(first.getByRole('button', { name: /^Not useful:/ })).toBeVisible();
+        await first.getByRole('button', { name: /^Dismiss:/ }).click();
+        await page.waitForURL(URL_OF[h]);
+        await unfoldWorth(page);
+        await expect(
+          page.locator('li[data-insight]').filter({ has: page.getByText(said, { exact: true }) }),
+        ).toHaveCount(0);
+      }
+    }
+    await context.close();
+    await q(`delete from insight_response where insight_key like 'conflict.%'`);
+  });
+}
+
+test('phone, first screen on Month: the horizons, the headline and the first Worth knowing row are above the fold', async ({
+  browser,
+}) => {
+  const { context, page } = await open(browser, 'sam', '/forward?h=month');
+  const height = VIEWPORTS.phone.height;
+  for (const [what, el] of [
+    ['horizons', page.getByRole('navigation', { name: 'Horizon' })],
+    ['headline', page.getByTestId('headline')],
+    ['first Worth knowing row', worthOf(page).locator('li[data-insight]').first()],
+  ] as const) {
+    const box = await el.boundingBox();
+    expect(box, what).toBeTruthy();
+    expect(box!.y + box!.height, what).toBeLessThanOrEqual(height);
+  }
+  await context.close();
+});
+
+test('two columns on a tablet and desktop: Coming up sits to the right of the headline; on a phone below the header', async ({
+  browser,
+}) => {
+  const coming = (page: Page) => page.locator('section[aria-labelledby="forward-coming"]');
+  for (const viewport of [VIEWPORTS['tablet-portrait'], VIEWPORTS.desktop]) {
+    const { context, page } = await open(browser, 'sam', '/forward', { viewport });
+    const head = (await page.getByTestId('headline').boundingBox())!;
+    const col = (await coming(page).boundingBox())!;
+    expect(col.x, `${viewport.width}px`).toBeGreaterThan(head.x + head.width / 2);
+    await context.close();
+  }
+  const { context, page } = await open(browser, 'sam', '/forward');
+  const header = (await page.locator('main header').first().boundingBox())!;
+  const col = (await coming(page).boundingBox())!;
+  expect(col.y).toBeGreaterThanOrEqual(header.y + header.height);
+  await context.close();
+});
+
+// R-2: Forward's first run, quiet and stale scenes, with everything else held aside
+// (as today-screen.spec does) and put back exactly afterwards.
+test.describe('held aside: Forward’s first run, quiet and stale', () => {
+  const held = {
+    event: [] as string[],
+    task: [] as string[],
+    project: [] as string[],
+    calendar_source: [] as string[],
+  };
+  const CALENDARS = ['fw Family calendar', 'fw Quiet calendar'];
+  const archiveIds = async (table: string, list: string[]) =>
+    list.length
+      ? q(`update ${table} set archived_at = now() where id = any($1::uuid[])`, [list])
+      : [];
+  const restoreIds = async (table: string, list: string[]) =>
+    list.length
+      ? q(`update ${table} set archived_at = null where id = any($1::uuid[])`, [list])
+      : [];
+
+  test.beforeAll(async () => {
+    for (const table of Object.keys(held) as (keyof typeof held)[]) {
+      held[table] = (await q(`select id from ${table} where archived_at is null`)).map(
+        (r) => r.id!,
+      );
+      await archiveIds(table, held[table]);
+    }
+  });
+  test.afterAll(async () => {
+    await q(`update calendar_source set archived_at = now() where name = any($1::text[])`, [
+      CALENDARS,
+    ]);
+    for (const table of Object.keys(held) as (keyof typeof held)[])
+      await restoreIds(table, held[table]);
+  });
+
+  /** The fixture's two weekly series (Swimming, Football), back for one scene; returns their ids. */
+  async function usualSeries(): Promise<string[]> {
+    const rows = await q(
+      `select id from event where id = any($1::uuid[]) and title in ('Swimming', 'Football')
+         and rrule is not null and recurrence_parent_id is null`,
+      [held.event],
+    );
+    const list = rows.map((r) => r.id!);
+    expect(list.length).toBe(2);
+    await restoreIds('event', list);
+    return list;
+  }
+
+  /** A synthetic calendar, last updated at `synced`. */
+  async function calendar(name: string, tag: string, synced: string) {
+    const id = await seedCalendar({
+      owner: 'fixture-sam',
+      name,
+      visibility: 'household',
+      fingerprintTag: tag,
+    });
+    await q(
+      `update calendar_source set archived_at = null, last_attempt_at = $2::timestamptz, last_synced_at = $2::timestamptz, last_sync_status = 'ok' where id = $1`,
+      [id, synced],
+    );
+    return id;
+  }
+
+  test('first run: no calendar and nothing recorded says HOME doesn’t know your calendars yet', async ({
+    browser,
+  }) => {
+    const { context, page } = await open(browser, 'sam');
+    await expect(page.getByTestId('headline')).toHaveText('HOME doesn’t know your calendars yet.');
+    await expect(page.getByRole('link', { name: 'Connect a calendar ›' })).toHaveAttribute(
+      'href',
+      '/settings/calendars',
+    );
+    const units = page.locator('li[data-unit]');
+    await expect(units).toHaveCount(7);
+    for (let n = 0; n < 7; n++)
+      await expect(units.nth(n).locator(':scope > p')).toHaveText('Nothing recorded');
+    await expect(page.locator('section[aria-labelledby="forward-coming"] a[href]')).toHaveCount(0);
+    await expect(page.locator('[data-conflict]')).toHaveCount(0);
+    await expect(page.getByTestId('qualifier')).toHaveCount(0);
+    await context.close();
+  });
+
+  test('quiet: a fresh calendar and only the usual says just the usual; each day says what is recorded', async ({
+    browser,
+  }) => {
+    const usual = await usualSeries();
+    try {
+      await calendar('fw Quiet calendar', 'fwquietcal', at(DAY, '06:00'));
+      const { context, page } = await open(browser, 'sam');
+      await expect(page.getByTestId('headline')).toHaveText(
+        'Just the usual in the next seven days.',
+      );
+      await expect(page.getByTestId('qualifier')).toHaveCount(0);
+      // Swimming is on Wednesdays, Football on Saturdays.
+      const expected: Record<string, string> = {
+        '2027-05-05': 'Nothing recorded besides the usual',
+        '2027-05-06': 'Nothing recorded',
+        '2027-05-07': 'Nothing recorded',
+        '2027-05-08': 'Nothing recorded besides the usual',
+        '2027-05-09': 'Nothing recorded',
+        '2027-05-10': 'Nothing recorded',
+        '2027-05-11': 'Nothing recorded',
+      };
+      await expect(page.locator('li[data-unit]')).toHaveCount(7);
+      for (const [date, words] of Object.entries(expected))
+        await expect(unit(page, date).locator(':scope > p'), date).toHaveText(words);
+      await expect(page.locator('[data-conflict]')).toHaveCount(0);
+      await expect(worthOf(page)).toHaveCount(0);
+      await context.close();
+    } finally {
+      await archiveIds('event', usual);
+      await q(`update calendar_source set archived_at = now() where name = 'fw Quiet calendar'`);
+    }
+  });
+
+  test('stale: a calendar last updated two days ago is said, plainly, under the headline and in Worth knowing', async ({
+    browser,
+  }) => {
+    const usual = await usualSeries();
+    try {
+      await calendar('fw Family calendar', 'fwfamilycal', at('2027-05-03', '09:00'));
+      // Without JavaScript, so the page's refresh-on-use never runs and the scene stays put.
+      const { context, page } = await open(browser, 'sam', '/forward', { js: false });
+      await expect(page.getByTestId('headline')).toHaveText(
+        'Just the usual in the next seven days.',
+      );
+      await expect(page.getByTestId('qualifier')).toHaveText('As far as HOME knows.');
+      const health = worthOf(page).locator('[data-insight^="data_health."]');
+      await expect(health).toHaveCount(1);
+      await expect(health.locator(':scope > p')).toHaveText(
+        'fw Family calendar hasn’t updated since Monday.',
+      );
+      const words = await page.locator('main').innerText();
+      expect(words).not.toMatch(/\b(failed|error|broken|stale|urgent)\b/i);
+      await context.close();
+    } finally {
+      await archiveIds('event', usual);
+      await q(`update calendar_source set archived_at = now() where name = 'fw Family calendar'`);
+    }
+  });
 });

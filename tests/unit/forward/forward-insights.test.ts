@@ -449,8 +449,9 @@ describe('an empty horizon is still drawn (contract §5.4)', () => {
 });
 
 describe('wording (contract §5.5)', () => {
+  // The full list: M5 contract §8.1 and M6 contract §5.5 (matrix U-13).
   const FORBIDDEN =
-    /\b(busy|easy|full|calm|stressful|overwhelming|packed|steady|clear|free|available|quiet|needs?|should|probably|covered|sorted|away|unavailable|double-booked|can['’]t|clash)\b/i;
+    /\b(needs?|needs you|nobody['’]?s down|lift|pick(ing)? up|drop(ping)? off|taking|driving|free|available|out|easy|busy|full|calm|covered|sorted|nothing needs|should|probably|nothing prepared|packed|steady|clear|quiet|stressful|overwhelming|away|unavailable|in two places|double-booked|can['’]t|clash|worth deciding|nothing planned)\b|\bwho\?/i;
 
   it('no rendered string the model carries uses a forbidden phrase, on any horizon', () => {
     const events = [
@@ -475,8 +476,13 @@ describe('wording (contract §5.5)', () => {
           ...p.worth.all.map((i) => i.text),
           ...[...p.marks.values()].flat().map((m) => m.text),
         ];
+        // The household's own titles and names are exempt, as recorded.
+        const own = (t: string) =>
+          [...events.map((e) => e.title), ...PEOPLE.map((p) => p.name)]
+            .sort((a, b) => b.length - a.length)
+            .reduce((x, name) => x.split(name).join(''), t);
         for (const s of strings) {
-          expect(s).not.toMatch(FORBIDDEN);
+          expect(own(s), s).not.toMatch(FORBIDDEN);
           checked++;
         }
       }

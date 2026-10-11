@@ -22,6 +22,7 @@ import {
   compareIsoDates,
   daysBetween,
   daysInMonth,
+  longDate,
   parseIsoDate,
   weekdayOf,
   type IsoDate,
@@ -372,6 +373,25 @@ function nameOf(i: AgendaItem): string {
   return i.kind === 'birthday' ? `${i.name}’s birthday` : i.title;
 }
 
+/**
+ * A listed item in the headline (§5.5, `forward.headline.listed`): its name
+ * and its day ("Swimming today", "Nana Jo’s birthday on Tuesday"). An event
+ * carried in from before today is named by when it ends, so it never reads
+ * as starting today (ADR 0009 §36, owner's decision): "Camp, until Friday",
+ * "Camp, until tomorrow", "Camp, ending today"; past a week, its date.
+ */
+function listedPart(e: ForwardEntry, today: IsoDate): string {
+  const i = e.item;
+  if (i.kind !== 'event' || i.day === 1) return `${nameOf(i)} ${onDay(e.date, today)}`;
+  const end = addDays(e.date, i.days - i.day);
+  const n = daysBetween(today, end);
+  if (n === 0) return `${i.title}, ending today`;
+  if (n === 1) return `${i.title}, until tomorrow`;
+  return n < 7
+    ? `${i.title}, until ${WEEKDAYS[weekdayOf(end)]}`
+    : `${i.title}, until ${longDate(end)}`;
+}
+
 /** Thrown when the agenda handed over does not cover the whole horizon. */
 export class IncompleteAgendaError extends RangeError {
   constructor(
@@ -524,7 +544,7 @@ export function forward(input: ForwardInput): ForwardModel {
     facts = usual.flatMap((e) => e.facts);
   } else if (listable) {
     rule = 'forward.headline.listed';
-    const parts = notable.map((e) => `${nameOf(e.item)} ${onDay(e.date, today)}`);
+    const parts = notable.map((e) => listedPart(e, today));
     sentence = `${capitalise(parts.join(', then '))}.`;
     facts = notable.flatMap((e) => e.facts);
   } else {
