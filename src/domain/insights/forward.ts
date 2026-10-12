@@ -7,6 +7,7 @@ import { OPENING_DAYS, OPENINGS_SHOWN } from '../engines/insights/openings';
 import type { AgendaInputs } from '../events/agenda-inputs';
 import { addDays, isoDateInZone } from '@/lib/dates';
 import type { UserActor } from '@/trust/actor';
+import type { ForecastRead } from '../weather/service';
 import { insightsFor, insightsInput } from './today';
 
 // Forward's Worth knowing (M6 Package 4; contract §4.1, §5.8; ADR 0009 §18).
@@ -45,12 +46,16 @@ export async function forwardInsights(
   horizonDays: number,
   found: readonly Conflict[],
   deps: Deps = {},
+  forecast?: ForecastRead,
 ) {
   const today = isoDateInZone(now, timeZone);
   return insightsFor(
     actor,
     {
-      ...insightsInput(inputs, days, now, timeZone, new Set(), { conflicts: found }),
+      ...insightsInput(inputs, days, now, timeZone, new Set(), {
+        conflicts: found,
+        ...(forecast ? { forecast } : {}),
+      }),
       through: addDays(today, horizonDays - 1),
       listed: FORWARD_LISTED[horizon],
       shown: FORWARD_SHOWN,

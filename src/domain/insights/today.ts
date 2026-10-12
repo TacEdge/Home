@@ -18,7 +18,8 @@ import { addDays, isoDateInZone } from '@/lib/dates';
 import type { UserActor } from '@/trust/actor';
 import type { InsightResponseKind } from '@/db/schema/insight-response';
 import { CONFLICT_DAYS, readConflictInputs } from './conflicts';
-import { openingsOver, readOpeningWeather } from './openings';
+import { openingsOver, openingWeatherFrom, readOpeningWeather } from './openings';
+import type { ForecastRead } from '../weather/service';
 import { respond, respondedKeys } from './service';
 import { insightKey, insightResponseKind } from './schema';
 
@@ -40,8 +41,12 @@ import { insightKey, insightResponseKind } from './schema';
 // today + 6, two listed), from the same read plus one read of the forecast
 // cache. A response on an opening works exactly as on any other insight.
 
-/** Package 3 derives openings; Package 4 lists them (contract §2.1). Until then none is listed or counted. */
-export const OPENINGS_LISTED = false;
+/**
+ * Package 3 derived openings; Package 4 lists them (contract §2.1), so this is
+ * true. It stays as the one switch: false gives openings a cap of zero in
+ * `insightsFor`, before shown, rest and "+ N more", on every surface.
+ */
+export const OPENINGS_LISTED = true;
 
 /** The agenda window the detectors read: today and the next seven days (ADR 0008 §26). */
 export const insightWindow = (today: string) => ({
@@ -59,6 +64,11 @@ export const insightWindow = (today: string) => ({
 export type ReaderInsightsInput = InsightsInput & {
   source?: Pick<AgendaInputs, 'people' | 'records'>;
   openingDays?: number;
+  /**
+   * The forecast read the page already made for its own words, so openings
+   * use it and the cache is read once (X2). Without it, `withOpenings` reads.
+   */
+  forecast?: ForecastRead;
 };
 
 /** The engine's input from the agenda read: records handed over as they are. */
@@ -72,7 +82,7 @@ export function insightsInput(
     Pick<
       ReaderInsightsInput,
       'conflicts' | 'placed' | 'through' | 'listed' | 'shown' | 'openings' | 'openingsShown'
-    > & { openingDays: number }
+    > & { openingDays: number; forecast: ForecastRead }
   > = {},
 ): ReaderInsightsInput {
   return {
@@ -127,7 +137,9 @@ export async function withOpenings(
   const through = input.through ?? addDays(today, LOOKAHEAD_DAYS);
   const last = addDays(today, (input.openingDays ?? OPENING_DAYS.today) - 1);
   const window = { from: today, to: last < through ? last : through };
-  const weather = await readOpeningWeather(actor, input.now, deps);
+  const weather = input.forecast
+    ? openingWeatherFrom(input.forecast)
+    : await readOpeningWeather(actor, input.now, deps);
   return {
     ...input,
     openings: openingsOver(
@@ -152,7 +164,7 @@ export async function withOpenings(
  * plus, on a surface that lists openings, the one forecast read
  * (`withOpenings`). `responded` is those keys, for the marks Today puts on
  * its items. While `OPENINGS_LISTED` is false, no opening is shown, folded
- * or counted on any surface (Today, Forward Week, a person's page).
+ * or counted on any surface.
  */
 export async function insightsFor(
   actor: UserActor,
