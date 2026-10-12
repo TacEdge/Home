@@ -671,7 +671,18 @@ describe('P4, P5: privacy of the refresh', () => {
     clean('logs', logText);
     for (const fp of [...fingerprints, row.location_fingerprint!])
       expect(logText).not.toContain(fp);
-    expect(logText).not.toContain('37');
+    // The raw elevation, checked without each line's timestamp, which can hold any digits.
+    const withoutTimestamps = logs
+      .flatMap((l) => l.split('\n'))
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => {
+        const line = JSON.parse(l) as Record<string, unknown>;
+        delete line.ts;
+        return JSON.stringify(line);
+      })
+      .join('\n');
+    expect(withoutTimestamps).toContain('weather_refresh_failed');
+    expect(withoutTimestamps).not.toContain('37');
     for (const adult of [h.sam, h.alex]) {
       const exported = JSON.stringify(await exportFor(adult, {}, deps));
       clean('export', exported);
