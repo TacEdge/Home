@@ -137,6 +137,8 @@ describe('the one request path', () => {
       unreachable: 'unreachable',
       too_large: 'too_large',
       bad_response: 'not_a_calendar',
+      // M7's openMeteoPolicy code; the calendar policy never produces it.
+      rate_limited: 'unreachable',
     };
     for (const [code, status] of Object.entries(expected)) {
       const p = icsProvider({

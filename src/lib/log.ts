@@ -3,7 +3,8 @@ import 'server-only';
 // A tiny structured logger (contract §5.8). One JSON object per line; events
 // and IDs, never content. Keys on the redaction list are replaced wherever
 // they appear, at any depth, including inside arrays; and every string value,
-// error message and key is scrubbed of calendar secrets by its content.
+// error message and key is scrubbed of calendar secrets and of the weather
+// request by its content.
 
 export type Level = 'debug' | 'info' | 'warn' | 'error';
 export type Fields = Record<string, unknown>;
@@ -36,6 +37,14 @@ export const REDACTED_KEYS = [
   'href',
   'uri',
   'link',
+  // The home location (M7 contract §3.5, ADR 0011 §13): never logged, under
+  // any of the names it could travel by.
+  'lat',
+  'lon',
+  'latitude',
+  'longitude',
+  'elevation',
+  'coordinates',
 ] as const;
 
 /** A field whose name contains one of these is redacted wherever the word sits. */
@@ -66,6 +75,11 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bhc\d+(?:\.[A-Za-z0-9_+/=-]+){4}/g, '[credential]'],
   // An address fingerprint.
   [/\bfp\d+\.[A-Za-z0-9_-]{16,}/g, '[fingerprint]'],
+  // The weather request (M7 contract §5.1): its URL carries the home
+  // location, so any trace of it is replaced, with or without a scheme, and
+  // so is any coordinate written as a query parameter.
+  [/[^\s"'<>]*api\.open-meteo\.com[^\s"'<>]*/gi, '[weather-request]'],
+  [/\b(?:latitude|longitude|elevation)=[^\s&"'<>]*/gi, '[weather-request]'],
 ];
 
 /** A string with every secret calendar address, sealed credential and fingerprint replaced. */

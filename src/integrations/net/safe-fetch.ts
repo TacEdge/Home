@@ -8,7 +8,8 @@ import { isApprovedCalendarUrl } from '@/lib/calendar-address';
 import { isPublicAddress } from '@/lib/net-policy';
 
 // The one way HOME fetches something from outside (M4 contract §4.3), built
-// for calendar feeds: GET only, the approved destination only, every
+// for calendar feeds and, since M7, the weather forecast, each under its own
+// frozen policy: GET only, the approved destination only, every
 // redirect hop checked again, every resolved address checked at the moment
 // of connecting (so a name that later resolves somewhere private is refused,
 // DNS rebinding included), a total time limit, a size limit enforced while
@@ -32,7 +33,10 @@ export type SafeFetchErrorCode =
   | 'too_large'
   | 'address_rejected'
   | 'unreachable'
-  | 'bad_response';
+  | 'bad_response'
+  // A 429 answer, under a policy that asks for it (openMeteoPolicy); the
+  // calendar policy reads a 429 as `unreachable`, as it always has.
+  | 'rate_limited';
 
 export class SafeFetchError extends Error {
   constructor(readonly code: SafeFetchErrorCode) {
@@ -49,18 +53,63 @@ export type Lookup = (
 
 type Limits = Record<keyof typeof FETCH_LIMITS, number>;
 
-/** Where a fetch may go. Production code uses googleCalendarPolicy only. */
+/**
+ * Where a fetch may go, and how. Production code uses googleCalendarPolicy
+ * and openMeteoPolicy only. The optional parts are per-policy: a policy
+ * that leaves them out gets the calendar's headers, limits and answers,
+ * exactly as before the second policy existed (M7 contract §2.2).
+ */
 export type FetchPolicy = {
   /** May a request (first or after a redirect) go to this URL? */
   approve(url: URL): boolean;
   /** May a socket connect to this resolved address? */
   allowAddress(address: string): boolean;
+  /** The only request headers sent; nothing else is ever added. Default: the calendar's. */
+  headers?: Readonly<Record<string, string>>;
+  /** The policy's own limits; a caller's `limits` (tests) still win. Default: FETCH_LIMITS. */
+  limits?: Readonly<Partial<Limits>>;
+  /** Whether a 429 answer is `rate_limited` (otherwise `unreachable`). */
+  rateLimited?: boolean;
 };
 
 /** Google Calendar's secret iCal feed, on the public internet only (ADR 0007 §3). */
 export const googleCalendarPolicy: FetchPolicy = Object.freeze({
   approve: isApprovedCalendarUrl,
   allowAddress: isPublicAddress,
+});
+
+const OPEN_METEO_ORIGIN = 'https://api.open-meteo.com';
+const OPEN_METEO_PATH = '/v1/forecast';
+
+/**
+ * Open-Meteo's forecast endpoint, exactly (M7 contract §5.1, ADR 0011 §19):
+ * https, `api.open-meteo.com`, the default port, no user or password, the
+ * path `/v1/forecast`, no fragment. The query is the adapter's.
+ */
+function isApprovedOpenMeteoUrl(url: URL): boolean {
+  return (
+    url.origin === OPEN_METEO_ORIGIN &&
+    url.protocol === 'https:' &&
+    url.port === '' &&
+    url.username === '' &&
+    url.password === '' &&
+    url.pathname === OPEN_METEO_PATH &&
+    url.hash === ''
+  );
+}
+
+/**
+ * The weather forecast (M7 contract §5.1, ADR 0011 §19): Open-Meteo's one
+ * endpoint, public addresses only, two fixed headers and nothing else, 10
+ * seconds, 512 KiB, no redirects, and a 429 read as `rate_limited`. Frozen,
+ * like googleCalendarPolicy, so nothing can widen it at run time.
+ */
+export const openMeteoPolicy: FetchPolicy = Object.freeze({
+  approve: isApprovedOpenMeteoUrl,
+  allowAddress: isPublicAddress,
+  headers: Object.freeze({ accept: 'application/json', 'user-agent': 'HOME-weather/1' }),
+  limits: Object.freeze({ timeoutMs: 10_000, maxBytes: 512 * 1024, maxRedirects: 0 }),
+  rateLimited: true,
 });
 
 export type FetchedFeed = { text: string; bytes: number; contentType: string | null };
@@ -84,7 +133,7 @@ const HEADERS = {
  */
 export async function safeGet(address: string, opts: SafeFetchOptions = {}): Promise<FetchedFeed> {
   const policy = opts.policy ?? googleCalendarPolicy;
-  const limits: Limits = { ...FETCH_LIMITS, ...opts.limits };
+  const limits: Limits = { ...FETCH_LIMITS, ...policy.limits, ...opts.limits };
   const lookup = opts.lookup ?? (dnsLookup as unknown as Lookup);
   let url: URL;
   try {
@@ -181,7 +230,7 @@ function getOnce(
         port: url.port || undefined,
         path: `${url.pathname}${url.search}`,
         method: 'GET',
-        headers: HEADERS,
+        headers: { ...(policy.headers ?? HEADERS) },
         agent: false,
         lookup: guardedLookup as never,
       },
@@ -193,6 +242,9 @@ function getOnce(
           if (!location) return fail('bad_response');
           finish(() => resolve({ kind: 'redirect', location }));
           return close();
+        }
+        if (status === 429 && policy.rateLimited === true) {
+          return fail('rate_limited');
         }
         if ([401, 403, 404, 410].includes(status)) {
           return fail('address_rejected');

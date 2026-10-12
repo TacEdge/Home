@@ -119,6 +119,8 @@ Open-Meteo (free, no key, good NZ coverage), hourly forecast for the home locati
 
 *M7 (ADR 0011, approved 2026-10-11):* behind a HOME-defined `WeatherProvider`; requested in UTC (`timeformat=unixtime`, never `timezone`, whose fixed offset ignores DST); cached in one household-level `weather_forecast` row, refreshed on use at most hourly (at once after a location change) and never while rendering, with the last good forecast kept on failure; the home location in private environment configuration, rounded to two decimal places and never stored or logged (the row holds only a keyed fingerprint of it, so another place's forecast is never shown); daylight computed locally.
 
+*As built in M7 Package 1b (ADR 0011 §43):* the interface and `ForecastHour` are `src/domain/weather/provider.ts`; the adapter is `src/integrations/weather/open-meteo.ts`, fetching only through `safe-fetch`'s frozen `openMeteoPolicy`; `src/integrations/weather/fake.ts` is the fake (`HOME_TEST_WEATHER=fake`, local and CI only); `src/integrations/weather/entry.ts` is the composition root and the second app→integrations exception; the forecast service is `src/domain/weather/service.ts` (`readForecast`, `refreshForecast`) with its due rules in `rules.ts`; the refresh runs only inside `POST /weather/refresh`; `weatherConfig()` in `src/lib/env.ts` is the only reader of `HOME_LAT`, `HOME_LON`, `HOME_ELEVATION` and `HOME_WEATHER_LOCATION_KEY`; the engines are `src/domain/engines/weather.ts` and `daylight.ts`.
+
 No background job infrastructure in V0.1: syncs happen lazily on use with a staleness threshold (M4 contract §3.3). A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
 
 ### 2.5 Trust & permissions layer
@@ -251,7 +253,7 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   └── evals/             # Scenario fixtures + expected behaviours
 │   ├── integrations/
 │   │   ├── calendar/          # provider.ts (interface), ics/, (later google/, microsoft/, caldav/)
-│   │   └── weather/
+│   │   └── weather/           # entry.ts (composition root), open-meteo.ts, fake.ts (M7)
 │   ├── trust/
 │   │   ├── auth.ts
 │   │   ├── actor.ts           # Actor context (user; via ui | kev | sync; channel)

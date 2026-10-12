@@ -21,6 +21,9 @@ cp .env.example .env.local                # fill in values; never commit this fi
 #   BETTER_AUTH_SECRET and AUDIT_HASH_SECRET: `openssl rand -base64 48`
 #   HOME_CREDENTIALS_KEY (calendars, optional): `openssl rand -base64 32`
 #   HOME_FINGERPRINT_KEY (calendars, optional): another `openssl rand -base64 32`, never the credentials key
+#   HOME_LAT=-41.29 and HOME_LON=174.78 (weather, optional): the synthetic public point only, never a real home
+#   HOME_WEATHER_LOCATION_KEY (weather, optional): its own `openssl rand -base64 32`, never equal to another key
+#   HOME_TEST_WEATHER=fake (weather, optional): a synthetic forecast instead of calling Open-Meteo
 #   HOME_ALLOWED_EMAILS: the household's addresses (or the fixture ones for a sandbox)
 #   HOME_MAIL_TRANSPORT=test              # magic links are written to a mailbox file
 pnpm db:migrate                           # applies src/db/migrations with DATABASE_URL_MIGRATE
@@ -28,6 +31,8 @@ pnpm dev                                  # http://localhost:3000
 ```
 
 With `HOME_MAIL_TRANSPORT=test`, sign-in links are appended to `<tmpdir>/home-test-mailbox.jsonl` (macOS: `$TMPDIR/home-test-mailbox.jsonl`; Linux: `/tmp/...`). Open the link from there.
+
+**Weather (M7).** With `HOME_LAT`, `HOME_LON` and `HOME_WEATHER_LOCATION_KEY` set, the boot line reads `[home] weather location: set` (otherwise `absent`, `invalid` or `set, key missing`; never a value). Use only the synthetic Wellington point (`-41.29`, `174.78`); a test that moves the location uses Christchurch's (`-43.53`, `172.64`). Generate the key with `openssl rand -base64 32`; HOME refuses a key shorter than 32 bytes or equal to `HOME_CREDENTIALS_KEY`, `HOME_FINGERPRINT_KEY` or another secret, and then treats weather as unconfigured. With `HOME_TEST_WEATHER=fake` a refresh stores a dry synthetic week and nothing reaches Open-Meteo; without it, a refresh (`POST /weather/refresh`, not yet asked for by any screen) calls the real provider, so leave the location unset unless you mean to. `HOME_TEST_WEATHER` is refused on Vercel and under `NODE_ENV=production`. No test reaches the network: the suites set these variables themselves and use the fake provider.
 
 If you already had a Docker volume from before M1.1, create the role once: `docker compose exec postgres psql -U home -d home -f /docker-entrypoint-initdb.d/20-init-app-role.sql`, then `pnpm db:migrate` again so migration `0002_app_role`'s grants apply.
 

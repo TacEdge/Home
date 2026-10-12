@@ -2,7 +2,7 @@
 
 Status: **Approved** by the owner on 2026-10-11: decisions D1–D19 as recommended (§12.2), with five amendments (§12.4). The approval takes effect when PR #70 (Package 0) merges.
 
-- **Progress:** Package 0 merged (PR #70). **Package 1a in review** (migration `0008_weather_forecast`, the `weather_forecast` table only; migration-only PR). Its migration must run in Production and Preview (owner, **Migrate production database** and **Migrate preview database**) before Package 1b merges. Package 1b not started; nothing else built.
+- **Progress:** Package 0 merged (PR #70). Package 1a merged (PR #71; migration `0008_weather_forecast`, run in Production and Preview). **Package 1b in review** (weather provider, cache and refresh; no screen; ADR 0011 §43). Nothing else built.
 
 The architecture decisions are recorded in ADR 0011 (`docs/decisions/0011-m7-weather-and-free-windows.md`).
 

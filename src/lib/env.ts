@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 
 // The only place HOME reads process.env (contract §5.3). Parsed once, validated
@@ -62,6 +63,15 @@ const schema = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
     .optional(),
+  // The fake weather provider (M7 contract §7): local and CI runs only. With
+  // `fake`, the weather composition root uses a synthetic forecast instead of
+  // Open-Meteo. Refused on any deployed environment (parseEnv), and again by
+  // the composition root itself.
+  HOME_TEST_WEATHER: z.enum(['fake']).optional(),
+  // HOME_LAT, HOME_LON, HOME_ELEVATION and HOME_WEATHER_LOCATION_KEY are
+  // deliberately not in this schema: the home location and its key are read
+  // only by weatherConfig() below, never held on `env`, and a wrong value
+  // never stops HOME booting (it leaves weather unconfigured).
 });
 
 export type Env = z.infer<typeof schema>;
@@ -107,6 +117,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         bad.join('; '),
       );
   }
+  if (env.HOME_TEST_WEATHER && (env.VERCEL_ENV || source.VERCEL || env.NODE_ENV === 'production'))
+    throw new EnvError(
+      ['HOME_TEST_WEATHER'],
+      'HOME_TEST_WEATHER (the fake weather provider is for local and CI runs only)',
+    );
   if ((env.HOME_TEST_TIME || env.HOME_TEST_CLOCK) && env.VERCEL_ENV)
     throw new EnvError(
       ['HOME_TEST_TIME'],
@@ -253,6 +268,151 @@ export function testFeedEnv(source: Record<string, string | undefined> = process
 } {
   return {
     HOME_TEST_CALENDAR_FEEDS: source.HOME_TEST_CALENDAR_FEEDS,
+    VERCEL_ENV: source.VERCEL_ENV,
+    VERCEL: source.VERCEL,
+    NODE_ENV: source.NODE_ENV,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The home location for the weather (M7 contract §3.5, §5.1, §7; ADR 0011 §13,
+// §14). The exact values exist only inside weatherConfig(): it reads them,
+// rounds them at once (coordinates to two decimal places, elevation to 10 m)
+// and lets only the rounded point out. The location key never leaves this
+// module at all: it is used here for the location fingerprint and for
+// nothing else. None of these values is ever logged; the boot line names a
+// status only.
+
+/** The rounded home point: what the forecast request and daylight use. */
+export type WeatherPoint = Readonly<{
+  /** Degrees, two decimal places. */
+  lat: number;
+  /** Degrees, two decimal places. */
+  lon: number;
+  /** Metres, to the nearest 10, or null when not configured. */
+  elevation: number | null;
+}>;
+
+export type WeatherConfig =
+  | { status: 'absent' }
+  | { status: 'invalid' }
+  /** A location, but no valid key: no request, no forecast read; daylight only. */
+  | { status: 'key_missing'; point: WeatherPoint }
+  | { status: 'set'; point: WeatherPoint; fingerprint: string };
+
+/** The minimum decoded length of HOME_WEATHER_LOCATION_KEY (contract §5.1). */
+export const WEATHER_KEY_MIN_BYTES = 32;
+
+const DECIMAL = /^-?\d{1,4}(\.\d{1,12})?$/;
+
+/** Rounds to two decimal places, with no negative zero. */
+function round2(x: number): number {
+  const r = Math.round(x * 100) / 100;
+  return r === 0 ? 0 : r;
+}
+
+function parseCoordinate(raw: string, limit: number): number | null {
+  if (!DECIMAL.test(raw)) return null;
+  const x = Number(raw);
+  if (!Number.isFinite(x) || Math.abs(x) > limit) return null;
+  const r = round2(x);
+  return Math.abs(r) > limit ? null : r;
+}
+
+function parseElevation(raw: string): number | null | 'invalid' {
+  if (!DECIMAL.test(raw)) return 'invalid';
+  const x = Number(raw);
+  if (!Number.isFinite(x) || x < -500 || x > 9000) return 'invalid';
+  const r = Math.round(x / 10) * 10;
+  return r === 0 ? 0 : r;
+}
+
+/**
+ * The location key's bytes: canonical standard base64 of at least 32 bytes,
+ * not one repeated byte, and not equal to any other HOME key or secret (each
+ * key has one purpose). Null when absent or invalid.
+ */
+function weatherKeyFrom(source: Record<string, string | undefined>): Buffer | null {
+  const raw = source.HOME_WEATHER_LOCATION_KEY;
+  if (!raw) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return null;
+  const bytes = Buffer.from(raw, 'base64');
+  if (bytes.length < WEATHER_KEY_MIN_BYTES || bytes.toString('base64') !== raw) return null;
+  if (bytes.every((b) => b === bytes[0])) return null;
+  const others = [
+    source.HOME_CREDENTIALS_KEY,
+    source.HOME_CREDENTIALS_KEY_PREVIOUS,
+    source.HOME_FINGERPRINT_KEY,
+    source.BETTER_AUTH_SECRET,
+    source.AUDIT_HASH_SECRET,
+  ];
+  if (others.some((other) => other !== undefined && other !== '' && other === raw)) return null;
+  return bytes;
+}
+
+/**
+ * The canonical string the location fingerprint is made from (contract §5.1,
+ * v1): `home-weather-location:v1|open_meteo|{lat}|{lon}|{elevation|none}`,
+ * the coordinates with exactly two decimals. Pure; exported for its test.
+ */
+export function weatherLocationCanonical(point: WeatherPoint): string {
+  return [
+    'home-weather-location:v1',
+    'open_meteo',
+    point.lat.toFixed(2),
+    point.lon.toFixed(2),
+    point.elevation === null ? 'none' : String(point.elevation),
+  ].join('|');
+}
+
+/** Lower-case hex HMAC-SHA256 of the canonical string. Pure; exported for its test vector. */
+export function weatherLocationFingerprint(point: WeatherPoint, key: Buffer): string {
+  return createHmac('sha256', key).update(weatherLocationCanonical(point), 'utf8').digest('hex');
+}
+
+/**
+ * The weather configuration as it is now: read on every call, like the gate
+ * and the calendar keys, so a change applies on the next request. Never
+ * throws. A location with only one of HOME_LAT and HOME_LON, a value out of
+ * range or not a plain decimal, or a bad HOME_ELEVATION is `invalid`;
+ * neither coordinate set is `absent` (HOME_ELEVATION alone is ignored).
+ */
+export function weatherConfig(
+  source: Record<string, string | undefined> = process.env,
+): WeatherConfig {
+  const rawLat = source.HOME_LAT;
+  const rawLon = source.HOME_LON;
+  if (!rawLat && !rawLon) return { status: 'absent' };
+  if (!rawLat || !rawLon) return { status: 'invalid' };
+  const lat = parseCoordinate(rawLat, 90);
+  const lon = parseCoordinate(rawLon, 180);
+  if (lat === null || lon === null) return { status: 'invalid' };
+  const elevation = source.HOME_ELEVATION ? parseElevation(source.HOME_ELEVATION) : null;
+  if (elevation === 'invalid') return { status: 'invalid' };
+  const point: WeatherPoint = Object.freeze({ lat, lon, elevation });
+  const key = weatherKeyFrom(source);
+  if (!key) return { status: 'key_missing', point };
+  return { status: 'set', point, fingerprint: weatherLocationFingerprint(point, key) };
+}
+
+/** The boot line's status (contract §7): never a value. */
+export function weatherBootStatus(config: WeatherConfig): string {
+  return config.status === 'key_missing' ? 'set, key missing' : config.status;
+}
+
+/**
+ * HOME_TEST_WEATHER with what its guard needs to refuse a deployed
+ * environment (src/integrations/weather/entry.ts). Raw strings, read on each
+ * call. Never set on Vercel.
+ */
+export function testWeatherEnv(source: Record<string, string | undefined> = process.env): {
+  HOME_TEST_WEATHER?: string;
+  VERCEL_ENV?: string;
+  VERCEL?: string;
+  NODE_ENV?: string;
+} {
+  return {
+    HOME_TEST_WEATHER: source.HOME_TEST_WEATHER,
     VERCEL_ENV: source.VERCEL_ENV,
     VERCEL: source.VERCEL,
     NODE_ENV: source.NODE_ENV,
