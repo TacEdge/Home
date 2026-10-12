@@ -11,7 +11,7 @@ import {
   type OpeningForecast,
   type OpeningTaskRef,
 } from '@/domain/engines/insights/openings';
-import { bandWords } from '@/domain/engines/weather';
+import { asOfTime, bandWords } from '@/domain/engines/weather';
 import { clockOf, weekdayOf } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { eventRow, updated, when, type FactLookup } from './facts';
@@ -163,7 +163,7 @@ export function OpeningExplanation({
       ) : null}
       {o.forecast ? (
         <p className="mt-2">
-          Forecast fetched {when(o.forecast.fetchedAt, zone)} (Open-Meteo), for{' '}
+          Forecast as of {asOfTime(o.forecast.fetchedAt, lookup.now, zone)}, for{' '}
           {forecastWords(o.forecast, o, zone)}
           <br />
           <CreditLink />

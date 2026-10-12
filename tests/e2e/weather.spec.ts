@@ -213,7 +213,7 @@ test.describe('Today', () => {
     await expect(why).toContainText('From the forecast as of 06:55.');
     await expect(why).toContainText('Morning, 07:00–12:00: looks dry.');
     await expect(why).toContainText('Afternoon, 12:00–18:00: showers possible.');
-    await expect(why).toContainText('Between 14° and 14°.');
+    await expect(why).toContainText('Around 14°C.');
     // Nothing was due, so nothing was asked; no network left the page for the provider.
     expect(posts()).toBe(0);
     await shot(page, 'today-sentence-phone');
@@ -234,6 +234,50 @@ test.describe('Today', () => {
     await expect(page.getByTestId('weather-why')).toContainText('yesterday 21:00');
     expect(posts()).toBe(0);
     await context.close();
+  });
+
+  test('X4: “Why ›” sits on the sentence’s line, beside the credit link; opened, its body is below and full width; no overflow at 320 and 375', async ({
+    browser,
+  }) => {
+    await setForecast(at(SAT, '06:55'));
+    for (const viewport of [
+      VIEWPORTS.phone,
+      { width: 375, height: 667 },
+      { width: 320, height: 640 },
+    ]) {
+      const { context, page } = await open(browser, 'sam', at(SAT, '07:30'), '/today', {
+        viewport,
+      });
+      const sentence = page.getByTestId('weather-sentence');
+      await expect(sentence).toHaveText('Looks dry today.');
+      const summary = whyOf(page.getByTestId('weather'));
+      const link = visibleCredit(page);
+      const s = (await sentence.boundingBox())!;
+      const l = (await link.boundingBox())!;
+      const w = (await summary.boundingBox())!;
+      const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+      // Sentence, link and Why share one line (their centres within a few px).
+      expect(
+        Math.abs(mid(w) - mid(s)),
+        `Why on the sentence line at ${viewport.width}`,
+      ).toBeLessThanOrEqual(12);
+      expect(Math.abs(mid(l) - mid(s))).toBeLessThanOrEqual(12);
+      expect(w.x).toBeGreaterThan(l.x + l.width - 1);
+      expect(w.height).toBeGreaterThanOrEqual(43.5);
+      await expectNoHorizontalScroll(page, `Today at ${viewport.width}`);
+      if (viewport.width === VIEWPORTS.phone.width) await shot(page, 'today-dry-phone');
+      await summary.click();
+      const why = page.getByTestId('weather-why');
+      const body = (await why.boundingBox())!;
+      const box = (await page.getByTestId('weather').boundingBox())!;
+      expect(body.y).toBeGreaterThan(s.y + s.height - 1);
+      expect(body.width, 'the opened Why takes the full width').toBeGreaterThanOrEqual(
+        box.width - 2,
+      );
+      await expectNoHorizontalScroll(page, `Today open at ${viewport.width}`);
+      if (viewport.width === VIEWPORTS.phone.width) await shot(page, 'today-dry-why-open-phone');
+      await context.close();
+    }
   });
 
   test('X6, X7: an unusable forecast says it hasn’t updated; no credit, no sentence, no “error”; the refresh is asked once, after render', async ({
@@ -310,7 +354,7 @@ test.describe('Today', () => {
     await expect(why).toContainText('Household:');
     await expect(why).toContainText('Family calendar');
     await expect(why).toContainText('ws Family calendar · last updated');
-    await expect(why).toContainText('Forecast fetched');
+    await expect(why).toContainText('Forecast as of 06:55, for 10:00–20:00: looks dry.');
     await expect(why).toContainText('About three hours; dry weather and daylight');
     await expect(why.getByRole('link', { name: /Paint the back fence/ })).toHaveAttribute(
       'href',

@@ -459,7 +459,7 @@ The headline, its rules and everything else on Today are unchanged. M5's and M6'
 ### 4.2 Forward Week
 
 1. **A day phrase** at the end of each day's row, in muted ink: "Looks dry", "Showers possible", "Rain likely", with ", windy" when it applies. At most four words. A row with nothing recorded reads "Nothing recorded besides the usual" and then its phrase.
-2. **The credit line** once, beside the Coming up label: "Forecast as of 06:55 · Open-Meteo", with its own "Why ›": each day's words describe that day's planning hours (08:00–20:00, or what remains of today) in the forecast fetched at that time, and what "looks dry", "showers possible", "rain likely" and "windy" mean, with their thresholds.
+2. **The credit line** once, beside the Coming up label: "Forecast as of 06:55 · Open-Meteo", with its own "Why ›": each day's words describe that day's planning hours (08:00–20:00, or what remains of today) in the forecast as of that time, and what "looks dry", "showers possible", "rain likely" and "windy" mean, with their thresholds.
 3. **Openings** in Worth knowing, after `data_health`, at most two.
 
 Month and Season are unchanged: no phrases, no openings, no credit. The horizon switch, headline, rows, load bands, marks and The usual are unchanged.

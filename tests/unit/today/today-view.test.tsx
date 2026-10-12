@@ -41,6 +41,7 @@ function render(now: Date, h: Parameters<typeof run>[0] = { events: WED }, linke
     tasks: taskRecords,
     projects: new Map(PROJECTS.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }])),
     timeZone: NZ,
+    now,
   };
   const html = renderToStaticMarkup(
     <TodayView model={r.today} lookup={lookup} linked={linked} worth={r.insights} />,

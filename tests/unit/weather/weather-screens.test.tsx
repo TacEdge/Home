@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { creditOpeningKey } from '@/app/_insights/weather/credit-key';
 import { CreditLink } from '@/app/_insights/weather/credit';
 import { ComingUpLabel, DayPhrase } from '@/app/_insights/weather/forecast-credit-line';
-import { WeatherToday } from '@/app/_insights/weather/weather-today';
+import { temperatureWords, WeatherToday } from '@/app/_insights/weather/weather-today';
 import { OpeningExplanation } from '@/app/_insights/opening-explanation';
 import type { FactLookup } from '@/app/_insights/facts';
 import {
@@ -89,7 +89,7 @@ describe('Today’s weather block (§4.1, §4.4, §5.2)', () => {
     expect(why).toContain('Morning, 07:00–12:00: looks dry.');
     expect(why).toContain('Afternoon, 12:00–18:00: showers possible. Chance of rain up to 40%');
     expect(why).toContain('Evening, 18:00–21:00: showers possible.');
-    expect(why).toContain('Between 14° and 14°.');
+    expect(why).toContain('Around 14°C.');
     expect((html.match(/data-testid="credit-link"/g) ?? []).length).toBe(2);
   });
 
@@ -99,6 +99,30 @@ describe('Today’s weather block (§4.1, §4.4, §5.2)', () => {
     const html = render({ sentence, fetchedAt: forecast.fetchedAt });
     expect(words(html)).toContain('As of yesterday 21:00, looks dry today.');
     expect(words(html)).toContain('From the forecast as of yesterday 21:00.');
+  });
+
+  it('temperatures: “Around 14°C.” when the displayed values match, “Between 11°C and 17°C.” when not; always °C, rounded for display', () => {
+    expect(temperatureWords(14, 14)).toBe('Around 14°C.');
+    expect(temperatureWords(11, 17)).toBe('Between 11°C and 17°C.');
+    // The provider's values can carry decimals: the displayed integers are compared.
+    expect(temperatureWords(13.6, 14.4)).toBe('Around 14°C.');
+    expect(temperatureWords(13.4, 14.6)).toBe('Between 13°C and 15°C.');
+    expect(temperatureWords(-0.4, 0.4)).not.toMatch(/-0/);
+  });
+
+  it('the sentence, the credit link and “Why ›” share one flex-wrap row; the opened Why takes the full width', () => {
+    const forecast = forecastOf(at('2026-10-14', '06:55'), () => ({}));
+    const sentence = todaySentence(forecast, WED_0703, NZ)!;
+    const html = render({ sentence, fetchedAt: forecast.fetchedAt });
+    const row = html.slice(
+      html.indexOf('<div class="flex flex-wrap items-baseline gap-x-3">'),
+      html.indexOf('data-testid="weather-why"'),
+    );
+    expect(row).toMatch(/weather-sentence/);
+    expect(row.indexOf('weather-sentence')).toBeLessThan(row.indexOf('credit-link'));
+    expect(row.indexOf('credit-link')).toBeLessThan(row.indexOf('<details'));
+    expect(row).toContain('open:basis-full');
+    expect(row).toContain('min-h-11');
   });
 
   it('the evening state: the sentence is about tomorrow', () => {
@@ -167,6 +191,8 @@ describe('Forward Week’s day phrases and credit line (§4.2, §5.2)', () => {
     expect(why).toContain('at or below a 20% chance of rain, and under 0.2 mm');
     expect(why).toContain('60% or more, or 1 mm or more');
     expect(why).toContain('gusts of 50 km/h or more');
+    expect(why).toContain('in the forecast as of 06:55.');
+    expect(why).not.toContain('fetched');
   });
 
   it('with no forecast it is only the label', () => {
@@ -192,6 +218,7 @@ describe('an opening’s Why, from its facts (§4.5)', () => {
     ),
     projects: new Map(),
     timeZone: NZ,
+    now: WED_0703,
     ...extra,
   });
   const why = (c: ReturnType<typeof compose>, key: string, extra?: Partial<FactLookup>) => {
@@ -210,12 +237,18 @@ describe('an opening’s Why, from its facts (§4.5)', () => {
     expect(w).toContain('Before');
     expect(w).toContain('Football');
     expect(w).toContain('Household:');
-    expect(w).toContain(
-      'Forecast fetched Wednesday 14 October, 06:55 (Open-Meteo), for Saturday, 08:00–20:00: looks dry.',
-    );
+    expect(w).toContain('Forecast as of 06:55, for Saturday, 08:00–20:00: looks dry.');
     expect(w).toContain('The task, as recorded');
     expect(w).toContain('About three hours; dry weather and daylight');
     expect(w.endsWith("It isn't a check of anyone's plans.")).toBe(true);
+  });
+
+  it('an older forecast reads “Forecast as of yesterday 21:00, for …”', () => {
+    const c = compose({ forecast: forecastOf(at('2026-10-13', '21:00'), () => ({})) });
+    const w = why(c, '2026-10-17:1000-1930:task');
+    expect(w).toContain('Forecast as of yesterday 21:00, for Saturday, 08:00–20:00: looks dry.');
+    expect(w).not.toContain('Open-Meteo),');
+    expect(w).not.toContain('fetched');
   });
 
   it('a plain opening bounded by the planning hours and sunset has no task and no “Before”', () => {
@@ -252,7 +285,7 @@ describe('an opening’s Why, from its facts (§4.5)', () => {
       <OpeningExplanation opening={c.openings[0]!} lookup={lookupFor(c)} />,
     );
     expect(html).not.toContain('credit-link');
-    expect(words(html)).not.toContain('Forecast fetched');
+    expect(words(html)).not.toContain('Forecast as of');
   });
 
   it('several matching tasks: the first is named, the others are listed', () => {

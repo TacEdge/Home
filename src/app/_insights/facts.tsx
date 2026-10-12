@@ -22,6 +22,8 @@ export type FactLookup = {
   /** Project id → its title and target date, as the reader can see them. */
   projects: Map<string, { title: string; targetDate: IsoDate | null }>;
   timeZone: string;
+  /** The moment the page is composed for: how an older forecast's time reads. */
+  now: Date;
 };
 
 const sameFact = (a: Fact, b: Fact) => JSON.stringify(a) === JSON.stringify(b);

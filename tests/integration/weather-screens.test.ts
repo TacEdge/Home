@@ -260,7 +260,7 @@ describe('Today: the weather sentence, its credit and its Why (W15, W19, §4.1, 
       expect(why).toContain(
         'Afternoon, 12:00–18:00: showers possible. Chance of rain up to 40%, 0.6 mm of rain, gusts up to 30 km/h.',
       );
-      expect(why).toContain('Between 14° and 14°.');
+      expect(why).toContain('Around 14°C.');
       expect(creditLinks(html)).toBe(2); // the line beside the sentence, and the Why's
       // A page for a weekday carries no opening.
       expect(rows(html).filter((r) => r.startsWith('open_window'))).toEqual([]);
@@ -398,9 +398,7 @@ describe('Forward Week: day phrases, the credit line and its Why, openings (W14,
     const household = why.match(/Household: (.*?) Calendars/)![1]!.split(', ');
     expect(household.sort()).toEqual(['Alex WS', 'Isla WS', 'Milo WS', 'Sam WS']);
     expect(why).toContain('Family calendar WS · last updated Wednesday 14 October, 06:');
-    expect(why).toContain(
-      'Forecast fetched Wednesday 14 October, 06:55 (Open-Meteo), for Saturday, 08:00–20:00: looks dry.',
-    );
+    expect(why).toContain('Forecast as of 06:55, for Saturday, 08:00–20:00: looks dry.');
     expect(why).toContain('The task, as recorded');
     expect(why).toContain('About three hours; dry weather and daylight');
     expect(why).toContain(

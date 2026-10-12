@@ -93,6 +93,7 @@ export async function composeToday(
       agenda.records.projects.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }]),
     ),
     timeZone,
+    now,
   };
   const people = [...agenda.people.values()];
   const linked = !realDataGateOpen() || people.some((p) => p.userId === actor.userId);

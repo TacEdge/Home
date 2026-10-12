@@ -86,6 +86,7 @@ export async function composeForward(
       agenda.records.projects.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }]),
     ),
     timeZone,
+    now,
   };
   const forecast = forecastRead ? openingWeatherFrom(forecastRead).forecast : null;
   const phrases = new Map<string, string>();
