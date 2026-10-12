@@ -2,7 +2,7 @@
 
 Checked against `M7-BUILD-CONTRACT.md` §2.2, §8, §9, §10 and §11, and ADR 0011, on 2026-10-13 (Package 5), on `main` at the Package 4 merge (`331bf7b`; PRs #70, #71, #72, #75, #76, #78). Each requirement was checked against the code and the tests that run in CI, reading the assertions rather than the test titles and reusing the evidence of Packages 1a–4 where it holds. This package changes no product code, test, script or configuration. Synthetic data only: the fixture family, seeded scenarios on fixed synthetic days, scenario forecasts written by the test harness and the contract's synthetic public point (Wellington's Civic Square). No real calendar, address, location or family data was used anywhere. `HOME_REAL_DATA` stays closed, and no weather location or location key is set in Production.
 
-**Verdict: B — accept M7 on synthetic data after targeted corrections (subject to owner sign-off; M7 is not declared accepted).** No matrix row is FAIL and no caveat is class A. The engines, the refresh's privacy and failure handling, opening identity and responses, and the gate are proven by assertions CI runs, and the key numbers were checked independently: the HMAC test vectors, the NOAA daylight table and the engine timings. What stops an unqualified A is the contract's own standard for this package, "every criterion met, with evidence that cites tests" (§2.2): a few rows are weak because a test asserts less than the requirement (§8, Q1–Q6). Each correction is a small test addition, not a behaviour change, and none is implemented here: the owner's instruction for this package is documentation only unless an uncovered test requirement is explicitly approved. The owner also has two product decisions to confirm (§8), the screenshot review (criterion 13) and the review record (criterion 14). Operational acceptance on the family's real use is DEPLOY.md §E items 20–22.
+**Verdict: B — accept M7 on synthetic data after targeted corrections (subject to owner sign-off; M7 is not declared accepted).** No matrix row is FAIL and no caveat is class A. The engines, the refresh's privacy and failure handling, opening identity and responses, and the gate are proven by assertions CI runs, and the key numbers were checked independently: the HMAC test vectors, the NOAA daylight table and the engine timings. What stops an unqualified A is the contract's own standard for this package, "every criterion met, with evidence that cites tests" (§2.2): a few rows are weak because a test asserts less than the requirement (§8, Q1–Q6), and one test can fail by chance on a timestamp (Q8). Each correction is a small test addition, not a behaviour change, and none is implemented here: the owner's instruction for this package is documentation only unless an uncovered test requirement is explicitly approved. The owner also has two product decisions to confirm (§8), the screenshot review (criterion 13) and the review record (criterion 14). Operational acceptance on the family's real use is DEPLOY.md §E items 20–22.
 
 The full evidence matrix (167 requirement rows, each with its implementation, the test and its assertion, a result and the remaining action) is `M7-ACCEPTANCE-MATRIX.md`, the assessor's working file. This document summarises it and adds the walkthrough, the measurements and the decision.
 
@@ -212,6 +212,7 @@ Class **A** = a blocker: acceptance cannot proceed until it is fixed. **B** = a 
 | A foreign opening key response is not exercised separately | B (small) | Same code path as a crafted key; Q4 |
 | First-run Today and Forward with a forecast never rendered | B (small) | Q5 |
 | No-JS and Today's 44px only at phone | B | §2.2 Package 4 says four viewports with JavaScript on and off; Q6 |
+| The location-redaction scan matches `41.29` inside a timestamp | B | Found on this PR's own CI (`5aac2ee`, docs only): `tests/integration/weather.test.ts:161` failed because an export's `"at":"…T23:34:41.295Z"` contains `41.29`, one of `LOCATION_LEAKS` (`tests/fixtures/weather.ts:49`). A false positive that depends on the wall clock, not a leak; the job was re-run once. Q8 |
 | Scenario screenshots only at phone in PR #78 | B, **closed** | Walker B's 100 screenshots at three viewports (§4) |
 | `docs/runbooks/LOCAL-DEV.md` said the refresh was "not yet asked for by any screen" | B, **closed** | Corrected in this package |
 | PR #78's body says "four viewports with JavaScript on and off" and "tested with a throwing fetch" | C (record) | It overstates the evidence; this document is correct (X1, X4) |
@@ -256,6 +257,7 @@ No caveat is class A.
 | Q4 | I-2 (a foreign key) | `tests/integration/openings.test.ts` › the P3 scene (Sam's private waiting task makes Sam's Saturday opening `…:1300-1930:task:{samPrivateTask}`) | `respondToInsight(h.alex, samKey, 'dismissed', 'forward')` and `(…, 'today')` → `not_eligible`; no `insight_response` row; audit count unchanged |
 | Q5 | X6 (first run) | `weather-screens.test.ts`: archive every calendar for Alex (no live calendar) and write a fresh forecast | `composeToday`'s state is `first_run`; the HTML has the weather sentence and one credit link and no `li[data-insight^="open_window"]`; Forward Week has its phrases and credit line and no openings |
 | Q6 | 4-1, X4, X5, E-1 | `tests/e2e/weather.spec.ts`: run the X4 Today and Forward no-JS tests at each of `VIEWPORTS`; in "X5 at {name}" loop the 44px check over `[today.page, week.page]` (moved before `today.context.close()`) | The same assertions at all four viewports |
+| Q8 | W18, P5 (test reliability) | `tests/integration/weather.test.ts` › `clean()`: match each coordinate leak only where it is not part of a longer number or a time, e.g. `new RegExp('(?<![\\d:.])' + escape(leak) + '(?!\\d)')` for the numeric entries (the URL and key entries stay substring matches) | An export containing `"…T23:34:41.295Z"` passes; one containing `-41.29` or `41.29,` still fails (a mutation planting the coordinate is still caught) |
 
 Q7, the scenario screenshot set, is met by walker B's screenshots (§4).
 
@@ -292,11 +294,11 @@ M7 is fully accepted only when both technical and operational acceptance are rec
 
 ## 11. Recommendation
 
-**Accept M7 on synthetic data after targeted corrections (B), subject to the owner's sign-off.** Nothing in the code breaks the contract; every §10.1 criterion cites tests, and criterion 13 cites the owner's screenshot judgement. The weak rows are named, each with a small test (Q1–Q6) the owner may approve.
+**Accept M7 on synthetic data after targeted corrections (B), subject to the owner's sign-off.** Nothing in the code breaks the contract; every §10.1 criterion cites tests, and criterion 13 cites the owner's screenshot judgement. The weak rows are named, each with a small test (Q1–Q6) the owner may approve; Q8 makes one redaction test immune to a timestamp coincidence.
 
 Sign-off means the owner:
 
-1. approves or declines Q1–Q6;
+1. approves or declines Q1–Q6 and Q8;
 2. confirms the two owner decisions in §8;
 3. approves the screenshots for criterion 13;
 4. accepts the ADR text as the review record for criterion 14.

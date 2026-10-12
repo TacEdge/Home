@@ -301,6 +301,7 @@ Q7 (the scenario screenshot set) is satisfied without a test: walker B's 100 syn
 - **5-1** is met by this commit (the acceptance document, this matrix, DEPLOY §E 20–22 and the environment rows).
 - **Q7** is met by walker B's screenshots for owner review, at three viewports (phone, tablet-portrait, desktop), in the session scratchpad and never committed, as in M6.
 - **Q1–Q6** are recorded as targeted evidence corrections for the owner's approval (§6), not implemented.
+- **Q8** (found on this package's own CI, `5aac2ee`): the W18/P5 redaction scan in `tests/integration/weather.test.ts` treats `41.29` as a leak anywhere, so an export timestamp such as `…T23:34:41.295Z` fails it by chance. Not a leak; the fix and its assertion are in `M7-ACCEPTANCE.md` §8.
 - **LOCAL-DEV.md**'s weather paragraph said the refresh was "not yet asked for by any screen"; it has been mounted on Today and Forward Week since PR #78. Corrected in this commit (documentation).
 - **Evening sentence.** Contract §4.4's example "Tomorrow: looks dry until midday, then showers possible." is the two-run shape of §5.2's `weather.tomorrow` template; the as-built "Rain likely tomorrow." is its one-run shape ("{Band} tomorrow."). Both are §5.2's; the contract is not changed.
 
