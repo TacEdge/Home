@@ -2,7 +2,7 @@
 
 Status: **Accepted** (owner, 2026-10-11). The owner approved decisions D1–D19 as recommended, with five amendments (§41; contract §12.4). This takes effect when PR #70 (Package 0) merges. The contract is `docs/m7/M7-BUILD-CONTRACT.md`. Decisions marked "Approved — owner decision D*n* (2026-10-11)" are listed, with the options weighed, in contract §12.2.
 
-- **Implementation:** Package 0 merged (PR #70). Package 1a merged (PR #71; `0008_weather_forecast` run in Production and Preview). Package 1b merged (PR #72). Package 2 merged (PR #75; §44). Package 3, openings, is in review (§45). Nothing else is built (see "Implementation" below).
+- **Implementation:** Package 0 merged (PR #70). Package 1a merged (PR #71; `0008_weather_forecast` run in Production and Preview). Package 1b merged (PR #72). Package 2 merged (PR #75; §44). Package 3 merged (PR #76; §45). Package 4 merged (PR #78; §46). Package 5 (acceptance assessment) is in review (§47, `docs/m7/M7-ACCEPTANCE.md`); M7 is technically accepted only on the owner's sign-off. Nothing else is built (see "Implementation" below).
 
 ## Context
 
@@ -446,7 +446,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
       - Order uses the stretch's start (identity), not the shown start, so the order does not change as `now` moves.
       - Because the engine sees only what the reader can see, an item never carries a person the reader cannot see; the engine still ignores any such id rather than trusting it.
 
-### Package 3: openings (for review with its PR)
+### Package 3: openings (merged, PR #76)
 
 45. **Built as §29–§35 and contract §5.6–§5.8 describe; no decision changed.** No component, page or screen change, weather card, Kev change, calendar write, schema, migration, dependency or Production setting. Openings are derived, keyed and respondable, but **not presented**: no opening is listed or counted on any screen until Package 4 (contract §2.1), by the owner-approved flag `OPENINGS_LISTED = false` (below).
     - **Engine.** `src/domain/engines/insights/openings.ts`, pure (no db, network, clock or LLM; `now` injected): `openings({ now, timeZone, window, gaps, forecast, daylight, tasks, projects })`. Every input is injected: the gap engine's household gaps and coverage over the window, the cached forecast with its fetch time (its freshness is checked here, §5.1), daylight per date (none without a location), and the reader's own open tasks and projects from the authorised read. Rules `open_window.plain` and `open_window.task`; constants `OPENING_MIN_MINUTES = 120`, `OPENING_DAYS` (Today 2, Forward Week 7), `OPENINGS_SHOWN` (Today 1, Forward Week 2), `MATCHED_NEEDS` (`dry_weather`, `daylight`) and `OPENING_LIMIT`, the fixed limit sentence.
@@ -475,7 +475,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
       - `respondToInsight` reads the forecast row once for every key, not only for an opening's: the eligibility read is one read for every family.
       - `hoursCovering` (Package 1b) checks a span by counting the stored hours inside it, so it assumes the cached hours are consecutive and unique, as the cache writes them.
 
-### Package 4: the screens (for review with its PR)
+### Package 4: the screens (merged, PR #78)
 
 46. **Weather and openings are on Today and Forward Week; no decision changed, and the copy is as §4.3 of the contract wrote it.** No provider, schema, migration, dependency, Kev change, calendar write or Production setting. `OPENINGS_LISTED` is **flipped to `true`** (`src/domain/insights/today.ts`), so openings are listed on Today (one, the earliest without a response, after every other family) and Forward Week (two, after `data_health`), and on no other surface; identity, ranking, caps, eligibility and `respondToInsight` are Package 3's, unchanged.
     - **One forecast read per page.** Each page reads the cache once, as the adult (`readForecast`), and hands the same read to its words and to its openings (`ReaderInsightsInput.forecast`, `forwardInsights(…, forecast)`; `openingWeatherFrom` is the pure half of `readOpeningWeather`). The query count is Package 3's, constant in what is recorded. Month, Season and a person's page read no forecast, so their output is byte-identical with or without weather. The compositions are now `src/app/(home)/today/compose.ts` and `…/forward/compose.ts` (the pages render them), so the integration tests compose and render exactly what a page does; `loadAgenda` takes optional `deps` for that.
@@ -493,6 +493,14 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **Choices where the contract is silent.** The stale line carries no credit; a day with entries shows its phrase on the heading line and an empty day on the "Nothing recorded…" line (not one line with the label); the credit line's Why sits right-aligned under the label row; Why times say "fetched {date}, {time}" in an opening's Why and "as of {time}" in the sentence's and the credit line's; Today's Why gives each part's own hours (from `now` for the first); an opening's "Before" and "After" rows are shown only when that end is a commitment; Sky is not used.
     - **Presentation corrections (owner-approved, after review).** Temperatures read "Around 14°C." or "Between 11°C and 17°C." (not "Between 14° and 14°."); every place that dates the forecast says "Forecast as of {time}" (the Today sentence's Why, an opening's Why, the credit line's Why), never "fetched" and no plain-text "(Open-Meteo)" in the opening's Why (the credit link follows it); Today's "Why ›" sits on the sentence's line. Evidence: unit tests of the temperature helper (equal, different, equal after rounding) and the three wordings (fresh and older forecast), and a browser test on Today at the phone width, 375px and 320px that the Why summary shares the sentence's line, is 44px tall, opens to a full-width body below, with no horizontal scroll; screenshots (`weather-today-dry-phone`, `weather-today-dry-why-open-phone`) are regenerated by the spec and never committed.
     - **Known limitations.** The forecast's low and high are over the parts described, so a flat synthetic forecast reads "Around 14°C."; the browser specs depend on the fixture family's records (Football, Swimming, Paint the back fence) and archive other specs' calendars for their duration.
+
+### Package 5: acceptance (for review with its PR)
+
+47. **Assessment only; no decision changed.** No product code, test, script, configuration, schema or Production setting changes. `docs/m7/M7-ACCEPTANCE.md` and `docs/m7/M7-ACCEPTANCE-MATRIX.md` check every §2.2 package criterion, every §8.6 row and every §10.1 criterion against the assertions CI runs, on `main` at `331bf7b`; DEPLOY.md §E gains items 20–22 and the environment rows for `HOME_LAT`, `HOME_LON`, `HOME_ELEVATION` and `HOME_WEATHER_LOCATION_KEY`; LOCAL-DEV's weather paragraph is corrected (the refresh is mounted on Today and Forward Week).
+    - **Verdict:** B, accept on synthetic data after targeted corrections, subject to the owner's sign-off. No row is FAIL and no caveat is class A.
+    - **Independent checks:** the HMAC test vectors recomputed with `openssl`; the daylight table recomputed with NOAA's spreadsheet algorithm (within 3 s of the committed values); the engine timings re-measured. X1's runtime check is weak because `safe-fetch` sends through `transport.request`, not `fetch`.
+    - **Proposed, not implemented** (documentation only unless the owner approves a test): Q1 the `statement_timeout` value, Q2 transport spies in X1, Q3 the privacy invariant's breadth at render, Q4 a foreign opening key, Q5 first run with a forecast, Q6 no-JS and 44px at four viewports.
+    - **For the owner:** two product decisions (openings with no weather configured; calendar-health rows ahead of openings), the screenshot approval (criterion 13, walker B's 100 synthetic screenshots, not committed) and the review record (criterion 14, this ADR's §43–§46 text).
 
 ## Consequences
 
