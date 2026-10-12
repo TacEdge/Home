@@ -19,6 +19,8 @@ import { PersonName, type PersonColour } from '@/ui/person-dot';
 import { toSortLine } from '../sort/copy';
 import { Disclosure } from '@/app/_insights/disclosure';
 import { FactsInPlace, type FactLookup } from '@/app/_insights/facts';
+import { WeatherToday } from '@/app/_weather/weather-today';
+import type { WeatherSentence, WeatherWords } from '@/domain/engines/weather';
 import { moreToDoLine, todayHeadline, todoDetail } from './copy';
 import { WorthKnowing } from '@/app/_insights/worth-knowing';
 import type { Insights } from '@/domain/engines/insights';
@@ -41,9 +43,26 @@ export type TodayViewProps = {
   worth: Pick<Insights, 'shown' | 'rest'>;
   /** Today's conflicts on their items (M6 Package 3), by `placement`. */
   marks?: ReadonlyMap<string, readonly ConflictMark[]>;
+  /** The weather sentence, or the stale line, from the cached forecast (M7); absent without weather. */
+  weather?: {
+    sentence: WeatherSentence | null;
+    stale: WeatherWords | null;
+    fetchedAt: Date | null;
+    now: Date;
+  };
+  /** The opening the credit link follows, when there is no sentence (M7 W19). */
+  creditFor?: string;
 };
 
-export function TodayView({ model, lookup, linked, worth, marks = new Map() }: TodayViewProps) {
+export function TodayView({
+  model,
+  lookup,
+  linked,
+  worth,
+  marks = new Map(),
+  weather,
+  creditFor,
+}: TodayViewProps) {
   const { headline, state } = model;
   const day = state === 'day';
   const twoColumns = day && (model.personLines.length > 0 || model.alsoToday.length > 0);
@@ -78,6 +97,7 @@ export function TodayView({ model, lookup, linked, worth, marks = new Map() }: T
           {headline.late.text}
         </p>
       ) : null}
+      {weather ? <WeatherToday {...weather} timeZone={lookup.timeZone} /> : null}
       {state === 'first_run' ? (
         <p className="mt-3">
           <Link href="/settings/calendars" className={link}>
@@ -188,7 +208,7 @@ export function TodayView({ model, lookup, linked, worth, marks = new Map() }: T
   // absent, as every empty section is, when there are none.
   const worthKnowing = (
     <div className="md:col-start-1 md:row-start-2">
-      <WorthKnowing shown={worth.shown} rest={worth.rest} lookup={lookup} />
+      <WorthKnowing shown={worth.shown} rest={worth.rest} lookup={lookup} creditFor={creditFor} />
     </div>
   );
 

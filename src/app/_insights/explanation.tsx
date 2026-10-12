@@ -7,6 +7,7 @@ import type { Insight } from '@/domain/engines/insights';
 import { clockOf, isoDateInZone, longDate } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
 import { eventRow, refreshFailed, updated, when, type FactLookup } from './facts';
+import { OpeningExplanation } from './opening-explanation';
 
 // Why HOME says an insight (M5 contract §4.4, ADR 0008 §33): its rule in
 // one plain sentence, from the numbers the rule compared, then the records
@@ -19,6 +20,7 @@ const of = <K extends Fact['kind']>(facts: readonly Fact[], kind: K) =>
 
 export function InsightExplanation({ insight, lookup }: { insight: Insight; lookup: FactLookup }) {
   if (insight.conflict) return <ConflictExplanation conflict={insight.conflict} lookup={lookup} />;
+  if (insight.opening) return <OpeningExplanation opening={insight.opening} lookup={lookup} />;
   const { facts, basis } = insight;
   const events = of(facts, 'event')
     .map((f) => eventRow(f, lookup.days))

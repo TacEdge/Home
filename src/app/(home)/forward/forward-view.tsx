@@ -24,9 +24,21 @@ export type ForwardViewProps = {
   /** Week's conflicts on their rows, by `placement`. */
   marks: ReadonlyMap<string, readonly ConflictMark[]>;
   returnTo: string;
+  /** Week's day phrases by day, and the forecast they come from (M7); absent without them. */
+  weather?: { phrases: ReadonlyMap<string, string>; fetchedAt: Date; now: Date };
+  /** The opening the credit link follows, when there are no phrases (M7 W19). */
+  creditFor?: string;
 };
 
-export function ForwardView({ model, lookup, worth, marks, returnTo }: ForwardViewProps) {
+export function ForwardView({
+  model,
+  lookup,
+  worth,
+  marks,
+  returnTo,
+  weather,
+  creditFor,
+}: ForwardViewProps) {
   const { headline } = model;
   // A calendar Worth knowing already speaks about is not listed again under
   // the headline's facts: its health is said once (as on Today).
@@ -93,10 +105,17 @@ export function ForwardView({ model, lookup, worth, marks, returnTo }: ForwardVi
           id="forward-worth"
           surface="forward"
           returnTo={returnTo}
+          creditFor={creditFor}
         />
       </div>
       <div className="md:col-start-2 md:row-span-4 md:row-start-1">
-        <ComingUp model={model} lookup={lookup} marks={marks} returnTo={returnTo} />
+        <ComingUp
+          model={model}
+          lookup={lookup}
+          marks={marks}
+          returnTo={returnTo}
+          weather={weather}
+        />
       </div>
       <div className="md:col-start-1 md:row-start-3">
         <TheUsual usual={model.usual} lookup={lookup} />

@@ -9,6 +9,11 @@ import { insightsFor, insightsInput } from '@/domain/insights/today';
 import { conflictPlacements, today } from '@/domain/engines/today';
 import { env, realDataGateOpen } from '@/lib/env';
 import { addDays, isoDateInZone } from '@/lib/dates';
+import { openingWeatherFrom } from '@/domain/insights/openings';
+import { readForecast } from '@/domain/weather/service';
+import { staleSentence, todaySentence, tomorrowSentence } from '@/domain/engines/weather';
+import { RefreshWeather } from '@/app/_weather/refresh-weather';
+import { creditOpeningKey } from '@/app/_weather/credit-key';
 import { requireActor } from '@/trust/session';
 import type { FactLookup } from '@/app/_insights/facts';
 import { TodayView } from './today-view';
@@ -46,10 +51,26 @@ export default async function TodayPage() {
     to: addDays(date, LOOKAHEAD_DAYS),
   });
   const placed = conflictPlacements(model);
+  // The cached forecast, read once (no network): the sentence below and the
+  // openings in Worth knowing both come from this one read (M7 contract §3.8).
+  const forecastRead = await readForecast(actor, { now });
+  const forecast = openingWeatherFrom(forecastRead).forecast;
+  const sentence =
+    model.state === 'evening'
+      ? tomorrowSentence(forecast, now, timeZone)
+      : todaySentence(forecast, now, timeZone);
+  const stale =
+    !sentence && forecastRead.configured && forecastRead.freshness === 'unusable'
+      ? staleSentence(forecastRead.fetchedAt, now, timeZone)
+      : null;
   // Worth knowing: the same records, the reader's own responses applied (one more query).
   const worth = await insightsFor(
     actor,
-    insightsInput(records, agenda.days, now, timeZone, new Set(), { conflicts: found, placed }),
+    insightsInput(records, agenda.days, now, timeZone, new Set(), {
+      conflicts: found,
+      placed,
+      forecast: forecastRead,
+    }),
   );
   const marks = conflictMarks(worth, worth.responded, placed, timeZone);
 
@@ -65,12 +86,28 @@ export default async function TodayPage() {
   };
   const people = [...agenda.people.values()];
   const linked = !realDataGateOpen() || people.some((p) => p.userId === actor.userId);
-  const stale = agenda.records.calendars.some((c) => c.stale && c.archivedAt === null);
+  const calendarStale = agenda.records.calendars.some((c) => c.stale && c.archivedAt === null);
+  // After render, and only when the server found a refresh due (M7 contract §5.1).
+  const askWeather = forecastRead.configured && forecastRead.refreshDue && realDataGateOpen();
 
   return (
     <>
-      {stale ? <RefreshOnUse /> : null}
-      <TodayView model={model} lookup={lookup} linked={linked} worth={worth} marks={marks} />
+      {calendarStale ? <RefreshOnUse /> : null}
+      {askWeather ? <RefreshWeather /> : null}
+      <TodayView
+        model={model}
+        lookup={lookup}
+        linked={linked}
+        worth={worth}
+        marks={marks}
+        weather={{
+          sentence,
+          stale,
+          fetchedAt: forecastRead.configured ? forecastRead.fetchedAt : null,
+          now,
+        }}
+        creditFor={sentence ? undefined : creditOpeningKey(worth)}
+      />
     </>
   );
 }

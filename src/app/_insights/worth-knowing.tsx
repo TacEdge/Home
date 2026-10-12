@@ -1,3 +1,4 @@
+import { CreditLink } from '@/app/_weather/credit';
 import type { Insight } from '@/domain/engines/insights';
 import { Label } from '@/ui/page';
 import { Disclosure } from './disclosure';
@@ -29,6 +30,7 @@ export function WorthKnowing({
   id = 'today-worth',
   surface = 'today',
   returnTo = '/today',
+  creditFor,
 }: {
   shown: readonly Insight[];
   rest: readonly Insight[];
@@ -37,6 +39,12 @@ export function WorthKnowing({
   id?: string;
   surface?: Surface;
   returnTo?: string;
+  /**
+   * The key of the opening the credit link follows (M7 contract §4.1, W19):
+   * set only when the page has no weather sentence or credit line of its own
+   * and this opening cites the forecast.
+   */
+  creditFor?: string;
 }) {
   const where = { surface, returnTo };
   if (shown.length === 0) return null;
@@ -45,7 +53,13 @@ export function WorthKnowing({
       <Label id={id}>Worth knowing</Label>
       <ul className="border-line border-b">
         {shown.map((i) => (
-          <InsightRow key={i.key} insight={i} lookup={lookup} {...where} />
+          <InsightRow
+            key={i.key}
+            insight={i}
+            lookup={lookup}
+            credit={i.key === creditFor}
+            {...where}
+          />
         ))}
       </ul>
       {rest.length > 0 ? (
@@ -57,6 +71,7 @@ export function WorthKnowing({
                 insight={i}
                 lookup={lookup}
                 full={n < FOLDED_FULL}
+                credit={i.key === creditFor}
                 {...where}
               />
             ))}
@@ -71,12 +86,14 @@ function InsightRow({
   insight,
   lookup,
   full = true,
+  credit = false,
   surface,
   returnTo,
 }: {
   insight: Insight;
   lookup: FactLookup;
   full?: boolean;
+  credit?: boolean;
   surface: Surface;
   returnTo: string;
 }) {
@@ -93,6 +110,11 @@ function InsightRow({
         />
         <span className="min-w-0 break-words">{insight.text}</span>
       </p>
+      {credit ? (
+        <div className="pl-5">
+          <CreditLink />
+        </div>
+      ) : null}
       {full ? (
         <div className="flex flex-wrap items-start gap-x-6 pl-5">
           <Disclosure label="Why" className="open:basis-full">

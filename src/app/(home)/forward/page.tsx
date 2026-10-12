@@ -14,7 +14,12 @@ import { conflictMarks } from '@/domain/engines/insights';
 import { forwardInsights } from '@/domain/insights/forward';
 import { conflictsOver, forwardConflicts } from '@/domain/insights/conflicts';
 import { addDays, isoDateInZone } from '@/lib/dates';
-import { env } from '@/lib/env';
+import { env, realDataGateOpen } from '@/lib/env';
+import { openingWeatherFrom } from '@/domain/insights/openings';
+import { readForecast } from '@/domain/weather/service';
+import { dayPhrase } from '@/domain/engines/weather';
+import { RefreshWeather } from '@/app/_weather/refresh-weather';
+import { creditOpeningKey } from '@/app/_weather/credit-key';
 import { requireActor } from '@/trust/session';
 import { ForwardView } from './forward-view';
 
@@ -46,6 +51,10 @@ export default async function ForwardPage({
   };
   const coverage = { from: today, to: addDays(today, 89) };
   const found = conflictsOver(records, agenda.days, now, timeZone, coverage);
+  // Week alone shows the weather (M7 contract §4.2): its day phrases and its
+  // openings come from one read of the cached forecast, never the network.
+  // Month and Season read none, and say nothing of it.
+  const forecastRead = horizon === 'week' ? await readForecast(actor, { now }) : null;
   // Worth knowing and the reader's responses: the one more query.
   const worth = await forwardInsights(
     actor,
@@ -56,6 +65,8 @@ export default async function ForwardPage({
     horizon,
     HORIZON_DAYS[horizon],
     found,
+    undefined,
+    forecastRead ?? undefined,
   );
   const current = found.filter((c) => !worth.responded.has(c.key));
   const input = todayInput(agenda, now, timeZone, 0);
@@ -83,13 +94,32 @@ export default async function ForwardPage({
     ),
     timeZone,
   };
-  const stale = agenda.records.calendars.some((c) => c.stale && c.archivedAt === null);
+  const calendarStale = agenda.records.calendars.some((c) => c.stale && c.archivedAt === null);
+  const forecast = forecastRead ? openingWeatherFrom(forecastRead).forecast : null;
+  const phrases = new Map<string, string>();
+  if (forecast)
+    for (const unit of model.units) {
+      const words = unit.unit === 'day' ? dayPhrase(forecast, unit.from, now, timeZone) : null;
+      if (words) phrases.set(unit.from, words.text);
+    }
+  const askWeather = !!forecastRead?.configured && forecastRead.refreshDue && realDataGateOpen();
   const returnTo = horizon === 'week' ? '/forward' : `/forward?h=${horizon}`;
 
   return (
     <>
-      {stale ? <RefreshOnUse /> : null}
-      <ForwardView model={model} lookup={lookup} worth={worth} marks={marks} returnTo={returnTo} />
+      {calendarStale ? <RefreshOnUse /> : null}
+      {askWeather ? <RefreshWeather /> : null}
+      <ForwardView
+        model={model}
+        lookup={lookup}
+        worth={worth}
+        marks={marks}
+        returnTo={returnTo}
+        weather={
+          phrases.size > 0 && forecast ? { phrases, fetchedAt: forecast.fetchedAt, now } : undefined
+        }
+        creditFor={phrases.size > 0 ? undefined : creditOpeningKey(worth)}
+      />
     </>
   );
 }
