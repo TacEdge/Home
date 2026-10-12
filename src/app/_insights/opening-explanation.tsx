@@ -100,7 +100,9 @@ export function OpeningExplanation({
   lookup: FactLookup;
 }) {
   const zone = lookup.timeZone;
-  const people = o.people.map((id) => lookup.people.get(id)).filter((p) => p !== undefined);
+  // In the order People lists them, so the line reads the same on every page.
+  const named = new Set(o.people);
+  const people = [...lookup.people.values()].filter((p) => named.has(p.id));
   const before = o.edges.from === 'commitment' && o.gap.before ? o.gap.before : null;
   const after = o.edges.to === 'commitment' && o.gap.after ? o.gap.after : null;
   const beforeRow = before ? commitmentRow(before, lookup) : null;
