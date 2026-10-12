@@ -419,6 +419,11 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
       - `idle_in_transaction_session_timeout` was proven by a real 25-second wait against local Postgres 16; Neon's pooler behaviour is Package 5's to observe in Preview.
       - Preview has no location or key yet: DEPLOY.md §E items 20–22 are Package 5's.
       - `HOME_ELEVATION`'s range (−500 to 9,000 m) and treating a lone coordinate as `invalid` are this package's choices; the contract is silent.
+    - **Owner decisions at review (2026-10-12):**
+      - **"Windy at times." on tomorrow's sentence is an approved wording interpretation.** Contract §5.2 states it for `weather.today` only; `weather.tomorrow` adds it under the same rule (§17: windy is said when any hour's gusts reach 50 km/h). Package 4's screenshot approval still covers the final copy.
+      - **A lone `HOME_LAT` or `HOME_LON` is `invalid`, not `absent`.** Both fail closed in the same way: no request, no read, no forecast words, no error; only the boot-line word differs from W12's literal wording.
+      - **Migration-first evidence:** `0008` ran in Preview (https://github.com/TacEdge/Home/actions/runs/38185992836) and Production (https://github.com/TacEdge/Home/actions/runs/38125452393) before this package merged.
+    - **Follow-ups recorded, outside this package:** issue #73 (the refresh route logs no structured line for an error raised outside the service) and issue #74 (no `pool.on('error')` for idle pooled connections; pre-existing). The `src/db/create.ts` comment was corrected here: inside Next.js an unhandled client error is logged raw by the framework rather than exiting the process.
 
 ## Consequences
 
