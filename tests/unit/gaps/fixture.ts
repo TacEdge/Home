@@ -2,6 +2,7 @@ import { agenda, type AgendaEventInput, type AgendaTaskInput } from '@/domain/en
 import {
   gaps,
   HOUSEHOLD,
+  scheduledTasks,
   type GapPerson,
   type GapScope,
   type Gaps,
@@ -58,7 +59,11 @@ export type Run = {
   calendars?: TodayCalendar[];
 };
 
-/** The engine's input for a run: the shared agenda placed over the agenda's range, as a page will. */
+/**
+ * The engine's input for a run, as the composition (`gapsOver`) builds it: the
+ * shared agenda placed over the agenda's range, and the same task records
+ * selected as the agenda selects scheduled tasks, with their full windows.
+ */
 export function inputOf(o: Run): GapsInput {
   const now = o.now ?? WED_0703;
   const range = o.range ?? { from: '2026-10-14', to: '2026-10-31' };
@@ -84,7 +89,7 @@ export function inputOf(o: Run): GapsInput {
     agendaRange,
     days,
     people: people.map((p) => ({ id: p.id, inHousehold: p.inHousehold })),
-    tasks: tasks.map((t) => ({ id: t.id, assigneePersonId: t.assigneePersonId })),
+    tasks: scheduledTasks(tasks),
     calendars: o.calendars ?? [healthy(now)],
     scopes: o.scopes ?? ALL_SCOPES,
   };

@@ -59,6 +59,12 @@ const timed = (start: string, end: string) => ({
 const day = (d: string, from: string, to: string) =>
   timed(`${d}T${from}:00+13:00`, `${d}T${to}:00+13:00`);
 const read = (actor: UserActor) => readGaps(actor, NOW, ZONE, deps, DAYS);
+// Saturday 24 and Sunday 25 October, 07:03 at home: a range starting on each.
+const SAT_24 = new Date('2026-10-24T07:03:00+13:00');
+const SUN_25 = new Date('2026-10-25T07:03:00+13:00');
+const readFrom = (actor: UserActor, now: Date) => readGaps(actor, now, ZONE, deps, DAYS);
+/** One date's gaps, byte for byte (stretch, shown span, key, commitments, facts). */
+const dateBytes = (r: Gaps, date: string) => JSON.stringify(r.gaps.filter((g) => g.date === date));
 /** "08:00–09:00 and 10:00–20:00": a scope's stretches on a date, as the matrix writes them. */
 const said = (r: Gaps, date: string, scope = HOUSEHOLD) =>
   r.gaps
@@ -260,6 +266,56 @@ describe('G rows through the real services', () => {
   });
 });
 
+describe('a scheduled task that began before the range (§5.4 “over its window”)', () => {
+  it('D: an overnight task Saturday 24 22:00 to Sunday 25 10:00 for Milo, through createTask: read from Sunday, household and Milo 10:00–20:00 with the same keys and gaps as read from Saturday; no extra query', async () => {
+    // Not vacuous: before the task, Sunday is open from 08:00 for both scopes.
+    for (const scope of [HOUSEHOLD, id.milo])
+      expect(said(await readFrom(h.alex, SUN_25), '2026-10-25', scope)).toBe('08:00–20:00');
+    const overnight = await createTask(
+      h.sam,
+      {
+        title: 'Overnight job',
+        assigneePersonId: id.milo,
+        scheduled: { startsAt: '2026-10-24T22:00:00+13:00', endsAt: '2026-10-25T10:00:00+13:00' },
+      },
+      deps,
+    );
+    for (const actor of [h.sam, h.alex]) {
+      const sunday = await readFrom(actor, SUN_25);
+      const saturday = await readFrom(actor, SAT_24);
+      // The agenda from Sunday does not place it (it starts on Saturday): the
+      // engine reads its window from the task record instead.
+      expect(
+        sunday.days
+          .flatMap((d) => d.items)
+          .some((i) => i.kind === 'task_scheduled' && i.taskId === overnight.id),
+      ).toBe(false);
+      for (const scope of [HOUSEHOLD, id.milo]) {
+        expect(said(sunday, '2026-10-25', scope)).toBe('10:00–20:00');
+        expect(said(saturday, '2026-10-25', scope)).toBe('10:00–20:00');
+        const key = `gap:${scope}:2026-10-25:1000-2000`;
+        expect(sunday.gaps.find((g) => g.scope === scope && g.date === '2026-10-25')?.key).toBe(
+          key,
+        );
+        expect(sunday.gaps.find((g) => g.key === key)!.before).toEqual({
+          kind: 'task',
+          id: overnight.id,
+        });
+      }
+      expect(said(sunday, '2026-10-25', id.isla)).toBe('08:00–20:00');
+      // The whole of Sunday, every scope, byte for byte, wherever the range starts.
+      expect(dateBytes(sunday, '2026-10-25')).toBe(dateBytes(saturday, '2026-10-25'));
+    }
+    // The composition still adds no query to the agenda read.
+    let q = queries;
+    await readAgendaInputs(h.alex, deps);
+    const agendaQueries = queries - q;
+    q = queries;
+    await readFrom(h.alex, SUN_25);
+    expect(queries - q).toBe(agendaQueries);
+  });
+});
+
 describe('P1: the privacy invariant for gaps and coverage (contract §3.5, §8.2)', () => {
   it('Sam’s private event, all-day event, scheduled task, person and stale calendar leave Alex’s gaps, keys, order, facts and coverage byte-identical, and change Sam’s', async () => {
     const before = { alex: await read(h.alex), sam: await read(h.sam) };
@@ -354,6 +410,37 @@ describe('P1: the privacy invariant for gaps and coverage (contract §3.5, §8.2
     expect(said(after.sam, '2026-10-17', privatePerson)).toBe('08:00–16:00 and 17:00–20:00');
     expect(after.sam.coverage.rule).toBe('coverage.partial');
     expect(after.sam.coverage.calendars.find((c) => c.id === staleCalendar)?.health).toBe('stale');
+    expect(bytes(after.sam)).not.toBe(bytes(before.sam));
+  });
+
+  it('Sam’s private overnight scheduled task (Saturday 24 22:00 to Sunday 25 11:00), read from Sunday: Alex’s gaps, keys, facts and coverage byte-identical; Sam’s change', async () => {
+    const before = { alex: await readFrom(h.alex, SUN_25), sam: await readFrom(h.sam, SUN_25) };
+    // Not vacuous: both adults have Sunday gaps for the household and for Sam.
+    for (const r of [before.alex, before.sam]) {
+      expect(said(r, '2026-10-25')).toBe('10:00–20:00');
+      expect(said(r, '2026-10-25', id.sam)).toBe('08:00–20:00');
+    }
+    const privateOvernight = await createTask(
+      h.sam,
+      {
+        title: 'Private overnight job',
+        visibility: 'private',
+        assigneePersonId: id.sam,
+        scheduled: { startsAt: '2026-10-24T22:00:00+13:00', endsAt: '2026-10-25T11:00:00+13:00' },
+      },
+      deps,
+    );
+    const after = { alex: await readFrom(h.alex, SUN_25), sam: await readFrom(h.sam, SUN_25) };
+    expect(after.alex.gaps).toEqual(before.alex.gaps);
+    expect(after.alex.coverage).toEqual(before.alex.coverage);
+    expect(bytes(after.alex)).toBe(bytes(before.alex));
+    expect(bytes(after.alex)).not.toContain(privateOvernight.id);
+    // Sam's own: the private window blocks Sam and the household until 11:00.
+    expect(said(after.sam, '2026-10-25', id.sam)).toBe('11:00–20:00');
+    expect(said(after.sam, '2026-10-25')).toBe('11:00–20:00');
+    expect(
+      after.sam.gaps.find((g) => g.key === `gap:${id.sam}:2026-10-25:1100-2000`)!.before,
+    ).toEqual({ kind: 'task', id: privateOvernight.id });
     expect(bytes(after.sam)).not.toBe(bytes(before.sam));
   });
 });

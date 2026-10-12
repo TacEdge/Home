@@ -22,8 +22,16 @@ import {
 // (the templates are Package 3's). Pure: the caller reads every record
 // through the domain services as the reader (so visibility, archive and
 // sensitivity are already applied), runs the shared agenda over at least the
-// range and passes it in, with the reader's calendars. No I/O, no clock
-// (`now` is injected), stable sorts with explicit tie-breaks.
+// range and passes it in, with the reader's scheduled tasks and calendars.
+// No I/O, no clock (`now` is injected), stable sorts with explicit tie-breaks.
+//
+// Events come from the agenda's days (it places an occurrence on every home
+// day it covers). Scheduled tasks do not: the agenda places a task only on the
+// home day its window starts, so a window that began before the range would
+// never reach a range's days. The engine takes each scheduled task's full
+// window from `tasks` instead (`scheduledTasks` selects them exactly as the
+// agenda does) and blocks every requested date the window covers, so a
+// date's stretches do not depend on where the range starts.
 //
 // What blocks a stretch (§5.4; D11, D12):
 //   a person's scope   the timed occurrences they are on (attending or
@@ -61,8 +69,42 @@ export type GapScope = string;
 
 /** A person the reader can see. Only these can be in a scope. */
 export type GapPerson = { id: string; inHousehold: boolean };
-/** Who an open task is assigned to: the agenda's scheduled items carry no assignee. */
-export type GapTask = { id: string; assigneePersonId: string | null };
+/** A scheduled task the reader can see: its full window and who it is assigned to. */
+export type GapTask = {
+  id: string;
+  assigneePersonId: string | null;
+  scheduledStartsAt: Date;
+  scheduledEndsAt: Date;
+};
+
+/** A task record as the reader's agenda read gives it (the fields selection needs). */
+export type GapTaskRecord = {
+  id: string;
+  status: string;
+  assigneePersonId: string | null;
+  scheduledStartsAt?: Date | null;
+  scheduledEndsAt?: Date | null;
+};
+
+/**
+ * The tasks the shared agenda treats as scheduled (agenda.ts: open, with both
+ * ends of a window), from the same authorised task records the agenda was
+ * given, so visibility and archive are the read's and nothing else is added
+ * or dropped. Only where it places them differs: the gap engine uses the
+ * whole window.
+ */
+export function scheduledTasks(tasks: readonly GapTaskRecord[]): GapTask[] {
+  const out: GapTask[] = [];
+  for (const t of tasks)
+    if (t.status === 'open' && t.scheduledStartsAt && t.scheduledEndsAt)
+      out.push({
+        id: t.id,
+        assigneePersonId: t.assigneePersonId,
+        scheduledStartsAt: t.scheduledStartsAt,
+        scheduledEndsAt: t.scheduledEndsAt,
+      });
+  return out;
+}
 
 /** A visible calendar's freshness, as M5's rules read it, plus "never succeeded" (§5.5). */
 export type CalendarHealth = 'ok' | 'failed' | 'stale' | 'never';
@@ -118,11 +160,11 @@ export type GapsInput = {
    * which absent days were loaded and empty. It must hold the whole range.
    */
   agendaRange: { from: IsoDate; to: IsoDate };
-  /** The shared agenda's days over at least the range. */
+  /** The shared agenda's days over at least the range (its scheduled-task items are not read). */
   days: readonly AgendaDay[];
   /** The people the reader can see. */
   people: readonly GapPerson[];
-  /** The reader's open tasks, for who a scheduled one is assigned to. */
+  /** The reader's scheduled tasks (`scheduledTasks`), each with its full window and assignee. */
   tasks: readonly GapTask[];
   /** The calendars the reader can see (archived ones are ignored). */
   calendars: readonly TodayCalendar[];
@@ -245,8 +287,6 @@ export function gaps(input: GapsInput): Gaps {
     return { people: on, household: [...on].some((id) => household.has(id)) };
   };
 
-  const assignee = new Map(input.tasks.map((t) => [t.id, t.assigneePersonId]));
-  const seenTasks = new Set<string>();
   for (const d of input.days)
     for (const i of d.items) {
       if (i.kind === 'event' && inRange(d.date)) {
@@ -265,28 +305,36 @@ export function gaps(input: GapsInput): Gaps {
             to: i.endsAt.getTime(),
             event: true,
           });
-      } else if (i.kind === 'task_scheduled' && !seenTasks.has(i.taskId)) {
-        // The agenda places a task on the day its window starts, which may be
-        // before the range; it blocks every home day its window covers.
-        seenTasks.add(i.taskId);
-        const from = i.startsAt.getTime();
-        const to = i.endsAt.getTime();
-        if (to <= from) continue;
-        const fact: CommitmentFact = { kind: 'task', id: i.taskId };
-        const who = assignee.get(i.taskId) ?? null;
-        const c = {
-          fact,
-          ref: refOf(fact),
-          ...whoIsOn(who ? [{ personId: who, role: 'responsible' }] : []),
-        };
-        for (
-          let date = homeDate(from), last = homeDate(to - 1);
-          date <= last;
-          date = addDays(date, 1)
-        )
-          if (inRange(date)) recordsOn(date).timed.push({ ...c, from, to, event: false });
       }
     }
+
+  // Scheduled tasks from their records, not the agenda's placement: each
+  // blocks every requested home date its window covers, from the date it
+  // starts to the date before it ends (an end at midnight does not reach the
+  // next), wherever the range starts. Counted once, however often it is given.
+  const seenTasks = new Set<string>();
+  for (const t of input.tasks) {
+    if (seenTasks.has(t.id)) continue;
+    seenTasks.add(t.id);
+    const from = t.scheduledStartsAt.getTime();
+    const to = t.scheduledEndsAt.getTime();
+    if (to <= from) continue;
+    const fact: CommitmentFact = { kind: 'task', id: t.id };
+    const who = t.assigneePersonId;
+    const c = {
+      fact,
+      ref: refOf(fact),
+      ...whoIsOn(who ? [{ personId: who, role: 'responsible' }] : []),
+    };
+    const first = homeDate(from);
+    const last = homeDate(to - 1);
+    for (
+      let date = first < range.from ? range.from : first;
+      date <= last && date <= range.to;
+      date = addDays(date, 1)
+    )
+      recordsOn(date).timed.push({ ...c, from, to, event: false });
+  }
 
   const peopleFacts = (scope: GapScope): GapFact[] =>
     (scope === HOUSEHOLD ? [...household].sort() : [scope]).map((id) => ({ kind: 'person', id }));

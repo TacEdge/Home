@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Deps } from '../common/write';
 import { agenda, type AgendaDay } from '../engines/agenda';
-import { gaps, HOUSEHOLD, type GapScope, type Gaps } from '../engines/gaps';
+import { gaps, HOUSEHOLD, scheduledTasks, type GapScope, type Gaps } from '../engines/gaps';
 import { readAgendaInputs, type AgendaInputs } from '../events/agenda-inputs';
 import { addDays, isoDateInZone, type IsoDate } from '@/lib/dates';
 import type { UserActor } from '@/trust/actor';
@@ -14,7 +14,13 @@ import type { UserActor } from '@/trust/actor';
 // (§3.5), so nothing computed for one adult can reach the other. No insight
 // family, wording or response here: openings are Package 3's.
 
-/** The engine run over the agenda the caller already read. Pure. */
+/**
+ * The engine run over the agenda the caller already read. Pure. Scheduled
+ * tasks come from the same authorised task records the agenda was given
+ * (`records.tasks`, the actor-aware open-task read), selected as the agenda
+ * selects them, with their full windows: a window that began before the range
+ * still blocks the range's days. No query of its own.
+ */
 export function gapsOver(
   inputs: Pick<AgendaInputs, 'people' | 'records'>,
   days: readonly AgendaDay[],
@@ -31,7 +37,7 @@ export function gapsOver(
     agendaRange,
     days,
     people: inputs.people.map((p) => ({ id: p.id, inHousehold: p.inHousehold })),
-    tasks: inputs.records.tasks.map((t) => ({ id: t.id, assigneePersonId: t.assigneePersonId })),
+    tasks: scheduledTasks(inputs.records.tasks),
     calendars: inputs.records.calendars,
     scopes,
   });

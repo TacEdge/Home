@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { AgendaEventInput } from '@/domain/engines/agenda';
+import { agenda, type AgendaEventInput } from '@/domain/engines/agenda';
 import {
   COVERAGE_RULES,
   GAP_FLOOR_MINUTES,
@@ -9,6 +9,7 @@ import {
   GapScopeError,
   gaps,
   HOUSEHOLD,
+  scheduledTasks,
   type Gaps,
 } from '@/domain/engines/gaps';
 import { PLANNING_FROM, PLANNING_TO } from '@/domain/engines/planning';
@@ -31,6 +32,7 @@ import {
   shuffle,
   VISIBLE,
   WED_0703,
+  type GapTaskInput,
   type Run,
 } from './fixture';
 
@@ -785,6 +787,169 @@ describe('G20, G21 — determinism and keys', () => {
       expect(k.length, k).toBeLessThanOrEqual(200);
       expect(k, k).toMatch(/^gap:(household|[A-Za-z0-9-]+):\d{4}-\d{2}-\d{2}:\d{4}-\d{4}$/);
     }
+  });
+});
+
+describe('scheduled tasks from their records, over their whole window (§5.4 “over its window”)', () => {
+  const task = (
+    id: string,
+    from: string,
+    to: string,
+    assigneePersonId: string | null,
+    extra: Partial<GapTaskInput> = {},
+  ): GapTaskInput => ({
+    id,
+    title: 'Synthetic job',
+    status: 'open',
+    dueDate: null,
+    scheduledStartsAt: new Date(from),
+    scheduledEndsAt: new Date(to),
+    assigneePersonId,
+    ...extra,
+  });
+  /** Saturday 17 22:00 to Sunday 18 10:00. */
+  const overnight = (who: string | null) =>
+    task('t-overnight', at('2026-10-17', '22:00'), at('2026-10-18', '10:00'), who);
+  /** Friday 16 18:00 to Sunday 18 12:00. */
+  const multiDay = (who: string | null) =>
+    task('t-multiday', at('2026-10-16', '18:00'), at('2026-10-18', '12:00'), who);
+  const SUNDAY = { from: '2026-10-18', to: '2026-10-18' } as const;
+  const sundayOf = (r: Gaps) => JSON.stringify(r.gaps.filter((g) => g.date === '2026-10-18'));
+
+  it('A: an overnight task Saturday 17 22:00 to Sunday 18 10:00 for Milo, the range and agenda Sunday only: household and Milo 10:00–20:00 (08:00–10:00 blocked); unassigned, the household only', () => {
+    const milo = run({ range: SUNDAY, tasks: [overnight(ID.milo)] });
+    for (const scope of [HOUSEHOLD, ID.milo]) {
+      expect(said(milo, '2026-10-18', scope), scope).toBe('10:00–20:00');
+      const g = milo.gaps.find((x) => x.key === `gap:${scope}:2026-10-18:1000-2000`)!;
+      expect(g.before).toEqual({ kind: 'task', id: 't-overnight' });
+      expect(g.facts).toContainEqual({ kind: 'task', id: 't-overnight' });
+    }
+    for (const scope of [ID.isla, ID.sam, ID.alex])
+      expect(said(milo, '2026-10-18', scope), scope).toBe('08:00–20:00');
+    // No household assignee: the household's scope only.
+    const none = run({ range: SUNDAY, tasks: [overnight(null)] });
+    expect(said(none, '2026-10-18')).toBe('10:00–20:00');
+    for (const scope of [ID.milo, ID.isla, ID.sam, ID.alex])
+      expect(said(none, '2026-10-18', scope), scope).toBe('08:00–20:00');
+    // Assigned only to someone outside the household: the same as unassigned.
+    const nana = run({ range: SUNDAY, tasks: [overnight(ID.nana)] });
+    expect(JSON.stringify(nana.gaps)).toBe(JSON.stringify(none.gaps));
+  });
+
+  it('B: a multi-day task Friday 16 18:00 to Sunday 18 12:00 for Sam, read from Saturday: Saturday no gap (household and Sam); Sunday 12:00–20:00', () => {
+    const r = run({ range: { from: '2026-10-17', to: '2026-10-18' }, tasks: [multiDay(ID.sam)] });
+    for (const scope of [HOUSEHOLD, ID.sam]) {
+      expect(said(r, '2026-10-17', scope), scope).toBe('');
+      expect(said(r, '2026-10-18', scope), scope).toBe('12:00–20:00');
+    }
+    for (const scope of [ID.milo, ID.isla, ID.alex]) {
+      expect(said(r, '2026-10-17', scope), scope).toBe('08:00–20:00');
+      expect(said(r, '2026-10-18', scope), scope).toBe('08:00–20:00');
+    }
+    // Read from Sunday alone, Sunday is the same.
+    const sunday = run({ range: SUNDAY, tasks: [multiDay(ID.sam)] });
+    expect(said(sunday, '2026-10-18')).toBe('12:00–20:00');
+    expect(said(sunday, '2026-10-18', ID.sam)).toBe('12:00–20:00');
+  });
+
+  it('C: Sunday’s gaps (stretch bounds and keys) are identical whether the range starts Thursday, Friday, Saturday or Sunday, household and person scopes', () => {
+    const cases: Run['tasks'][] = [
+      [overnight(ID.milo)],
+      [overnight(null)],
+      [multiDay(ID.sam)],
+      [overnight(ID.milo), multiDay(ID.sam)],
+    ];
+    for (const tasks of cases) {
+      const from = (d: string) => run({ range: { from: d, to: '2026-10-18' }, tasks });
+      const sunday = from('2026-10-18');
+      // Not vacuous: every scope has Sunday gaps, and a task shortens at least one.
+      for (const scope of ALL_SCOPES) expect(said(sunday, '2026-10-18', scope), scope).not.toBe('');
+      expect(
+        keys(sunday).some((k) => k.includes(':2026-10-18:') && !k.endsWith(':0800-2000')),
+      ).toBe(true);
+      for (const d of ['2026-10-15', '2026-10-16', '2026-10-17'])
+        expect(sundayOf(from(d)), `${tasks!.map((t) => t.id)} from ${d}`).toBe(sundayOf(sunday));
+    }
+  });
+
+  it('a task the agenda places is counted once (no double blocking from its agenda item)', () => {
+    const r = run({
+      range: SUNDAY,
+      tasks: [task('t-one', at('2026-10-18', '10:00'), at('2026-10-18', '11:00'), ID.sam)],
+    });
+    expect(said(r, '2026-10-18', ID.sam)).toBe('08:00–10:00 and 11:00–20:00');
+    // The agenda does carry the item; the engine reads the task from the record only.
+    const input = inputOf({
+      range: SUNDAY,
+      tasks: [task('t-one', at('2026-10-18', '10:00'), at('2026-10-18', '11:00'), ID.sam)],
+    });
+    expect(input.days.flatMap((d) => d.items).some((i) => i.kind === 'task_scheduled')).toBe(true);
+    const twice = gaps({ ...input, tasks: [...input.tasks, ...input.tasks] });
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(gaps(input)));
+    // Without the record, the agenda item alone blocks nothing.
+    expect(said(gaps({ ...input, tasks: [] }), '2026-10-18', ID.sam)).toBe('08:00–20:00');
+  });
+
+  it('the scheduled tasks are exactly the ones the agenda places: open, with both ends of a window', () => {
+    const records: GapTaskInput[] = [
+      task('t-open', at('2026-10-15', '10:00'), at('2026-10-15', '11:00'), ID.sam),
+      task('t-done', at('2026-10-15', '10:00'), at('2026-10-15', '11:00'), ID.sam, {
+        status: 'done',
+      }),
+      task('t-dropped', at('2026-10-15', '10:00'), at('2026-10-15', '11:00'), null, {
+        status: 'dropped',
+      }),
+      task('t-due', at('2026-10-15', '10:00'), at('2026-10-15', '11:00'), null, {
+        scheduledStartsAt: null,
+        scheduledEndsAt: null,
+        dueDate: '2026-10-15',
+      }),
+      task('t-half', at('2026-10-15', '10:00'), at('2026-10-15', '11:00'), null, {
+        scheduledEndsAt: null,
+      }),
+      task('t-early', at('2026-10-10', '22:00'), at('2026-10-11', '09:00'), ID.milo),
+      task('t-late', at('2026-10-30', '19:00'), at('2026-11-02', '09:00'), null),
+    ];
+    const placed = agenda({ from: '2026-10-01', to: '2026-11-30', timeZone: NZ, tasks: records })
+      .flatMap((d) => d.items)
+      .flatMap((i) => (i.kind === 'task_scheduled' ? [i.taskId] : []));
+    const selected = scheduledTasks(records);
+    expect(selected.map((t) => t.id).sort()).toEqual([...placed].sort());
+    expect(selected.map((t) => t.id).sort()).toEqual(['t-early', 't-late', 't-open']);
+    // The record's own window and assignee, unchanged.
+    expect(selected.find((t) => t.id === 't-early')).toEqual({
+      id: 't-early',
+      assigneePersonId: ID.milo,
+      scheduledStartsAt: new Date(at('2026-10-10', '22:00')),
+      scheduledEndsAt: new Date(at('2026-10-11', '09:00')),
+    });
+  });
+});
+
+describe('unblocking evidence over the shown span (contract §5.4)', () => {
+  it('a person’s Why names an unassigned household timed event only when it overlaps the shown span: now Sunday 10:07, 09:00–09:30 not named, 15:00–15:30 named', () => {
+    const events = [
+      on('e-early', 'Earlier for the house', '2026-10-18', '09:00', '09:30'),
+      on('e-later', 'Later for the house', '2026-10-18', '15:00', '15:30'),
+    ];
+    const r = run({
+      events,
+      now: new Date(at('2026-10-18', '10:07')),
+      range: { from: '2026-10-18', to: '2026-10-18' },
+    });
+    const milo = r.gaps.find((g) => g.key === `gap:${ID.milo}:2026-10-18:0800-2000`)!;
+    expect(clockOf(milo.shown.from, NZ)).toBe('10:07');
+    const later = { kind: 'event', id: 'e-later', occurrenceDate: '2026-10-18' };
+    expect(milo.unblocking).toEqual([later]);
+    expect(milo.facts).toContainEqual(later);
+    expect(JSON.stringify(milo.facts)).not.toContain('e-early');
+    // The blocking rule is unchanged: both still block the household.
+    expect(said(r, '2026-10-18')).toBe('09:30–15:00 and 15:30–20:00');
+    // Before the day began, the whole stretch is shown and both are named.
+    const before = run({ events, range: { from: '2026-10-18', to: '2026-10-18' } });
+    expect(
+      before.gaps.find((g) => g.key === `gap:${ID.milo}:2026-10-18:0800-2000`)!.unblocking,
+    ).toEqual([{ kind: 'event', id: 'e-early', occurrenceDate: '2026-10-18' }, later]);
   });
 });
 
