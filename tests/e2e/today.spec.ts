@@ -276,15 +276,7 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
     await page.goto('/today');
     await expect(page.getByRole('heading', { level: 1, name: DAY })).toBeVisible();
     await expect(page.getByText('Nothing on today.')).toBeVisible();
-    // M7 Package 3: on a Friday, Saturday or Sunday, Worth knowing lists the weekend's
-    // opening ("Nothing is recorded for the household …"), the only section below the
-    // headline; on any other day there is none.
-    if (/^(Friday|Saturday|Sunday) /.test(t.long ?? '')) {
-      await expect(page.getByRole('heading', { level: 2 })).toHaveText(['Worth knowing']);
-      await expect(
-        page.locator('section[aria-labelledby="today-worth"] li[data-insight^="open_window."]'),
-      ).toHaveCount(1);
-    } else await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'What’s coming up ›' })).toHaveCount(1);
     await expect(page.getByRole('link', { name: /things? to sort ›$/ })).toBeVisible();
     const quietMain = (await page.textContent('main')) ?? '';

@@ -40,6 +40,9 @@ import { insightKey, insightResponseKind } from './schema';
 // today + 6, two listed), from the same read plus one read of the forecast
 // cache. A response on an opening works exactly as on any other insight.
 
+/** Package 3 derives openings; Package 4 lists them (contract §2.1). Until then none is listed or counted. */
+export const OPENINGS_LISTED = false;
+
 /** The agenda window the detectors read: today and the next seven days (ADR 0008 §26). */
 export const insightWindow = (today: string) => ({
   from: today,
@@ -148,14 +151,19 @@ export async function withOpenings(
  * responses among the keys found), and none when there is nothing to find,
  * plus, on a surface that lists openings, the one forecast read
  * (`withOpenings`). `responded` is those keys, for the marks Today puts on
- * its items.
+ * its items. While `OPENINGS_LISTED` is false, no opening is shown, folded
+ * or counted on any surface (Today, Forward Week, a person's page).
  */
 export async function insightsFor(
   actor: UserActor,
   input: ReaderInsightsInput,
   deps: Deps = {},
 ): Promise<Insights & { responded: ReadonlySet<string> }> {
-  const full = await withOpenings(actor, input, deps);
+  const derived = await withOpenings(actor, input, deps);
+  // Until Package 4 (`OPENINGS_LISTED`), openings are derived, with their
+  // keys, and kept in `all` for the responses query, but none is listed or
+  // counted: a cap of zero, applied before the shown, rest and "+ N more" split.
+  const full = OPENINGS_LISTED ? derived : { ...derived, openingsShown: 0 };
   const found = insights({ ...full, dismissed: new Set() });
   if (found.all.length === 0) return { ...found, responded: new Set() };
   const keys = await respondedKeys(
