@@ -36,7 +36,7 @@ for (const s of skip)
 
 /**
  * The known causes of a failed run that are not the code (ADR 0007 §48):
- * the dev servers' caches (`.next`, `.next-narrow`) left by an earlier or
+ * the dev servers' caches (`.next`, `.next-narrow`, `.next-weather`) left by an earlier or
  * aborted run, whose stale route types break the typecheck and whose stale
  * compiled routes answer 404; and a Playwright browser path the container
  * provides but the shell did not export. Cleared and defaulted before
@@ -44,7 +44,7 @@ for (const s of skip)
  */
 export function prepareLocalRun(): string[] {
   const notes: string[] = [];
-  for (const dir of ['.next', '.next-narrow']) {
+  for (const dir of ['.next', '.next-narrow', '.next-weather']) {
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
       notes.push(`cleared ${dir}`);

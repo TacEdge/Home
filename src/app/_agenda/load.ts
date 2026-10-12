@@ -1,5 +1,6 @@
 import 'server-only';
 import { agenda, type AgendaDay, type AgendaEventInput } from '@/domain/engines/agenda';
+import type { Deps } from '@/domain/common/write';
 import { readAgendaInputs, type AgendaInputs } from '@/domain/events/agenda-inputs';
 import type { Person } from '@/domain/people/service';
 import { addDays, isoDateInZone, type IsoDate } from '@/lib/dates';
@@ -46,9 +47,10 @@ export async function loadAgenda(
   from: IsoDate,
   days: number,
   today: IsoDate = todayInHomeZone(),
+  deps: Deps = {},
 ): Promise<LoadedAgenda> {
   const to = addDays(from, days - 1);
-  const { events, people, tasks, projects, records } = await readAgendaInputs(actor);
+  const { events, people, tasks, projects, records } = await readAgendaInputs(actor, deps);
   return {
     today,
     from,

@@ -3,12 +3,16 @@ import { defineConfig, devices } from '@playwright/test';
 import { assertTestDatabase } from './tests/db-guard';
 import { FEED_DIR } from './tests/e2e/calendar-feeds';
 import { TEST_APP_DATABASE_URL, TEST_DATABASE_URL, testEnv } from './tests/env';
+import { weatherEnv } from './tests/fixtures/weather';
 
 // End-to-end tests run against the dev server with the test mail transport
 // (production refuses it, by design) and the local test database.
 //
-// Two servers: the main one (both fixture users allowed) and a second whose
-// allowlist omits Sam. Cookies for localhost ignore the port, so visiting the
+// Three servers: the main one (both fixture users allowed) and a second whose
+// allowlist omits Sam, and a third (M7 Package 4) with the synthetic home
+// location, a test-only location key and the fake weather provider, for the
+// weather specs alone, so every other spec sees HOME without weather exactly
+// as before. Cookies for localhost ignore the port, so visiting the
 // second server with Sam's session proves that removing an address from the
 // allowlist signs that person out on their next request.
 
@@ -19,8 +23,10 @@ assertTestDatabase(TEST_APP_DATABASE_URL);
 
 export const MAIN_PORT = 3333;
 export const NARROW_PORT = 3334;
+export const WEATHER_PORT = 3335;
 export const MAIN_URL = `http://localhost:${MAIN_PORT}`;
 export const NARROW_URL = `http://localhost:${NARROW_PORT}`;
+export const WEATHER_URL = `http://localhost:${WEATHER_PORT}`;
 
 const serverEnv = (port: number, allowed: string) => ({
   ...process.env,
@@ -71,6 +77,18 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: { ...serverEnv(NARROW_PORT, 'alex@example.test'), HOME_NEXT_DIST_DIR: '.next-narrow' },
+    },
+    {
+      command: `pnpm dev -p ${WEATHER_PORT}`,
+      url: `${WEATHER_URL}/sign-in`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: {
+        ...serverEnv(WEATHER_PORT, 'sam@example.test,alex@example.test'),
+        ...weatherEnv(),
+        HOME_TEST_WEATHER: 'fake',
+        HOME_NEXT_DIST_DIR: '.next-weather',
+      },
     },
   ],
 });
