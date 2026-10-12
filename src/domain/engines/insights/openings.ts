@@ -88,6 +88,12 @@ export type OpeningTask = {
 /** One of the reader's projects: only its status is read. */
 export type OpeningProject = { id: string; status: string };
 
+/**
+ * The project statuses a matched task's project may have: every recorded
+ * status but `paused` and `done`. An unknown status is not live.
+ */
+const LIVE_PROJECT_STATUSES: ReadonlySet<string> = new Set(['idea', 'active']);
+
 export type OpeningsInput = {
   now: Date;
   /** The home zone. */
@@ -102,7 +108,10 @@ export type OpeningsInput = {
   daylight: readonly Daylight[];
   /** The reader's open tasks, read as the reader (visibility and archive already applied). */
   tasks: readonly OpeningTask[];
-  /** The reader's projects. */
+  /**
+   * The reader's projects, read as the reader (visibility and archive already
+   * applied). A task whose project is not here is not matched.
+   */
   projects: readonly OpeningProject[];
 };
 
@@ -304,10 +313,13 @@ export function compareOpeningTasks(a: OpeningTask, b: OpeningTask): number {
 /**
  * A task that may be matched at all (ADR 0011 §30): open, not scheduled, with
  * an estimate, with needs that are non-empty and only `dry_weather` and
- * `daylight`, and not in a `paused` or `done` project the reader can see.
- * Only these recorded fields are read.
+ * `daylight`, and either in no project or in one of the reader's visible,
+ * unarchived projects whose status is neither `paused` nor `done` (`active`
+ * below). A project absent from the reader's list (archived, private to
+ * another adult) or with an unrecognised status is not matched: the reader's
+ * view holds no status that says it is live. Only these recorded fields are read.
  */
-function waiting(t: OpeningTask, paused: ReadonlySet<string>): boolean {
+function waiting(t: OpeningTask, active: ReadonlySet<string>): boolean {
   return (
     t.status === 'open' &&
     t.scheduledStartsAt === null &&
@@ -316,7 +328,7 @@ function waiting(t: OpeningTask, paused: ReadonlySet<string>): boolean {
     t.estimateMinutes > 0 &&
     t.needs.length > 0 &&
     t.needs.every((n) => (MATCHED_NEEDS as readonly string[]).includes(n)) &&
-    (t.projectId === null || !paused.has(t.projectId))
+    (t.projectId === null || active.has(t.projectId))
   );
 }
 
@@ -349,15 +361,17 @@ export function openings(input: OpeningsInput): Opening[] {
   const today = isoDateInZone(now, timeZone);
   const qualified = gaps.coverage.rule === 'coverage.partial';
   const daylightOn = new Map(input.daylight.map((d) => [d.date, d]));
-  const paused = new Set(
-    input.projects.filter((p) => p.status === 'paused' || p.status === 'done').map((p) => p.id),
+  // The reader's live projects: listed (so visible and unarchived) and with a
+  // status known to be neither `paused` nor `done`. Anything else matches nothing.
+  const active = new Set(
+    input.projects.filter((p) => LIVE_PROJECT_STATUSES.has(p.status)).map((p) => p.id),
   );
   // Each task once, in the written order.
   const seen = new Set<string>();
   const tasks = [...input.tasks]
     .sort(compareOpeningTasks)
     .filter((t) => !seen.has(t.id) && (seen.add(t.id), true))
-    .filter((t) => waiting(t, paused));
+    .filter((t) => waiting(t, active));
 
   const out: Opening[] = [];
   const first = input.window.from < today ? today : input.window.from;

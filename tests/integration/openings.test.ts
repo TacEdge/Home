@@ -16,8 +16,13 @@ import {
   respondToInsight,
 } from '@/domain/insights/today';
 import { createPerson } from '@/domain/people/service';
-import { createProject } from '@/domain/projects/service';
-import { createTask } from '@/domain/tasks/service';
+import {
+  archiveProject,
+  createProject,
+  listProjects,
+  updateProject,
+} from '@/domain/projects/service';
+import { archiveTask, createTask } from '@/domain/tasks/service';
 import { toStoredHour } from '@/domain/weather/provider';
 import { syntheticHours, utcDayStart, type SyntheticValues } from '@/integrations/weather/fake';
 import { addDays, isoDateInZone } from '@/lib/dates';
@@ -636,6 +641,84 @@ describe('P3: the privacy invariant for openings (contract §3.5, §8.2)', () =>
       'Private outdoor job is recorded as about two hours, in dry weather. Nothing is recorded for the household on Saturday, 13:00–19:30, as far as HOME knows, and the forecast for Saturday as of 06:55 looks dry.',
     );
     expect(sam[0]!.opening!.coverage.calendars.map((c) => c.id)).toContain(staleCalendar);
+  });
+});
+
+describe('project eligibility through the real services (ADR 0011 §30, §45): only a project the reader sees as live', () => {
+  /** Saturday's opening on Alex's Forward Week, and everything Alex is given about openings. */
+  const saturday = async (actor: UserActor) => {
+    const r = await forward(actor);
+    return { sat: opens(r).find((i) => i.when === SAT)!, all: bytes(r) };
+  };
+
+  it('a visible active project matches; paused, it does not; archived (paused first), it still does not', async () => {
+    const deck = await createProject(h.sam, { title: 'Deck OW', status: 'active' }, deps);
+    const oil = await createTask(
+      h.sam,
+      {
+        title: 'Oil the deck',
+        estimateMinutes: 60,
+        needs: ['dry_weather'],
+        dueDate: '2026-10-20',
+        projectId: deck.id,
+      },
+      deps,
+    );
+    try {
+      // Visible and active: dated, so named first; the fence listed after it.
+      let { sat } = await saturday(h.alex);
+      expect(sat.key).toBe(`open_window:household:${SAT}:1000-1930:task:${oil.id}`);
+      expect(sat.opening!.others.map((t) => t.id)).toEqual([id.fence]);
+      // Paused: the fence is named; the deck's task is nowhere.
+      await updateProject(h.sam, deck.id, { status: 'paused' }, deps);
+      ({ sat } = await saturday(h.alex));
+      expect(sat.key).toBe(key.satTask);
+      expect(JSON.stringify(sat)).not.toContain(oil.id);
+      // Archived: gone from Alex's projects, so the task is not matched (before the fix it
+      // was named again, the archived project no longer being "seen as paused").
+      await archiveProject(h.sam, deck.id, deps);
+      expect((await listProjects(h.alex, {}, deps)).map((p) => p.id)).not.toContain(deck.id);
+      const after = await saturday(h.alex);
+      expect(after.sat.key).toBe(key.satTask);
+      expect(after.sat.opening!.others).toEqual([]);
+      expect(after.all).not.toContain(oil.id);
+      expect(after.all).not.toContain(deck.id);
+    } finally {
+      await archiveTask(h.sam, oil.id, deps);
+    }
+  });
+
+  it('Alex’s task in Sam’s household project: matched while visible and active; once Sam makes the project private and done, Alex’s opening no longer names it and carries nothing of the hidden project', async () => {
+    const shed = await createProject(h.sam, { title: 'Shed OW', status: 'active' }, deps);
+    const stain = await createTask(
+      h.alex,
+      {
+        title: 'Stain the shed',
+        visibility: 'private',
+        estimateMinutes: 60,
+        needs: ['dry_weather'],
+        dueDate: '2026-10-19',
+        projectId: shed.id,
+      },
+      deps,
+    );
+    try {
+      let { sat } = await saturday(h.alex);
+      expect(sat.key).toBe(`open_window:household:${SAT}:1000-1930:task:${stain.id}`);
+      // Sam makes the project private and done: Alex can no longer see it at all.
+      await updateProject(h.sam, shed.id, { visibility: 'private', status: 'done' }, deps);
+      expect((await listProjects(h.alex, {}, deps)).map((p) => p.id)).not.toContain(shed.id);
+      const after = await saturday(h.alex);
+      sat = after.sat;
+      expect(sat.key).toBe(key.satTask);
+      expect(sat.opening!.others).toEqual([]);
+      expect(sat.facts.some((f) => f.kind === 'project')).toBe(false);
+      // Nothing of the hidden project, nor the unmatched task, in Alex's keys, facts or text.
+      for (const secret of [shed.id, stain.id, 'Shed OW', 'Stain the shed'])
+        expect(after.all).not.toContain(secret);
+    } finally {
+      await archiveTask(h.alex, stain.id, deps);
+    }
   });
 });
 

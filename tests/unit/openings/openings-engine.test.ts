@@ -10,6 +10,7 @@ import {
   type Opening,
 } from '@/domain/engines/insights/openings';
 import { FORWARD_LISTED } from '@/domain/insights/forward';
+import { PROJECT_STATUSES } from '@/domain/projects/schema';
 import { insightKey } from '@/domain/insights/schema';
 import { clockOf } from '@/lib/dates';
 import { timed } from '../today/household';
@@ -206,6 +207,81 @@ describe('O — openings (contract §8.6)', () => {
 
   it.each(['paused', 'done'])('O12: the fence’s project %s: no task opening', (status) => {
     expect(keys(run({ projects: [{ ...BACK_FENCE, status }] }))).toEqual([SAT_PLAIN, SUN_PLAIN]);
+  });
+
+  // Project eligibility (ADR 0011 §30, §45): a task with a recorded project matches only
+  // when that project is in the reader's list (visible, unarchived) with a status that is
+  // neither paused nor done. Nothing about a project outside the list reaches the output.
+  describe('O12a–O12g: a task’s project must be one the reader sees as live', () => {
+    const CAR = task('t-car', 'Wash the car', { estimateMinutes: 60, needs: ['dry_weather'] });
+    const CAR_TASK = `open_window:household:${SAT}:1000-1930:task:${CAR.id}`;
+    const json = (os: readonly Opening[]) => JSON.stringify(os);
+
+    it('O12a: the fence’s project missing from the reader’s list (archived, or private to the other adult): no task opening, a plain one instead, and nothing of the project in the output', () => {
+      const os = run({ projects: [] });
+      expect(keys(os)).toEqual([SAT_PLAIN, SUN_PLAIN]);
+      expect(json(os)).not.toContain(BACK_FENCE.id);
+      expect(json(os)).not.toContain(FENCE.id);
+    });
+
+    it.each(['paused', 'done'])(
+      'O12b: the fence’s project %s: no task opening, and no project fact',
+      (status) => {
+        const os = run({ projects: [{ ...BACK_FENCE, status }] });
+        expect(keys(os)).toEqual([SAT_PLAIN, SUN_PLAIN]);
+        expect(json(os)).not.toContain(BACK_FENCE.id);
+      },
+    );
+
+    it('O12c: an unrecognised project status: no task opening', () => {
+      expect(keys(run({ projects: [{ ...BACK_FENCE, status: 'someday' }] }))).toEqual([
+        SAT_PLAIN,
+        SUN_PLAIN,
+      ]);
+    });
+
+    it.each(PROJECT_STATUSES.filter((st) => st !== 'paused' && st !== 'done'))(
+      'O12d: the fence’s project visible and %s: the task opening, naming the fence; no project fact',
+      (status) => {
+        const os = run({ projects: [{ ...BACK_FENCE, status }] });
+        expect(keys(os)).toEqual([SAT_TASK, SUN_PLAIN]);
+        expect(json(os)).not.toContain(BACK_FENCE.id);
+        expect(byDate(os, SAT)!.facts.filter((f) => f.kind === 'project')).toEqual([]);
+      },
+    );
+
+    it('O12e: a task with no project matches, whatever the projects list holds', () => {
+      const free = { ...FENCE, projectId: null };
+      expect(keys(run({ tasks: [free, GARAGE], projects: [] }))[0]).toBe(SAT_TASK);
+    });
+
+    it('O12f: other matching tasks: with the fence’s project visible and active, the fence is named and the car listed after it', () => {
+      const sat = byDate(run({ tasks: [FENCE, CAR, GARAGE] }), SAT)!;
+      expect(sat.key).toBe(SAT_TASK);
+      expect(sat.others.map((t) => t.id)).toEqual([CAR.id]);
+      expect(sat.facts.filter((f) => f.kind === 'task')).toEqual([
+        { kind: 'task', id: FENCE.id },
+        { kind: 'task', id: CAR.id },
+      ]);
+    });
+
+    it.each([
+      ['missing from the reader’s list', [] as (typeof BACK_FENCE)[]],
+      ['paused', [{ ...BACK_FENCE, status: 'paused' }]],
+      ['done', [{ ...BACK_FENCE, status: 'done' }]],
+    ])(
+      'O12g: the fence’s project %s: the car is named, and the fence is in neither the others nor the facts',
+      (_, projects) => {
+        const os = run({ tasks: [FENCE, CAR, GARAGE], projects });
+        const sat = byDate(os, SAT)!;
+        expect(sat.key).toBe(CAR_TASK);
+        expect(sat.task!.id).toBe(CAR.id);
+        expect(sat.others).toEqual([]);
+        expect(sat.facts.filter((f) => f.kind === 'task')).toEqual([{ kind: 'task', id: CAR.id }]);
+        expect(json(os)).not.toContain(FENCE.id);
+        expect(json(os)).not.toContain(BACK_FENCE.id);
+      },
+    );
   });
 
   it('O13: a task with daylight only, 120 minutes, forecast unusable: task openings on Saturday and Sunday naming it, with no weather sentence; the fence is not matched', () => {
