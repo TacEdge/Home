@@ -6,12 +6,12 @@
 // forecast when there is no sentence; Forward Week's credit line; the Why of
 // either) and nowhere else. A plain link: no script, no widget, no CSP change.
 
-export const OPEN_METEO_URL = 'https://open-meteo.com/';
+import { FORECAST_CREDIT_URL } from '@/domain/engines/weather';
 
 export function CreditLink({ className = '' }: { className?: string }) {
   return (
     <a
-      href={OPEN_METEO_URL}
+      href={FORECAST_CREDIT_URL}
       rel="noreferrer"
       aria-label="Forecast data: Open-Meteo"
       data-testid="credit-link"

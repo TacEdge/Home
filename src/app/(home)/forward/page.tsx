@@ -19,7 +19,7 @@ import { openingWeatherFrom } from '@/domain/insights/openings';
 import { readForecast } from '@/domain/weather/service';
 import { dayPhrase } from '@/domain/engines/weather';
 import { RefreshWeather } from '@/app/_weather/refresh-weather';
-import { creditOpeningKey } from '@/app/_weather/credit-key';
+import { creditOpeningKey } from '@/app/_insights/weather/credit-key';
 import { requireActor } from '@/trust/session';
 import { ForwardView } from './forward-view';
 

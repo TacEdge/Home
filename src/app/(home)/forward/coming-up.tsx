@@ -8,7 +8,7 @@ import type { ForwardEntry, ForwardModel, Horizon } from '@/domain/engines/forwa
 import { placement } from '@/domain/engines/today';
 import { clockOf } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
-import { ComingUpLabel, DayPhrase } from '@/app/_weather/forecast-credit-line';
+import { ComingUpLabel, DayPhrase } from '@/app/_insights/weather/forecast-credit-line';
 import { Label } from '@/ui/page';
 import { dateColumn } from './copy';
 

@@ -37,6 +37,8 @@ export const FRESH_HOURS = 3;
 export const USABLE_HOURS = 12;
 /** Words for today to today + 6 only (D6). */
 export const HORIZON_DAYS = 7;
+/** Where the forecast's credit link goes (CC BY 4.0 attribution; contract §4.7, ADR 0011 §20). */
+export const FORECAST_CREDIT_URL = 'https://open-meteo.com/';
 /** Parts of a day, home time (contract §5.2). */
 export const DAY_PARTS = Object.freeze([
   { part: 'morning', from: '06:00', to: '12:00' },

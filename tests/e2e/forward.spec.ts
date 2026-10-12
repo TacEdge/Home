@@ -918,7 +918,12 @@ test.describe('held aside: Forward’s first run, quiet and stale', () => {
       for (const [date, words] of Object.entries(expected))
         await expect(unit(page, date).locator(':scope > p'), date).toHaveText(words);
       await expect(page.locator('[data-conflict]')).toHaveCount(0);
-      await expect(worthOf(page)).toHaveCount(0);
+      // M7 Package 4 (the one named addition): with a fresh calendar, the two
+      // weekend days are recorded as openings and nothing else is worth
+      // knowing. No weather is configured on this server, so no credit.
+      await expect(worthOf(page).locator('li[data-insight]')).toHaveCount(2);
+      await expect(worthOf(page).locator('li[data-insight^="open_window"]')).toHaveCount(2);
+      await expect(page.getByTestId('credit-link')).toHaveCount(0);
       await context.close();
     } finally {
       await archiveIds('event', usual);

@@ -1,4 +1,4 @@
-import { CreditLink } from '@/app/_weather/credit';
+import { CreditLink } from '@/app/_insights/weather/credit';
 import type { Insight } from '@/domain/engines/insights';
 import { Label } from '@/ui/page';
 import { Disclosure } from './disclosure';

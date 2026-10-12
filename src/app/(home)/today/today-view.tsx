@@ -19,7 +19,7 @@ import { PersonName, type PersonColour } from '@/ui/person-dot';
 import { toSortLine } from '../sort/copy';
 import { Disclosure } from '@/app/_insights/disclosure';
 import { FactsInPlace, type FactLookup } from '@/app/_insights/facts';
-import { WeatherToday } from '@/app/_weather/weather-today';
+import { WeatherToday } from '@/app/_insights/weather/weather-today';
 import type { WeatherSentence, WeatherWords } from '@/domain/engines/weather';
 import { moreToDoLine, todayHeadline, todoDetail } from './copy';
 import { WorthKnowing } from '@/app/_insights/worth-knowing';

@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { AgendaItemRow } from '@/app/_agenda/agenda-list';
-import { CreditLink } from '@/app/_weather/credit';
+import { CreditLink } from '@/app/_insights/weather/credit';
 import { WEEKDAYS } from '@/domain/engines/day-facts';
 import type { CommitmentFact } from '@/domain/engines/gaps';
 import {
