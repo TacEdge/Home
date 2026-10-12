@@ -317,7 +317,7 @@ describe('the screens’ boundaries, held in the source (X1, X12, W19)', () => {
 
   it('neither composition reaches a provider, and Forward reads the forecast on Week alone', () => {
     for (const f of ['src/app/(home)/today/compose.ts', 'src/app/(home)/forward/compose.ts'])
-      expect(read(f)).not.toMatch(/integrations\/|fetchForecast|refreshForecast|safe-fetch/);
+      expect(read(f)).not.toMatch(/integrations\/|fetchForecast|refreshForecast|safe-fetch|\bfetch\(/);
     expect(read('src/app/(home)/forward/compose.ts')).toMatch(
       /horizon === 'week' \? await readForecast/,
     );
