@@ -173,6 +173,7 @@ export const RULES: Rule[] = [
       'today',
       'today-conflicts',
       'today-screen',
+      'weather',
     ],
   },
   {

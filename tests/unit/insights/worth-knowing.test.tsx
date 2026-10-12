@@ -31,6 +31,7 @@ const lookup: FactLookup = {
   tasks: new Map(),
   projects: new Map(),
   timeZone: NZ,
+  now: WED_0703,
 };
 
 function render(shownCount: number, insights: readonly Insight[], surface: 'today' | 'forward') {

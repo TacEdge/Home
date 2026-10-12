@@ -32,7 +32,9 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     ".next-narrow/types/**/*.ts",
-    ".next-narrow/dev/types/**/*.ts"
+    ".next-narrow/dev/types/**/*.ts",
+    ".next-weather/types/**/*.ts",
+    ".next-weather/dev/types/**/*.ts"
   ],
   // Production config: what `next build` type-checks. Test code, test runners
   // and local scripts are excluded because Vercel does not upload them

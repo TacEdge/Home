@@ -175,7 +175,7 @@ describe('the client', () => {
     expect(text).toMatch(/return null;/);
   });
 
-  it('is not mounted on any page in Package 1b (Package 4 places it)', () => {
+  it('is mounted on Today and Forward Week only (Package 4)', () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((name) => {
         const p = join(dir, name);
@@ -184,6 +184,9 @@ describe('the client', () => {
     const users = walk('src')
       .filter((f) => /\.(ts|tsx)$/.test(f) && f !== CLIENT)
       .filter((f) => /_weather\/refresh-weather|RefreshWeather/.test(readFileSync(f, 'utf8')));
-    expect(users).toEqual([]);
+    expect(users.sort()).toEqual([
+      join('src/app/(home)/forward/page.tsx'),
+      join('src/app/(home)/today/page.tsx'),
+    ]);
   });
 });

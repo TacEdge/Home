@@ -63,6 +63,7 @@ function why(events: AgendaEventInput[], personId: string) {
     tasks: new Map(),
     projects: new Map(),
     timeZone: NZ,
+    now: WED_0703,
   };
   const html = renderToStaticMarkup(<InsightExplanation insight={insight} lookup={lookup} />);
   const text = html

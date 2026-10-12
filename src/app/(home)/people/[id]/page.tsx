@@ -85,6 +85,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       loaded.records.projects.map((p) => [p.id, { title: p.title, targetDate: p.targetDate }]),
     ),
     timeZone,
+    now,
   };
   // Usually: their weekly and fortnightly series, from the events the agenda
   // just read as this adult (M4 contract §3.6); derived, never stored.

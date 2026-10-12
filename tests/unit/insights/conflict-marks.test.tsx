@@ -37,6 +37,7 @@ describe('ConflictMarks on a dense day', () => {
     tasks: new Map(),
     projects: new Map(),
     timeZone: NZ,
+    now: WED_0703,
   };
   const html = renderToStaticMarkup(<ConflictMarks marks={mine} lookup={lookup} />);
   const count = (re: RegExp) => (html.match(re) ?? []).length;

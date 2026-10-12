@@ -6,7 +6,7 @@ import { HOUSEHOLD } from '../engines/gaps';
 import { openings, type Opening } from '../engines/insights/openings';
 import type { Forecast } from '../engines/weather';
 import type { AgendaInputs } from '../events/agenda-inputs';
-import { readForecast } from '../weather/service';
+import { readForecast, type ForecastRead } from '../weather/service';
 import { addDays, type IsoDate } from '@/lib/dates';
 import { weatherConfig } from '@/lib/env';
 import type { UserActor } from '@/trust/actor';
@@ -31,21 +31,18 @@ export type OpeningWeather = {
 };
 
 /**
- * One read of the forecast cache, as the adult (`readForecast`: one query
- * when weather is configured, none otherwise), and the rounded point for
- * daylight. A location with no valid key still gives daylight (§3.6).
+ * What openings take from a forecast read the caller already made: the
+ * usable forecast (fresh or older, this location's) and the rounded point
+ * for daylight. A location with no valid key still gives daylight (§3.6).
+ * Pure: pages that show the weather read the cache once and hand the same
+ * read to their sentence and to their openings, so there is one query.
  */
-export async function readOpeningWeather(
-  actor: UserActor,
-  now: Date,
-  deps: Deps = {},
-): Promise<OpeningWeather> {
+export function openingWeatherFrom(read: ForecastRead): OpeningWeather {
   const config = weatherConfig();
   const point =
     config.status === 'set' || config.status === 'key_missing'
       ? { lat: config.point.lat, lon: config.point.lon }
       : null;
-  const read = await readForecast(actor, { now }, deps);
   const forecast =
     read.configured &&
     (read.freshness === 'fresh' || read.freshness === 'older') &&
@@ -53,6 +50,19 @@ export async function readOpeningWeather(
       ? { fetchedAt: read.fetchedAt, hours: read.hours }
       : null;
   return { forecast, point };
+}
+
+/**
+ * One read of the forecast cache, as the adult (`readForecast`: one query
+ * when weather is configured, none otherwise), and the rounded point for
+ * daylight.
+ */
+export async function readOpeningWeather(
+  actor: UserActor,
+  now: Date,
+  deps: Deps = {},
+): Promise<OpeningWeather> {
+  return openingWeatherFrom(await readForecast(actor, { now }, deps));
 }
 
 /** Daylight for each date of a window, at the rounded point; none without a location. */

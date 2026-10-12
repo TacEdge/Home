@@ -84,11 +84,12 @@ Voice, in three pairs:
 |---|---|
 | You have 3 unassigned events requiring action! | Nobody’s down for Isla’s 3:00 pickup. |
 | Great job! Your week is 87% organised 🎉 | A quiet week. Just the usual. |
-| AI Insight: Optimal painting window detected | Saturday, 9 till 12, looks best. |
+| AI Insight: Optimal painting window detected | ~~Saturday, 9 till 12, looks best.~~ Superseded in M7 (ADR 0011 §46): HOME never says a time looks best or is free. *Nothing is recorded for the household on Saturday, 10:00–19:30.* |
 
 ## 07. In the product
 
 - The shell header: wordmark (sm) left, the place switch centred, the quiet ⌂ menu right (horizon lines; the quiet places and Settings, ADR 0006 §16).
+- **The forecast credit** (M7, ADR 0011 §20, §46): a small muted "Open-Meteo" link (13px, Mist text, underlined, a 44px target, accessible name "Forecast data: Open-Meteo", `rel="noreferrer"`) after Today's weather sentence, or in Forward Week's "Forecast as of 06:55 · Open-Meteo" line, and nowhere else. Weather is ink and muted ink; Sky only ever as a small mark (none is used), never a fill; the Sun stays for "needs you", which no weather or opening is.
 - Focus is a 2px ring in Pine (Moon at night), never Sun: it must reach 3:1 on every surface, and Sun means “needs you”.
 - Sign-in: the wordmark (lg) as the page’s `h1`, then the calm copy and one input.
 - The Sun appears only where a person is needed: the “needs you” dot, the Who? chip, “Sort it”. On a quiet day there are none.

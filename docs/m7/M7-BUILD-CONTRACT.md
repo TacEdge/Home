@@ -2,7 +2,7 @@
 
 Status: **Approved** by the owner on 2026-10-11: decisions D1–D19 as recommended (§12.2), with five amendments (§12.4). The approval takes effect when PR #70 (Package 0) merges.
 
-- **Progress:** Package 0 merged (PR #70). Package 1a merged (PR #71; migration `0008_weather_forecast`, run in Production and Preview). Package 1b merged (PR #72; weather provider, cache and refresh; no screen; ADR 0011 §43). Package 2 merged (PR #75; the gap engine and coverage; ADR 0011 §44). **Package 3 in review** (openings: the `open_window` family, derived with stable keys and responses, its ranking and per-surface caps; nothing listed or counted on any screen until Package 4 flips `OPENINGS_LISTED`; no component change; ADR 0011 §45). Nothing else built.
+- **Progress:** Package 0 merged (PR #70). Package 1a merged (PR #71; migration `0008_weather_forecast`, run in Production and Preview). Package 1b merged (PR #72; weather provider, cache and refresh; no screen; ADR 0011 §43). Package 2 merged (PR #75; the gap engine and coverage; ADR 0011 §44). Package 3 merged (PR #76; openings derived with stable keys and responses; ADR 0011 §45). **Package 4 in review** (the screens: Today's weather sentence, Forward Week's day phrases and credit line, openings listed with their Why, the credit link, refresh mounted; `OPENINGS_LISTED` flipped to `true`; ADR 0011 §46). Nothing else built.
 
 The architecture decisions are recorded in ADR 0011 (`docs/decisions/0011-m7-weather-and-free-windows.md`).
 
@@ -220,7 +220,7 @@ If Package 1b proves too large for one review, it may split into **1b-i** (provi
   - Matrix rows O1–O26 and P2–P3 pass; O23 through the real services.
   - Every template and rendered string passes the M5, M6 and M7 forbidden lists.
   - M5's and M6's insight suites pass unchanged except where an opening is now listed, and every such change is named in the PR.
-  - *Implementation note (after review, owner-approved):* Package 3 makes no screen change, so it lists no opening: `OPENINGS_LISTED = false` (`src/domain/insights/today.ts`) gives openings a cap of zero in `insightsFor`, before shown, rest and "+ N more", on Today and Forward Week alike. Openings are still derived with their keys, and responses on them are still accepted and recorded; Worth knowing on both surfaces is M6's, and the M5, M6 and browser suites keep their pre-Package-3 expectations. Package 4 sets it to `true`. A task with a recorded project matches only when that project is in the reader's visible, unarchived list with a status other than `paused` or `done` (ADR 0011 §45).
+  - *Implementation note (after review, owner-approved):* Package 3 makes no screen change, so it lists no opening: `OPENINGS_LISTED = false` (`src/domain/insights/today.ts`) gives openings a cap of zero in `insightsFor`, before shown, rest and "+ N more", on Today and Forward Week alike. Openings are still derived with their keys, and responses on them are still accepted and recorded; Worth knowing on both surfaces is M6's, and the M5, M6 and browser suites keep their pre-Package-3 expectations. Package 4 sets it to `true` (done, ADR 0011 §46). A task with a recorded project matches only when that project is in the reader's visible, unarchived list with a status other than `paused` or `done` (ADR 0011 §45).
 - **Package 4:**
   - Matrix rows W19, X1, X4–X7, X9 and X12 pass, at four viewports, with JavaScript on and off.
   - On a phone, Today's headline, weather sentence and first Worth knowing row are on the first screen.
@@ -459,7 +459,7 @@ The headline, its rules and everything else on Today are unchanged. M5's and M6'
 ### 4.2 Forward Week
 
 1. **A day phrase** at the end of each day's row, in muted ink: "Looks dry", "Showers possible", "Rain likely", with ", windy" when it applies. At most four words. A row with nothing recorded reads "Nothing recorded besides the usual" and then its phrase.
-2. **The credit line** once, beside the Coming up label: "Forecast as of 06:55 · Open-Meteo", with its own "Why ›": each day's words describe that day's planning hours (08:00–20:00, or what remains of today) in the forecast fetched at that time, and what "looks dry", "showers possible", "rain likely" and "windy" mean, with their thresholds.
+2. **The credit line** once, beside the Coming up label: "Forecast as of 06:55 · Open-Meteo", with its own "Why ›": each day's words describe that day's planning hours (08:00–20:00, or what remains of today) in the forecast as of that time, and what "looks dry", "showers possible", "rain likely" and "windy" mean, with their thresholds.
 3. **Openings** in Worth knowing, after `data_health`, at most two.
 
 Month and Season are unchanged: no phrases, no openings, no credit. The horizon switch, headline, rows, load bands, marks and The usual are unchanged.

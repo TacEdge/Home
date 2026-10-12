@@ -2,6 +2,11 @@
 
 > Open HOME at 7:03 on a Wednesday. Within about five seconds: what today looks like, where the family needs to be, what needs coordinating, what deserves attention, and whether Kev has noticed something useful. Calm even when the day is busy.
 
+> **As built in M5 and M7 (ADR 0008 §32–§33; ADR 0011 §46; `docs/m7/M7-BUILD-CONTRACT.md` §4.1).** The concept below is kept as written. Where the build differs, it is deliberate and recorded:
+>
+> - **The weather line is one sentence from the cached forecast** ("Looks dry until midday, then showers possible."), in body type and ink, after the headline and before "What this is based on ›", with a small muted "Open-Meteo" credit link and a "Why ›". In the evening it is about tomorrow; a forecast over twelve hours old gives "The forecast hasn't updated since yesterday." instead. Nothing appears without a location, key or forecast. The scenario's "Fine until mid-afternoon" is superseded: no output says a time is fine, good or best.
+> - **Openings join Worth knowing** (at most one, after every other family, ○ mark): "Nothing is recorded for the household …", never "free" or advice.
+
 Scenario: Wednesday 14 October, 7:03am (fixture family — see [README](./README.md)).
 
 ## 1. Information hierarchy

@@ -43,11 +43,11 @@ import { clearDomainRows, ensureFixtureUsers, type Household } from './fixtures'
 // public point and a test-only key, as the scenario harness does; no
 // provider is ever called. Synthetic only.
 //
-// Package 3 derives openings and accepts responses on them; it lists none
-// (contract §2.1): `OPENINGS_LISTED` is false until Package 4. So these tests
-// read the composition's output (every opening derived, in `all`, with its
-// key) and the reader's recorded responses (`responded`), and assert that no
-// opening is shown, folded or counted on Today or Forward Week.
+// Package 3 derived openings and accepted responses on them; Package 4 lists
+// them (contract §2.1: `OPENINGS_LISTED` is true). These tests read the
+// composition's output (every opening derived, in `all`, with its key), the
+// reader's recorded responses (`responded`) and the listing, with Today's
+// cap of one and Forward Week's of two, after every other family.
 
 const { db, pool, close } = testDb();
 const admin = adminDb();
@@ -222,7 +222,7 @@ const opens = (r: Insights): Insight[] => r.all.filter((i) => i.kind === 'open_w
 const openKeys = (r: Insights) => opens(r).map((i) => i.key);
 /** The derived openings the reader has not responded to (what Package 4 would choose from). */
 const unanswered = (r: Read) => openKeys(r).filter((k) => !r.responded.has(k));
-/** Openings in the listing: shown or folded. Package 3 lists none (`OPENINGS_LISTED`). */
+/** Openings in the listing: shown or folded (the surface's cap already applied). */
 const listedOpenings = (r: Insights) =>
   [...r.shown, ...r.rest].filter((i) => i.kind === 'open_window').map((i) => i.key);
 /** What a reader is given about openings, byte for byte: every one, its facts and data, the listing and responses. */
@@ -324,12 +324,12 @@ afterAll(async () => {
 });
 
 describe('the fixture stands: both adults see O1–O3 through the real services', () => {
-  it('O1–O3: Forward Week derives Saturday’s task opening and Sunday’s plain one, worded as the matrix writes them, and lists neither', async () => {
+  it('O1–O3: Forward Week derives Saturday’s task opening and Sunday’s plain one, worded as the matrix writes them, and lists both', async () => {
     for (const actor of [h.sam, h.alex]) {
       const r = await forward(actor);
       expect(openKeys(r)).toEqual([key.satTask, key.sunPlain]);
       expect(unanswered(r)).toEqual([key.satTask, key.sunPlain]);
-      expect(listedOpenings(r)).toEqual([]);
+      expect(listedOpenings(r)).toEqual([key.satTask, key.sunPlain]);
       // Keys are stable: the same read again gives the same keys and text.
       expect(bytes(await forward(actor))).toBe(bytes(r));
       const [sat, sun] = opens(r);
@@ -344,32 +344,31 @@ describe('the fixture stands: both adults see O1–O3 through the real services'
     }
   });
 
-  it('O18 and O20: Today on Saturday 07:30 derives Saturday’s first, then Sunday’s; on Friday 07:03, Saturday’s worded with “tomorrow”; none listed', async () => {
+  it('O18 and O20: Today on Saturday 07:30 derives Saturday’s first, then Sunday’s; on Friday 07:03, Saturday’s worded with “tomorrow”; one listed', async () => {
     await scene(at(SAT, '07:30'), at(SAT, '06:55'));
     const r = await today(h.alex, at(SAT, '07:30'));
     expect(openKeys(r)).toEqual([key.satTask, key.sunPlain]);
     expect(unanswered(r)).toEqual([key.satTask, key.sunPlain]);
-    expect(listedOpenings(r)).toEqual([]);
+    expect(listedOpenings(r)).toEqual([key.satTask]);
     expect(opens(r)[0]!.text).toBe(
       'Paint the back fence is recorded as about three hours, in dry weather and daylight. Nothing is recorded for the household today, 10:00–19:30, and the forecast as of 06:55 looks dry then.',
     );
     await scene(at('2026-10-16', '07:03'), at('2026-10-16', '06:55'));
     const fri = await today(h.alex, at('2026-10-16', '07:03'));
     expect(openKeys(fri)).toEqual([key.satTask]);
-    expect(listedOpenings(fri)).toEqual([]);
+    expect(listedOpenings(fri)).toEqual([key.satTask]);
     expect(opens(fri)[0]!.text).toContain(
       'Nothing is recorded for the household tomorrow, 10:00–19:30',
     );
   });
 });
 
-describe('Package 3 lists nothing (contract §2.1, `OPENINGS_LISTED`): Worth knowing is M6’s', () => {
-  it('Today and Forward Week, for both adults, with openings derived: no opening shown, folded or counted, and shown, rest and “+ N more” exactly M6’s', async () => {
-    expect(OPENINGS_LISTED).toBe(false);
+describe('Package 4 lists openings (contract §2.1, `OPENINGS_LISTED`): after every other family, within each surface’s cap', () => {
+  it('Today lists at most one and Forward Week two, after M6’s listing; the cap is neither listed nor counted in “+ N more”', async () => {
+    expect(OPENINGS_LISTED).toBe(true);
     const now = at(SAT, '07:30');
     await scene(now, at(SAT, '06:55'));
-    // Four stale household calendars: four data_health insights, listed on both surfaces,
-    // more than either shows, so an opening counted in "+ N more" would change the count.
+    // Four stale household calendars: four data_health insights, more than either surface shows.
     const stale: string[] = [];
     for (const n of ['8', '9', 'a', 'b'])
       stale.push(
@@ -377,28 +376,24 @@ describe('Package 3 lists nothing (contract §2.1, `OPENINGS_LISTED`): Worth kno
       );
     try {
       for (const actor of [h.sam, h.alex]) {
-        const list = (r: Insights) => ({
-          shown: r.shown.map((i) => i.key),
-          rest: r.rest.map((i) => i.key),
-          more: r.more,
-        });
         const t = await today(actor, now);
         const t6 = await today(actor, now, M6_TODAY);
         const f = await forward(actor, now);
         const f6 = await forwardM6(actor, now);
-        // Openings are derived, with their keys, on both surfaces.
         expect(openKeys(t)).toEqual([key.satTask, key.sunPlain]);
         expect(openKeys(f)).toEqual([key.satTask, key.sunPlain]);
-        // None in the listing: shown, folded or counted.
-        for (const r of [t, f]) {
-          expect(listedOpenings(r)).toEqual([]);
-          expect([...r.shown, ...r.rest].every((i) => i.kind !== 'open_window')).toBe(true);
-        }
-        // Exactly M6's listing and counts, and not vacuously: more than shown on both.
-        expect(list(t)).toEqual(list(t6));
-        expect(list(f)).toEqual(list(f6));
-        expect(t.more).toBe(1);
-        expect(f.more).toBe(2);
+        // Today: one opening (the earliest), after every other family; Sunday's is past the cap.
+        expect(listedOpenings(t)).toEqual([key.satTask]);
+        expect(listedOpenings(f)).toEqual([key.satTask, key.sunPlain]);
+        // Everything before the openings is exactly M6's order.
+        const before = (r: Insights) =>
+          [...r.shown, ...r.rest].filter((i) => i.kind !== 'open_window').map((i) => i.key);
+        expect(before(t)).toEqual([...t6.shown, ...t6.rest].map((i) => i.key));
+        expect(before(f)).toEqual([...f6.shown, ...f6.rest].map((i) => i.key));
+        // The listed opening comes last; the count is M6's plus the listed ones only.
+        expect([...t.shown, ...t.rest].at(-1)!.kind).toBe('open_window');
+        expect(t.more).toBe(t6.more + 1);
+        expect(f.more).toBe(f6.more + 2);
         expect(t.shown.every((i) => i.kind === 'data_health')).toBe(true);
       }
     } finally {
@@ -435,14 +430,14 @@ describe('O23 and P2: Dismiss and Not useful on openings, per adult, audited wit
     expect(openKeys(t)).toEqual([key.satTask, key.sunPlain]);
     expect(t.responded.has(key.satTask)).toBe(true);
     expect(unanswered(t)).toEqual([key.sunPlain]);
-    expect(listedOpenings(t)).toEqual([]);
+    expect(listedOpenings(t)).toEqual([key.sunPlain]);
     expect(opens(t).find((i) => i.key === key.sunPlain)!.text).toBe(
       'Nothing is recorded for the household tomorrow, 08:00–19:30. The forecast as of 06:55 has showers possible then.',
     );
     const f = await forward(h.alex, now);
     expect(f.responded.has(key.satTask)).toBe(true);
     expect(unanswered(f)).toEqual([key.sunPlain]);
-    expect(listedOpenings(f)).toEqual([]);
+    expect(listedOpenings(f)).toEqual([key.sunPlain]);
     // Sam: nothing changed, byte for byte (P2).
     expect(bytes(await today(h.sam, now))).toBe(samBefore.today);
     expect(bytes(await forward(h.sam, now))).toBe(samBefore.forward);
@@ -481,7 +476,7 @@ describe('O23 and P2: Dismiss and Not useful on openings, per adult, audited wit
     expect(samSat.responded.size).toBe(0);
     expect(unanswered(samSat)).toEqual([key.satTask, key.sunPlain]);
     expect(listedOpenings(alexSat)).toEqual([]);
-    expect(listedOpenings(samSat)).toEqual([]);
+    expect(listedOpenings(samSat)).toEqual([key.satTask]);
     await scene(NOW, at('2026-10-14', '06:55'));
     expect(bytes(await forward(h.sam))).toBe(samBefore);
     expect(await rowsFor(h.sam.userId, key.sunPlain)).toHaveLength(0);
@@ -491,7 +486,7 @@ describe('O23 and P2: Dismiss and Not useful on openings, per adult, audited wit
     expect(alexs.some((r) => JSON.stringify(r.meta) === '{"response":"not_useful"}')).toBe(true);
   });
 
-  it('O7: the forecast is refreshed (new numbers, a new fetch time): still responded for Alex, not for Sam; listed for neither', async () => {
+  it('O7: the forecast is refreshed (new numbers, a new fetch time): still responded for Alex (so unlisted), not for Sam (still listed)', async () => {
     await writeForecast(at('2026-10-14', '07:00'), (s) =>
       s.getTime() === at(SUN, '15:00').getTime() ? { precipitationProbability: 70 } : {},
     );
@@ -502,7 +497,7 @@ describe('O23 and P2: Dismiss and Not useful on openings, per adult, audited wit
     expect(unanswered(sam)).toContain(key.sunPlain);
     expect(sam.responded.has(key.sunPlain)).toBe(false);
     expect(listedOpenings(alex)).toEqual([]);
-    expect(listedOpenings(sam)).toEqual([]);
+    expect(listedOpenings(sam)).toEqual([key.satTask, key.sunPlain]);
     expect(opens(sam).find((i) => i.key === key.sunPlain)!.text).toBe(
       'Nothing is recorded for the household on Sunday, 08:00–19:30. The forecast for Sunday as of 07:00 has rain likely.',
     );

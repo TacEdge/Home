@@ -8,6 +8,7 @@ import type { ForwardEntry, ForwardModel, Horizon } from '@/domain/engines/forwa
 import { placement } from '@/domain/engines/today';
 import { clockOf } from '@/lib/dates';
 import { ItemRow, List } from '@/ui/list';
+import { ComingUpLabel, DayPhrase } from '@/app/_insights/weather/forecast-credit-line';
 import { Label } from '@/ui/page';
 import { dateColumn } from './copy';
 
@@ -25,16 +26,28 @@ export type ComingUpProps = {
   lookup: FactLookup;
   marks: ReadonlyMap<string, readonly ConflictMark[]>;
   returnTo: string;
+  /** Week's day phrases and the forecast they describe (M7); Month and Season have none. */
+  weather?: { phrases: ReadonlyMap<string, string>; fetchedAt: Date; now: Date };
 };
 
-export function ComingUp({ model, lookup, marks, returnTo }: ComingUpProps) {
+export function ComingUp({ model, lookup, marks, returnTo, weather }: ComingUpProps) {
   const { horizon } = model;
   return (
     <section aria-labelledby="forward-coming">
-      <Label id="forward-coming">Coming up</Label>
+      {weather ? (
+        <ComingUpLabel
+          id="forward-coming"
+          fetchedAt={weather.fetchedAt}
+          now={weather.now}
+          timeZone={lookup.timeZone}
+        />
+      ) : (
+        <Label id="forward-coming">Coming up</Label>
+      )}
       <ul>
-        {model.units.map((unit) => (
-          <li key={unit.from} data-unit={unit.from} className="border-line border-t py-2">
+        {model.units.map((unit) => {
+          const phrase = weather?.phrases.get(unit.from);
+          const heading = (
             <h3 className="text-[15px] font-medium">
               {unit.label}
               {unit.load.band > 0 ? (
@@ -48,42 +61,62 @@ export function ComingUp({ model, lookup, marks, returnTo }: ComingUpProps) {
                 </>
               ) : null}
             </h3>
-            {unit.notable.length === 0 ? (
-              <p className="text-ink-2 text-[15px]">{unit.load.text}</p>
-            ) : (
-              <>
-                <List>
-                  {unit.shown.map((e) => (
-                    <ForwardRow
-                      key={e.key}
-                      entry={e}
-                      horizon={horizon}
-                      lookup={lookup}
-                      marks={marks}
-                      returnTo={returnTo}
-                    />
-                  ))}
-                </List>
-                {unit.rest.length > 0 ? (
-                  <Disclosure label={`+ ${unit.more}`}>
-                    <List>
-                      {unit.rest.map((e) => (
-                        <ForwardRow
-                          key={e.key}
-                          entry={e}
-                          horizon={horizon}
-                          lookup={lookup}
-                          marks={marks}
-                          returnTo={returnTo}
-                        />
-                      ))}
-                    </List>
-                  </Disclosure>
-                ) : null}
-              </>
-            )}
-          </li>
-        ))}
+          );
+          return (
+            <li key={unit.from} data-unit={unit.from} className="border-line border-t py-2">
+              {phrase && unit.notable.length > 0 ? (
+                <div className="flex items-baseline justify-between gap-3">
+                  {heading}
+                  <DayPhrase text={phrase} />
+                </div>
+              ) : (
+                heading
+              )}
+              {unit.notable.length === 0 ? (
+                phrase ? (
+                  // Nothing recorded: the row's words, then the day's (M7 §4.2).
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-ink-2 text-[15px]">{unit.load.text}</p>
+                    <DayPhrase text={phrase} />
+                  </div>
+                ) : (
+                  <p className="text-ink-2 text-[15px]">{unit.load.text}</p>
+                )
+              ) : (
+                <>
+                  <List>
+                    {unit.shown.map((e) => (
+                      <ForwardRow
+                        key={e.key}
+                        entry={e}
+                        horizon={horizon}
+                        lookup={lookup}
+                        marks={marks}
+                        returnTo={returnTo}
+                      />
+                    ))}
+                  </List>
+                  {unit.rest.length > 0 ? (
+                    <Disclosure label={`+ ${unit.more}`}>
+                      <List>
+                        {unit.rest.map((e) => (
+                          <ForwardRow
+                            key={e.key}
+                            entry={e}
+                            horizon={horizon}
+                            lookup={lookup}
+                            marks={marks}
+                            returnTo={returnTo}
+                          />
+                        ))}
+                      </List>
+                    </Disclosure>
+                  ) : null}
+                </>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

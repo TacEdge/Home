@@ -7,7 +7,8 @@
 > - **Headlines are factual templates**, never character: "Six things in the next seven days, besides the usual." and "There is one overlap." (ADR 0009 §16). No "busy", "easy", "steady", "clear" or "packed".
 > - **"Needs sorting" is "Worth knowing"** (§27): two insights shown, then "+ N more". Only a calendar's health is listed on Week; Month and Season also list conflicts (§18).
 > - **Conflicts are recorded timed overlaps only** (`conflict.overlap`, `conflict.responsible`), marked quietly on their rows on Week with "Why ›", Dismiss and Not useful. There is no "in two places", no pickup gap, no "away", no transport (§12, §20, §24, §25).
-> - **Load marks are factual bands** with a text equivalent ("Three things recorded"), in ink tones (§22). No texture strip on Season, no weather.
+> - **Load marks are factual bands** with a text equivalent ("Three things recorded"), in ink tones (§22). No texture strip on Season.
+> - **Weather (M7, ADR 0011 §46):** Week alone ends each day's row with a short muted phrase ("Looks dry", "Showers possible, windy") and carries one credit line beside the Coming up label ("Forecast as of 06:55 · Open-Meteo") with its own Why; Month and Season show no weather. Up to two openings join Worth knowing on Week ("Nothing is recorded for the household on Sunday, 08:00–19:30.").
 > - **One structure on every horizon:** the same rows, with the unit changing (days, weeks, months). No day sheet, no zoom, no swipe (§23); the horizon switch is three links.
 > - **Empty units say "Nothing recorded besides the usual"**, never "quiet", "free" or an opportunity built on empty space.
 > - **No Kev on Forward in M6:** no "Read the week ahead", no Kev bar, no long-press, no "look at what could move" (M8–M10). No "worth deciding early".
