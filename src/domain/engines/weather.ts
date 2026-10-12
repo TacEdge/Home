@@ -9,6 +9,7 @@ import {
   parseIsoDate,
   type IsoDate,
 } from '@/lib/dates';
+import { PLANNING_FROM, PLANNING_TO } from './planning';
 
 // Forecast words (M7 contract §5.1 freshness, §5.2; ADR 0011 §15, §17):
 // bands over spans of forecast hours, Today's sentence, Forward Week's day
@@ -36,9 +37,6 @@ export const FRESH_HOURS = 3;
 export const USABLE_HOURS = 12;
 /** Words for today to today + 6 only (D6). */
 export const HORIZON_DAYS = 7;
-/** Planning hours (D9), home time: the span of a day phrase. */
-export const PLANNING_FROM = '08:00';
-export const PLANNING_TO = '20:00';
 /** Parts of a day, home time (contract §5.2). */
 export const DAY_PARTS = Object.freeze([
   { part: 'morning', from: '06:00', to: '12:00' },
