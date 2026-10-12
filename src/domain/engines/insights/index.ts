@@ -1,5 +1,6 @@
 import type { AgendaDay, AgendaEventInput } from '../agenda';
 import { compareConflicts, type Conflict } from '../conflicts';
+import { compareOpenings, OPENINGS_SHOWN, type Opening } from './openings';
 import {
   capitalise,
   eventFact,
@@ -39,7 +40,9 @@ import {
 // `conflict` (ADR 0009 §9–§13, §18): the conflict engine's observations,
 // passed in as they are, with their keys, rules, facts and sentences. No
 // second detector, no transport, no `coordination_gap`, no need inferred
-// from a missing record.
+// from a missing record. M7 adds `open_window` (ADR 0011 §29–§35): the
+// openings engine's observations (`./openings`), passed in as they are,
+// ranked after every other family, at most a surface's cap of them listed.
 
 export const INSIGHT_RULES = [
   'conflict.responsible',
@@ -50,9 +53,11 @@ export const INSIGHT_RULES = [
   'preparation.project_target',
   'data_health.stale',
   'data_health.failed',
+  'open_window.plain',
+  'open_window.task',
 ] as const;
 export type InsightRule = (typeof INSIGHT_RULES)[number];
-export type InsightKind = 'data_health' | 'conflict' | 'preparation' | 'busy_day';
+export type InsightKind = 'data_health' | 'conflict' | 'preparation' | 'busy_day' | 'open_window';
 
 export type Insight = {
   /** Deterministic: kind, rule, subject ids and date; never text. */
@@ -70,6 +75,8 @@ export type Insight = {
   onObject: boolean;
   /** For a `conflict`: the engine's observation, for its marks and its Why. */
   conflict?: Conflict;
+  /** For an `open_window`: the openings engine's observation, for its Why. */
+  opening?: Opening;
 };
 
 export type InsightPerson = DayPerson & { dateOfBirth: IsoDate | null };
@@ -113,8 +120,9 @@ export type InsightsInput = {
    */
   through?: IsoDate;
   /**
-   * The families this surface lists (contract §5.8): Today lists all four,
-   * Forward's Week only `data_health`, its Month and Season also `conflict`.
+   * The families this surface lists (contract §5.8): Today lists every one
+   * (M5's four, then `open_window`), Forward's Week `data_health` and
+   * `open_window`, its Month and Season `data_health` and `conflict`.
    * An insight of a family not listed is said on its item or indicator, so
    * it is `onObject`: never listed or counted, but still in `all`, with its
    * key, for the responses query and the marks.
@@ -122,6 +130,19 @@ export type InsightsInput = {
   listed?: ReadonlySet<InsightKind>;
   /** How many are shown before "+ N more": Today's three (`SHOWN`) unless a surface says (Forward's two). */
   shown?: number;
+  /**
+   * The reader's openings (`./openings`) over this surface's window (Today:
+   * today and tomorrow; Forward Week: today … today + 6), as that engine
+   * returned them. Each becomes an `open_window` insight.
+   */
+  openings?: readonly Opening[];
+  /**
+   * How many openings are listed (D15): Today's one (`OPENINGS_SHOWN.today`)
+   * unless a surface says (Forward Week's two). The earliest without a
+   * response; the rest are neither listed nor counted in "+ N more", but stay
+   * in `all`, with their keys, for the responses query.
+   */
+  openingsShown?: number;
 };
 
 export type Insights = {
@@ -142,29 +163,35 @@ export const LOOKAHEAD_DAYS = 7;
 /** Worth knowing shows at most this many (M5 contract §4.1). */
 export const SHOWN = 3;
 
-const ALL_KINDS: ReadonlySet<InsightKind> = new Set([
+/** What a surface lists when it does not say (Today's): every family. */
+export const LISTED_BY_DEFAULT: ReadonlySet<InsightKind> = new Set([
   'data_health',
   'conflict',
   'preparation',
   'busy_day',
+  'open_window',
 ]);
 
+/** The families in rank order (ADR 0009 §18; ADR 0011 §34, D15): openings after every other. */
 const KIND_ORDER: Record<InsightKind, number> = {
   data_health: 0,
   conflict: 1,
   preparation: 2,
   busy_day: 3,
+  open_window: 4,
 };
 
 /**
  * The order of insights (ADR 0009 §18): family, then within the family
  * (conflicts by their own order, ADR 0009 §13: rule, then the overlap's
- * start, then the key), then date, then key. Total: no ties remain.
+ * start, then the key; openings by date, then start, then key, ADR 0011
+ * §34), then date, then key. Total: no ties remain.
  */
 export function compareInsights(a: Insight, b: Insight): number {
   return (
     KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
     (a.conflict && b.conflict ? compareConflicts(a.conflict, b.conflict) : 0) ||
+    (a.opening && b.opening ? compareOpenings(a.opening, b.opening) : 0) ||
     compareIsoDates(a.when, b.when) ||
     (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   );
@@ -202,7 +229,7 @@ export function insights(input: InsightsInput): Insights {
   const household = new Set(people.filter((p) => p.inHousehold).map((p) => p.id));
   const routine = routineEvents(input.events, household);
   const found = new Map<string, Insight>();
-  const listed = input.listed ?? ALL_KINDS;
+  const listed = input.listed ?? LISTED_BY_DEFAULT;
   const add = (i: Insight) => {
     if (!found.has(i.key)) found.set(i.key, { ...i, onObject: i.onObject || !listed.has(i.kind) });
   };
@@ -332,9 +359,38 @@ export function insights(input: InsightsInput): Insights {
     });
   }
 
+  // open_window: the openings engine's observations, as they are (ADR 0011 §34).
+  for (const o of input.openings ?? []) {
+    if (o.date > last) continue;
+    add({
+      key: o.key,
+      kind: 'open_window',
+      rule: o.rule,
+      when: o.date,
+      text: o.text,
+      facts: [...o.facts],
+      basis: {
+        from: o.shown.from.toISOString(),
+        to: o.shown.to.toISOString(),
+        stretchFrom: o.stretch.from.toISOString(),
+        stretchTo: o.stretch.to.toISOString(),
+      },
+      onObject: false,
+      opening: o,
+    });
+  }
+
   const all = [...found.values()].sort(compareInsights);
   const dismissed = input.dismissed ?? new Set<string>();
-  const eligible = all.filter((i) => !i.onObject && !dismissed.has(i.key));
+  // Openings past the family's cap are neither listed nor counted (D15): the
+  // earliest without a response are listed; the next appears when one is
+  // dismissed or passes.
+  const cap = input.openingsShown ?? OPENINGS_SHOWN.today;
+  let openingsListed = 0;
+  const eligible = all.filter(
+    (i) =>
+      !i.onObject && !dismissed.has(i.key) && (i.kind !== 'open_window' || openingsListed++ < cap),
+  );
   const shown = input.shown ?? SHOWN;
   return {
     all,

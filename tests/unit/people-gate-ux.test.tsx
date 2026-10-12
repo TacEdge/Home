@@ -18,6 +18,8 @@ const people: {
 vi.mock('@/lib/env', () => ({
   realDataGateOpen: () => gate.open,
   env: { HOME_TIMEZONE: 'Pacific/Auckland' },
+  // No home location (M7): Today's openings read no forecast and no daylight.
+  weatherConfig: () => ({ status: 'absent' }),
 }));
 vi.mock('@/trust/session', () => ({
   requireActor: async () => ({

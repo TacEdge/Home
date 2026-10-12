@@ -18,7 +18,13 @@ export type Fact =
   | { kind: 'person'; id: string }
   | { kind: 'project'; id: string }
   | { kind: 'calendar'; id: string }
-  | { kind: 'range'; from: IsoDate; to: IsoDate };
+  | { kind: 'range'; from: IsoDate; to: IsoDate }
+  // M7 (contract §3.4, ADR 0011 §8): the planning hours a stretch was looked
+  // for in, the forecast a sentence cites (the instants it covers and when it
+  // was fetched) and the home date whose daylight bounds a span.
+  | { kind: 'planning'; from: string; to: string }
+  | { kind: 'forecast'; from: string; to: string; fetchedAt: string }
+  | { kind: 'daylight'; date: IsoDate };
 
 export type EventItem = Extract<AgendaItem, { kind: 'event' }>;
 export type TimedItem = Extract<AgendaItem, { kind: 'event'; allDay: false }>;
