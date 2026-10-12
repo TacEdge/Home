@@ -39,6 +39,9 @@ const FETCH_CODES: Record<SafeFetchErrorCode, ProviderErrorCode> = {
   unreachable: 'unreachable',
   too_large: 'too_large',
   bad_response: 'not_a_calendar',
+  // Never produced under googleCalendarPolicy (it reads a 429 as unreachable);
+  // listed so the mapping stays total.
+  rate_limited: 'unreachable',
 };
 
 const guardedFetch: FeedFetcher = async (address) =>
