@@ -6,8 +6,6 @@ import {
   DRY_MAX_PROBABILITY,
   FRESH_HOURS,
   HORIZON_DAYS,
-  PLANNING_FROM,
-  PLANNING_TO,
   RAIN_LIKELY_MM,
   RAIN_LIKELY_PROBABILITY,
   USABLE_HOURS,
@@ -21,6 +19,7 @@ import {
   windyOf,
   type Forecast,
 } from '@/domain/engines/weather';
+import { PLANNING_FROM, PLANNING_TO } from '@/domain/engines/planning';
 import type { ForecastHour } from '@/domain/weather/provider';
 import { syntheticHours, syntheticOpenMeteoBody } from '@/integrations/weather/fake';
 import { normaliseOpenMeteo } from '@/integrations/weather/open-meteo';
