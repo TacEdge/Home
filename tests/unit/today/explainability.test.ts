@@ -213,10 +213,11 @@ describe('wording matches its rule', () => {
   });
 
   it('every rule the engines can give is written down in the contract', () => {
-    // M5's rules in its contract; M6's conflict rules in M6's (§5.6).
+    // M5's rules in its contract; M6's conflict rules in M6's (§5.6); M7's openings in M7's (§5.6).
     const contract =
       readFileSync('docs/m5/M5-BUILD-CONTRACT.md', 'utf8') +
-      readFileSync('docs/m6/M6-BUILD-CONTRACT.md', 'utf8');
+      readFileSync('docs/m6/M6-BUILD-CONTRACT.md', 'utf8') +
+      readFileSync('docs/m7/M7-BUILD-CONTRACT.md', 'utf8');
     for (const r of [...HEADLINE_RULES, 'headline.late', ...INSIGHT_RULES, 'routine.regular_week'])
       expect(contract, r).toContain(`\`${r}\``);
   });

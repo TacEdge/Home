@@ -307,6 +307,10 @@ describe('every insight is traced', () => {
         /^.+’s target date is (today|tomorrow|(next )?\w+day); \w+ tasks? (is|are) open\.$/,
       'data_health.stale': /^.+ hasn’t updated since .+\.$/,
       'data_health.failed': /^.+ didn’t update the last time it was checked\.$/,
+      // The openings engine's own sentences (M7, tests/unit/openings/); none arise here.
+      'open_window.plain': /^Nothing is recorded for the household .+\.$/,
+      'open_window.task':
+        /^.+ is recorded as about .+\. Nothing is recorded for the household .+\.$/,
     };
     const seen = new Set<string>();
     for (const day of ['13', '14', '17', '20', '21'])
@@ -358,6 +362,10 @@ describe('every insight is traced', () => {
           for (const f of i.facts)
             if ('id' in f && !f.id.startsWith('e-2026')) expect(ids.has(f.id)).toBe(true);
         }
-    expect([...seen].sort()).toEqual([...INSIGHT_RULES].sort());
+    // Every rule but M7's openings, which this household's input never gives
+    // (they are passed in from the openings engine, traced in tests/unit/openings/).
+    expect([...seen].sort()).toEqual(
+      INSIGHT_RULES.filter((r) => !r.startsWith('open_window.')).sort(),
+    );
   });
 });
