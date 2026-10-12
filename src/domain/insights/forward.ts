@@ -3,6 +3,7 @@ import type { Deps } from '../common/write';
 import type { AgendaDay } from '../engines/agenda';
 import type { Conflict } from '../engines/conflicts';
 import type { InsightKind } from '../engines/insights';
+import { OPENING_DAYS, OPENINGS_SHOWN } from '../engines/insights/openings';
 import type { AgendaInputs } from '../events/agenda-inputs';
 import { addDays, isoDateInZone } from '@/lib/dates';
 import type { UserActor } from '@/trust/actor';
@@ -13,13 +14,15 @@ import { insightsFor, insightsInput } from './today';
 // own window (the horizon) and its own listing: Week lists only a calendar's
 // health, because its conflicts are said on their rows; Month and Season list
 // their conflicts, because they show no marks. Two are shown before "+ N more".
+// M7 (ADR 0011 §34, D15, D16): Week also lists openings over today … today + 6,
+// after every other family, at most two; Month and Season have none.
 
 /** Forward's horizons, written out here so this service does not import the Forward engine (ADR 0010 §8). */
 export type ForwardSurface = 'week' | 'month' | 'season';
 
 /** The families each horizon lists; any other insight is said on its item or indicator. */
 export const FORWARD_LISTED: Record<ForwardSurface, ReadonlySet<InsightKind>> = {
-  week: new Set(['data_health']),
+  week: new Set(['data_health', 'open_window']),
   month: new Set(['data_health', 'conflict']),
   season: new Set(['data_health', 'conflict']),
 };
@@ -28,8 +31,9 @@ export const FORWARD_LISTED: Record<ForwardSurface, ReadonlySet<InsightKind>> = 
 export const FORWARD_SHOWN = 2;
 
 /**
- * Forward's insights for one horizon: one responses query. `days` is the
- * 90-day agenda the page read; `found` the conflicts over it.
+ * Forward's insights for one horizon: one responses query, and on Week one
+ * read of the forecast cache for its openings. `days` is the 90-day agenda
+ * the page read; `found` the conflicts over it.
  */
 export async function forwardInsights(
   actor: UserActor,
@@ -50,6 +54,8 @@ export async function forwardInsights(
       through: addDays(today, horizonDays - 1),
       listed: FORWARD_LISTED[horizon],
       shown: FORWARD_SHOWN,
+      openingDays: OPENING_DAYS.forward,
+      openingsShown: OPENINGS_SHOWN.forward,
     },
     deps,
   );

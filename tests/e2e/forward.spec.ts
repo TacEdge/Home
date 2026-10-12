@@ -918,7 +918,13 @@ test.describe('held aside: Forward’s first run, quiet and stale', () => {
       for (const [date, words] of Object.entries(expected))
         await expect(unit(page, date).locator(':scope > p'), date).toHaveText(words);
       await expect(page.locator('[data-conflict]')).toHaveCount(0);
-      await expect(worthOf(page)).toHaveCount(0);
+      // M7 Package 3: Worth knowing lists the weekend's openings and nothing else (no
+      // location here, so no daylight or forecast: planning hours only).
+      await expect(worthOf(page).locator('li[data-insight]')).toHaveCount(2);
+      await expect(worthOf(page).locator('li[data-insight="open_window.plain"] > p')).toHaveText([
+        'Nothing is recorded for the household on Saturday, 10:00–20:00.',
+        'Nothing is recorded for the household on Sunday, 08:00–20:00.',
+      ]);
       await context.close();
     } finally {
       await archiveIds('event', usual);

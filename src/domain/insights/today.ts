@@ -6,16 +6,19 @@ import { NotPermittedError } from '../common/errors';
 import type { AgendaDay } from '../engines/agenda';
 import {
   insights,
+  LISTED_BY_DEFAULT,
   LOOKAHEAD_DAYS,
   type InsightKind,
   type Insights,
   type InsightsInput,
 } from '../engines/insights';
+import { OPENING_DAYS, type Opening } from '../engines/insights/openings';
 import type { AgendaInputs } from '../events/agenda-inputs';
-import { addDays } from '@/lib/dates';
+import { addDays, isoDateInZone } from '@/lib/dates';
 import type { UserActor } from '@/trust/actor';
 import type { InsightResponseKind } from '@/db/schema/insight-response';
-import { readConflictInputs } from './conflicts';
+import { CONFLICT_DAYS, readConflictInputs } from './conflicts';
+import { openingsOver, readOpeningWeather } from './openings';
 import { respond, respondedKeys } from './service';
 import { insightKey, insightResponseKind } from './schema';
 
@@ -31,12 +34,29 @@ import { insightKey, insightResponseKind } from './schema';
 // is Dismiss or Not useful, from any surface. Both hide the insight for that
 // adult on every surface; Not useful also records the adult's judgement.
 // Neither changes a rule, a ranking or any other insight.
+//
+// M7 (ADR 0011 §29–§35): openings join as `open_window`, after every other
+// family, on Today (today and tomorrow, one listed) and Forward Week (today …
+// today + 6, two listed), from the same read plus one read of the forecast
+// cache. A response on an opening works exactly as on any other insight.
 
 /** The agenda window the detectors read: today and the next seven days (ADR 0008 §26). */
 export const insightWindow = (today: string) => ({
   from: today,
   to: addDays(today, LOOKAHEAD_DAYS),
 });
+
+/**
+ * The engine's input as a surface composes it: the engine's own fields, and
+ * the read they came from, so openings are derived from the same records and
+ * days (no second agenda read). `openingDays` is how many home days from
+ * today the surface looks for openings in: Today's two unless it says
+ * (Forward Week's seven).
+ */
+export type ReaderInsightsInput = InsightsInput & {
+  source?: Pick<AgendaInputs, 'people' | 'records'>;
+  openingDays?: number;
+};
 
 /** The engine's input from the agenda read: records handed over as they are. */
 export function insightsInput(
@@ -45,9 +65,15 @@ export function insightsInput(
   now: Date,
   timeZone: string,
   dismissed: ReadonlySet<string> = new Set(),
-  extra: Partial<Pick<InsightsInput, 'conflicts' | 'placed' | 'through' | 'listed' | 'shown'>> = {},
-): InsightsInput {
+  extra: Partial<
+    Pick<
+      ReaderInsightsInput,
+      'conflicts' | 'placed' | 'through' | 'listed' | 'shown' | 'openings' | 'openingsShown'
+    > & { openingDays: number }
+  > = {},
+): ReaderInsightsInput {
   return {
+    source: { people: inputs.people, records: inputs.records },
     now,
     timeZone,
     days,
@@ -80,17 +106,57 @@ export function insightsInput(
 }
 
 /**
+ * The surface's openings added to its input (ADR 0011 §34, §38): when the
+ * surface lists `open_window` and was given its read, the openings over its
+ * window from that read, with one read of the forecast cache (one query when
+ * weather is configured, none otherwise). Nothing else is read: the agenda,
+ * tasks, projects and calendars are the ones the surface already holds.
+ * `through` is the last day the surface's days were placed to.
+ */
+export async function withOpenings(
+  actor: UserActor,
+  input: ReaderInsightsInput,
+  deps: Deps = {},
+): Promise<InsightsInput> {
+  const listed = input.listed ?? LISTED_BY_DEFAULT;
+  if (input.openings || !input.source || !listed.has('open_window')) return input;
+  const today = isoDateInZone(input.now, input.timeZone);
+  const through = input.through ?? addDays(today, LOOKAHEAD_DAYS);
+  const last = addDays(today, (input.openingDays ?? OPENING_DAYS.today) - 1);
+  const window = { from: today, to: last < through ? last : through };
+  const weather = await readOpeningWeather(actor, input.now, deps);
+  return {
+    ...input,
+    openings: openingsOver(
+      input.source,
+      input.days,
+      input.now,
+      input.timeZone,
+      window,
+      {
+        from: today,
+        to: through,
+      },
+      weather,
+    ),
+  };
+}
+
+/**
  * The reader's insights with their own responses applied (Dismiss and Not
  * useful alike): one more query than the engine needs (the reader's
- * responses among the keys found), and none when there is nothing to find.
- * `responded` is those keys, for the marks Today puts on its items.
+ * responses among the keys found), and none when there is nothing to find,
+ * plus, on a surface that lists openings, the one forecast read
+ * (`withOpenings`). `responded` is those keys, for the marks Today puts on
+ * its items.
  */
 export async function insightsFor(
   actor: UserActor,
-  input: InsightsInput,
+  input: ReaderInsightsInput,
   deps: Deps = {},
 ): Promise<Insights & { responded: ReadonlySet<string> }> {
-  const found = insights({ ...input, dismissed: new Set() });
+  const full = await withOpenings(actor, input, deps);
+  const found = insights({ ...full, dismissed: new Set() });
   if (found.all.length === 0) return { ...found, responded: new Set() };
   const keys = await respondedKeys(
     actor,
@@ -98,20 +164,35 @@ export async function insightsFor(
     deps,
   );
   const responded = new Set(Object.keys(keys));
-  return { ...insights({ ...input, dismissed: responded }), responded };
+  return { ...insights({ ...full, dismissed: responded }), responded };
 }
 
 /**
  * What a response is checked against, read from scratch: one agenda read over
- * 90 days (ADR 0009 §19), the reader's conflicts over all of it, and Today's
- * insights (its window, today and the next seven days) from the same days.
+ * 90 days (ADR 0009 §19), the reader's conflicts over all of it, the reader's
+ * openings over Forward Week's window (today … today + 6) from the same days
+ * and one forecast read (ADR 0011 §35), and Today's insights (its window,
+ * today and the next seven days, with today's and tomorrow's openings) from
+ * the same days.
  */
 async function readCurrent(actor: UserActor, now: Date, timeZone: string, deps: Deps) {
   const read = await readConflictInputs(actor, now, timeZone, deps);
+  const today = isoDateInZone(now, timeZone);
+  const weather = await readOpeningWeather(actor, now, deps);
+  const openings = openingsOver(
+    read.inputs,
+    read.days,
+    now,
+    timeZone,
+    { from: today, to: addDays(today, OPENING_DAYS.forward - 1) },
+    { from: today, to: addDays(today, CONFLICT_DAYS - 1) },
+    weather,
+  );
   const input = insightsInput(read.inputs, read.days, now, timeZone, new Set(), {
     conflicts: read.all,
+    openings: openings.filter((o) => o.offset < OPENING_DAYS.today),
   });
-  return { conflicts: read.all, input };
+  return { conflicts: read.all, openings, input };
 }
 
 /** The reader's insights now, read from scratch, their own responses applied. */
@@ -129,19 +210,31 @@ export async function readInsights(
 export const RESPONSE_SURFACES = ['today', 'forward', 'person'] as const;
 export type ResponseSurface = (typeof RESPONSE_SURFACES)[number];
 const LISTED: Record<ResponseSurface, ReadonlySet<InsightKind>> = {
-  today: new Set(['data_health', 'preparation', 'busy_day']),
-  forward: new Set(['data_health']),
+  today: new Set(['data_health', 'preparation', 'busy_day', 'open_window']),
+  forward: new Set(['data_health', 'open_window']),
   person: new Set(),
 };
+
+/**
+ * Whether an opening is derivable on a surface (ADR 0011 §35), ignoring the
+ * cap: listed there, and inside the surface's window (Today: today and
+ * tomorrow; Forward Week: today … today + 6). Every opening the engine
+ * returns is current (its end after `now`, two hours or more still shown).
+ */
+const openingListedOn = (o: Opening, surface: ResponseSurface) =>
+  LISTED[surface].has('open_window') &&
+  o.offset < (surface === 'today' ? OPENING_DAYS.today : OPENING_DAYS.forward);
 
 /**
  * Dismiss or Not useful (contract §5.9, ADR 0009 §17, §19): the reader's own,
  * for one insight the reader can see now, in this order:
  *  1. the real-data gate, then the actor, before anything is read;
  *  2. the key's and the response's form;
- *  3. the reader's own insights and conflicts, re-derived over 90 days;
- *  4. accepted only for a current conflict of the reader's, or for another
- *     insight that is current and listed on the named surface; anything else
+ *  3. the reader's own insights, conflicts and openings, re-derived from one
+ *     90-day agenda read and one forecast read;
+ *  4. accepted only for a current conflict of the reader's, for a current
+ *     opening derivable on the named surface (ignoring its cap), or for
+ *     another insight that is current and listed there; anything else
  *     (a crafted key, another adult's, one for a record the reader cannot
  *     see, one said on its item) is refused as not eligible;
  *  5. the same response again changes nothing and writes nothing;
@@ -163,11 +256,20 @@ export async function respondToInsight(
   const k = insightKey.parse(key);
   const r = insightResponseKind.parse(response);
   const where = z.enum(RESPONSE_SURFACES).parse(surface);
-  const { conflicts, input } = await readCurrent(actor, now, timeZone, deps);
+  const { conflicts, openings, input } = await readCurrent(actor, now, timeZone, deps);
   const isConflict = conflicts.some((c) => c.key === k);
-  if (!isConflict) {
+  const opening = openings.find((o) => o.key === k);
+  if (opening) {
+    if (!openingListedOn(opening, where)) throw new NotPermittedError('not_eligible');
+  } else if (!isConflict) {
     const found = insights(input).all.find((i) => i.key === k);
-    if (!found || found.onObject || found.kind === 'conflict' || !LISTED[where].has(found.kind))
+    if (
+      !found ||
+      found.onObject ||
+      found.kind === 'conflict' ||
+      found.kind === 'open_window' ||
+      !LISTED[where].has(found.kind)
+    )
       throw new NotPermittedError('not_eligible');
   }
   const responded = await respondedKeys(actor, [k], deps);
