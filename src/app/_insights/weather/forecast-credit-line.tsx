@@ -47,7 +47,7 @@ export function ComingUpLabel({
         <Disclosure label="Why" className="text-[15px]">
           <div className="mt-1 mb-2 text-[15px]" data-testid="forecast-why">
             <p className="text-ink-2">
-              Each day’s words describe that day’s planning hours, {PLANNING_FROM}–{PLANNING_TO}
+              Each day’s words describe that day’s planning hours, {PLANNING_FROM}–{PLANNING_TO}{' '}
               (what is left of them, today), in the forecast fetched at{' '}
               {asOfTime(fetchedAt, now, timeZone)}. A day the forecast doesn’t fully cover has no
               words.
