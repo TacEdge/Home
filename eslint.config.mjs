@@ -24,12 +24,13 @@ const allowed = {
   lib: [],
 };
 
-// One narrow exception (ADR 0007 §42): app may import the calendar
-// composition root, src/integrations/calendar/entry.ts, and nothing else in
-// integrations. It assembles the domain's calendar refresh with the real
-// provider, so domain never imports integrations and app never sees a
-// provider. tests/unit/layer-exceptions.test.ts holds the rule to this.
-const EXCEPTIONS = { app: { integrations: 'calendar/entry' } };
+// Two narrow exceptions: app may import the composition roots
+// src/integrations/calendar/entry.ts (ADR 0007 §42) and
+// src/integrations/weather/entry.ts (ADR 0011 §10), and nothing else in
+// integrations. Each assembles a domain refresh with its real provider, so
+// domain never imports integrations and app never sees a provider.
+// tests/unit/layer-exceptions.test.ts holds the rule to exactly these two.
+const EXCEPTIONS = { app: { integrations: ['calendar/entry', 'weather/entry'] } };
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
@@ -44,10 +45,10 @@ const forbidFor = (layer) =>
           group: [`@/${other}`, `@/${other}/*`, `**/src/${other}`, `**/src/${other}/*`],
           message,
         };
-      // Everything in the layer except exactly the one allowed module.
+      // Everything in the layer except exactly the allowed modules.
       return {
-        regex: `^(@/|.*/src/)${other}(?!/${escape(only)}$)(/.*)?$`,
-        message: `${message} The one exception is @/${other}/${only}.`,
+        regex: `^(@/|.*/src/)${other}(?!/(${only.map(escape).join('|')})$)(/.*)?$`,
+        message: `${message} The only exceptions are ${only.map((o) => `@/${other}/${o}`).join(' and ')}.`,
       };
     });
 
