@@ -247,12 +247,13 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
     `select id from person where user_id = 'fixture-alex' and archived_at is null`,
   );
   expect(me?.id).toBeTruthy();
+  // Birthdays and project targets anywhere in the insights' lookahead (a
+  // week), not just today's: an upcoming one is Worth knowing on a quiet day.
   const birthdays = await q(
-    `select id, date_of_birth from person where to_char(date_of_birth, 'MM-DD') = to_char(now() at time zone 'Pacific/Auckland', 'MM-DD') and archived_at is null`,
+    `select id, date_of_birth from person where date_of_birth is not null and archived_at is null`,
   );
   const targets = await q(
-    `select id, target_date from project where target_date = $1 and archived_at is null`,
-    [t.d],
+    `select id, target_date from project where target_date is not null and archived_at is null`,
   );
   try {
     await q(`update event set archived_at = now() where id = any($1::uuid[])`, [
