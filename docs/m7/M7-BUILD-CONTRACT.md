@@ -2,7 +2,7 @@
 
 Status: **Approved** by the owner on 2026-10-11: decisions D1–D19 as recommended (§12.2), with five amendments (§12.4). The approval takes effect when PR #70 (Package 0) merges.
 
-- **Progress:** Package 0 merged (PR #70). Package 1a merged (PR #71; migration `0008_weather_forecast`, run in Production and Preview). Package 1b merged (PR #72; weather provider, cache and refresh; no screen; ADR 0011 §43). **Package 2 in review** (the gap engine and coverage; no insight family, no screen; ADR 0011 §44). Nothing else built.
+- **Progress:** Package 0 merged (PR #70). Package 1a merged (PR #71; migration `0008_weather_forecast`, run in Production and Preview). Package 1b merged (PR #72; weather provider, cache and refresh; no screen; ADR 0011 §43). Package 2 merged (PR #75; the gap engine and coverage; ADR 0011 §44). **Package 3 in review** (openings: the `open_window` family, its listing on Today and Forward Week and its responses; no component change; ADR 0011 §45). Nothing else built.
 
 The architecture decisions are recorded in ADR 0011 (`docs/decisions/0011-m7-weather-and-free-windows.md`).
 
