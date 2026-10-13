@@ -135,11 +135,11 @@ describe('runtime/app role (home_app)', () => {
     },
   );
 
-  it('gains no column-level grants and no privileges on any other table through 0008', async () => {
+  it('gains no column-level grants and no privileges on any other table through 0009', async () => {
     // No explicit column ACL on any table 0005 creates or alters.
     const cols = await db.execute(sql`
       select attrelid::regclass::text as table_name, attname from pg_attribute
-      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note', 'calendar_connection', 'calendar_source', 'weather_forecast']::regclass[])
+      where attrelid = any (array['capture', 'context', 'proposal', 'event', 'project', 'task', 'note', 'calendar_connection', 'calendar_source', 'weather_forecast', 'kev_budget_reservation', 'kev_usage']::regclass[])
         and attacl is not null`);
     expect(cols.rows).toEqual([]);
     const tables = await db.execute(sql`
@@ -156,6 +156,7 @@ describe('runtime/app role (home_app)', () => {
       'event',
       'event_person',
       'insight_response', // 0006
+      'kev_budget_reservation', // 0009
       'kev_usage', // 0006
       'message', // 0006
       'note',
@@ -243,6 +244,7 @@ describe('runtime/app role (home_app)', () => {
     'calendar_connection', // 0007
     'calendar_source', // 0007
     'weather_forecast', // 0008
+    'kev_budget_reservation', // 0009
   ])('cannot ALTER, DROP or TRUNCATE %s', async (table) => {
     await expectPermissionDenied(db.execute(sql.raw(`alter table ${table} add column x int`)));
     await expectPermissionDenied(db.execute(sql.raw(`drop table ${table}`)));
@@ -271,6 +273,79 @@ describe('runtime/app role (home_app)', () => {
       .catch((e: unknown) => {
         if (e !== rollback) throw e;
       });
+  });
+
+  it('has exactly SELECT, INSERT and UPDATE on kev_budget_reservation: settle-only (0009 revoke)', async () => {
+    const grants = await db.execute(
+      sql`select privilege_type, is_grantable from information_schema.role_table_grants
+          where grantee = 'home_app' and table_name = 'kev_budget_reservation' order by 1`,
+    );
+    expect(grants.rows).toEqual(
+      ['INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+        privilege_type,
+        is_grantable: 'NO',
+      })),
+    );
+    const none = await db.execute(sql`
+      select p from unnest(array['DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) as p
+      where has_table_privilege('home_app', 'kev_budget_reservation', p)`);
+    expect(none.rows).toEqual([]);
+  });
+
+  it('can SELECT, INSERT and UPDATE kev_budget_reservation: reserve, then settle (0009; rolled back)', async () => {
+    const rollback = new Error('rollback');
+    await db
+      .transaction(async (tx) => {
+        await tx.execute(sql`
+          insert into kev_budget_reservation (attempt_id, user_id, tier, period, reserved_usd_micros)
+          values ('00000000-0000-4000-8000-0000000009a1', 'test.app_role', 'fast', '2026-10-01', 665280)`);
+        await tx.execute(sql`
+          update kev_budget_reservation set status = 'settled', settled_usd_micros = 81000, closed_at = now()
+          where attempt_id = '00000000-0000-4000-8000-0000000009a1' and status = 'open'`);
+        const r = await tx.execute(sql`
+          select status, settled_usd_micros::text as settled from kev_budget_reservation
+          where attempt_id = '00000000-0000-4000-8000-0000000009a1'`);
+        expect(r.rows).toEqual([{ status: 'settled', settled: '81000' }]);
+        throw rollback;
+      })
+      .catch((e: unknown) => {
+        if (e !== rollback) throw e;
+      });
+  });
+
+  it('cannot DELETE or TRUNCATE kev_budget_reservation (permission, not trigger)', async () => {
+    await expectPermissionDenied(
+      db.execute(sql`delete from kev_budget_reservation where user_id = 'test.app_role'`),
+    );
+    await expectPermissionDenied(db.execute(sql`truncate kev_budget_reservation`));
+  });
+
+  it('cannot disable or drop the kev_budget_reservation triggers, or replace their function', async () => {
+    await expectPermissionDenied(
+      db.execute(sql`alter table kev_budget_reservation disable trigger all`),
+    );
+    await expectPermissionDenied(
+      db.execute(sql`drop trigger kev_budget_reservation_settle_only on kev_budget_reservation`),
+    );
+    await expectPermissionDenied(
+      db.execute(sql`create or replace function kev_budget_reservation_settle_only() returns trigger as $$
+        begin return new; end $$ language plpgsql`),
+    );
+    const r = await db.execute(
+      sql`select tgname, tgenabled from pg_trigger where tgrelid = 'kev_budget_reservation'::regclass and not tgisinternal order by 1`,
+    );
+    expect(r.rows).toEqual([
+      { tgname: 'kev_budget_reservation_no_truncate', tgenabled: 'O' },
+      { tgname: 'kev_budget_reservation_settle_only', tgenabled: 'O' },
+    ]);
+  });
+
+  it("cannot UPDATE kev_usage's new attempt_id either (permission, not trigger; 0009)", async () => {
+    await expectPermissionDenied(
+      db.execute(
+        sql`update kev_usage set attempt_id = gen_random_uuid() where user_id = 'test.app_role'`,
+      ),
+    );
   });
 
   it('cannot disable or drop the kev_usage triggers', async () => {
