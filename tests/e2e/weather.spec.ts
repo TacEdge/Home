@@ -220,21 +220,25 @@ test.describe('Today', () => {
     await context.close();
   });
 
-  test('X4: without JavaScript the cached forecast stands, with its time; the Why opens; nothing is asked', async ({
-    browser,
-  }) => {
-    await setForecast(at('2026-10-13', '21:00'));
-    const { context, page, posts } = await open(browser, 'alex', at(DAY, '07:03'), '/today', {
-      js: false,
+  for (const [name, viewport] of Object.entries(VIEWPORTS))
+    test(`X4 at ${name}: without JavaScript the cached forecast stands, with its time; the Why opens; nothing is asked`, async ({
+      browser,
+    }) => {
+      await setForecast(at('2026-10-13', '21:00'));
+      const { context, page, posts } = await open(browser, 'alex', at(DAY, '07:03'), '/today', {
+        js: false,
+        viewport,
+      });
+      await expect(page.getByTestId('weather-sentence')).toHaveText(
+        'As of yesterday 21:00, looks dry until midday, then showers possible.',
+      );
+      await expect(visibleCredit(page)).toHaveCount(1);
+      await whyOf(page.getByTestId('weather')).click();
+      await expect(page.getByTestId('weather-why')).toContainText('yesterday 21:00');
+      await expectNoHorizontalScroll(page, `Today without JavaScript at ${name}`);
+      expect(posts()).toBe(0);
+      await context.close();
     });
-    await expect(page.getByTestId('weather-sentence')).toHaveText(
-      'As of yesterday 21:00, looks dry until midday, then showers possible.',
-    );
-    await whyOf(page.getByTestId('weather')).click();
-    await expect(page.getByTestId('weather-why')).toContainText('yesterday 21:00');
-    expect(posts()).toBe(0);
-    await context.close();
-  });
 
   test('X4: “Why ›” sits on the sentence’s line, beside the credit link; opened, its body is below and full width; no overflow at 320 and 375', async ({
     browser,
@@ -387,38 +391,39 @@ test.describe('Today', () => {
     await context.close();
   });
 
-  test('X4, O23: Dismiss and Not useful on an opening, from Today, without JavaScript: back on Today with it gone, for that adult only; Sunday’s follows, worded with “tomorrow”', async ({
-    browser,
-  }) => {
-    await setForecast(at(SAT, '06:55'));
-    const alex = await open(browser, 'alex', at(SAT, '07:30'), '/today', { js: false });
-    await expect(openings(alex.page)).toHaveCount(1);
-    await alex.page.getByRole('button', { name: /^Dismiss: Paint the back fence/ }).click();
-    await alex.page.waitForURL('**/today');
-    await expect(openings(alex.page)).toHaveCount(1);
-    await expect(openings(alex.page)).toContainText(
-      'Nothing is recorded for the household tomorrow, 08:00–19:30.',
-    );
-    await expect(alex.page.getByText('Paint the back fence is recorded')).toHaveCount(0);
-    // Not useful, inside the Why.
-    await whyOf(openings(alex.page)).click();
-    await alex.page.getByRole('button', { name: /^Not useful: Nothing is recorded/ }).click();
-    await alex.page.waitForURL('**/today');
-    await expect(openings(alex.page)).toHaveCount(0);
-    // Sam is untouched (P2), and the same keys are gone from Forward for Alex (the response is everywhere).
-    const sam = await open(browser, 'sam', at(SAT, '07:30'), '/today');
-    await expect(openings(sam.page)).toHaveCount(1);
-    await expect(openings(sam.page)).toContainText('Paint the back fence');
-    await alex.page.goto('/forward');
-    await expect(openings(alex.page)).toHaveCount(0);
-    const rows = await q(
-      `select user_id, response from insight_response where insight_key like 'open_window:%' order by response`,
-    );
-    expect(rows.map((r) => r.response)).toEqual(['dismissed', 'not_useful']);
-    expect(new Set(rows.map((r) => r.user_id)).size).toBe(1);
-    await sam.context.close();
-    await alex.context.close();
-  });
+  for (const [name, viewport] of Object.entries(VIEWPORTS))
+    test(`X4, O23 at ${name}: Dismiss and Not useful on an opening, from Today, without JavaScript: back on Today with it gone, for that adult only; Sunday’s follows, worded with “tomorrow”`, async ({
+      browser,
+    }) => {
+      await setForecast(at(SAT, '06:55'));
+      const alex = await open(browser, 'alex', at(SAT, '07:30'), '/today', { js: false, viewport });
+      await expect(openings(alex.page)).toHaveCount(1);
+      await alex.page.getByRole('button', { name: /^Dismiss: Paint the back fence/ }).click();
+      await alex.page.waitForURL('**/today');
+      await expect(openings(alex.page)).toHaveCount(1);
+      await expect(openings(alex.page)).toContainText(
+        'Nothing is recorded for the household tomorrow, 08:00–19:30.',
+      );
+      await expect(alex.page.getByText('Paint the back fence is recorded')).toHaveCount(0);
+      // Not useful, inside the Why.
+      await whyOf(openings(alex.page)).click();
+      await alex.page.getByRole('button', { name: /^Not useful: Nothing is recorded/ }).click();
+      await alex.page.waitForURL('**/today');
+      await expect(openings(alex.page)).toHaveCount(0);
+      // Sam is untouched (P2), and the same keys are gone from Forward for Alex (the response is everywhere).
+      const sam = await open(browser, 'sam', at(SAT, '07:30'), '/today');
+      await expect(openings(sam.page)).toHaveCount(1);
+      await expect(openings(sam.page)).toContainText('Paint the back fence');
+      await alex.page.goto('/forward');
+      await expect(openings(alex.page)).toHaveCount(0);
+      const rows = await q(
+        `select user_id, response from insight_response where insight_key like 'open_window:%' order by response`,
+      );
+      expect(rows.map((r) => r.response)).toEqual(['dismissed', 'not_useful']);
+      expect(new Set(rows.map((r) => r.user_id)).size).toBe(1);
+      await sam.context.close();
+      await alex.context.close();
+    });
 });
 
 test.describe('Forward Week', () => {
@@ -458,26 +463,33 @@ test.describe('Forward Week', () => {
     await context.close();
   });
 
-  test('X4: without JavaScript, Dismiss from Forward lands back on Forward with the opening gone, and the same key is gone from Today (the day it is listed there)', async ({
-    browser,
-  }) => {
-    const { context, page } = await open(browser, 'alex', at(DAY, '07:03'), '/forward', {
-      js: false,
+  for (const [name, viewport] of Object.entries(VIEWPORTS))
+    test(`X4 at ${name}: without JavaScript, the phrases and credit line stand; Dismiss from Forward lands back on Forward with the opening gone, and the same key is gone from Today (the day it is listed there)`, async ({
+      browser,
+    }) => {
+      const { context, page, posts } = await open(browser, 'alex', at(DAY, '07:03'), '/forward', {
+        js: false,
+        viewport,
+      });
+      await expect(page.getByTestId('day-phrase')).toHaveCount(7);
+      await expect(page.getByTestId('forecast-credit')).toContainText('Forecast as of 06:55');
+      await expect(visibleCredit(page)).toHaveCount(1);
+      await expectNoHorizontalScroll(page, `Forward without JavaScript at ${name}`);
+      expect(posts()).toBe(0);
+      await page
+        .getByRole('button', { name: /^Dismiss: Nothing is recorded for the household on Sunday/ })
+        .click();
+      await page.waitForURL('**/forward');
+      await expect(openings(page)).toHaveCount(1);
+      await expect(openings(page)).toContainText('Paint the back fence');
+      await context.close();
+      await setForecast(at(SAT, '06:55'));
+      const sat = await open(browser, 'alex', at(SAT, '07:30'), '/today', { js: false, viewport });
+      // Saturday's opening shows; Sunday's (dismissed on Forward) does not follow it.
+      await sat.page.getByRole('button', { name: /^Dismiss: Paint the back fence/ }).click();
+      await expect(openings(sat.page)).toHaveCount(0);
+      await sat.context.close();
     });
-    await page
-      .getByRole('button', { name: /^Dismiss: Nothing is recorded for the household on Sunday/ })
-      .click();
-    await page.waitForURL('**/forward');
-    await expect(openings(page)).toHaveCount(1);
-    await expect(openings(page)).toContainText('Paint the back fence');
-    await context.close();
-    await setForecast(at(SAT, '06:55'));
-    const sat = await open(browser, 'alex', at(SAT, '07:30'), '/today');
-    // Saturday's opening shows; Sunday's (dismissed on Forward) does not follow it.
-    await sat.page.getByRole('button', { name: /^Dismiss: Paint the back fence/ }).click();
-    await expect(openings(sat.page)).toHaveCount(0);
-    await sat.context.close();
-  });
 
   test('X7: an older forecast dates the credit line; an unusable one has no phrases and no credit, and the openings say nothing of weather', async ({
     browser,
@@ -647,7 +659,6 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       await expectAccessible(today.page, `Today at ${name}`);
       await expectNoHorizontalScroll(today.page, `Today at ${name}`);
       await shot(today.page, `today-why-open-${name}`);
-      await today.context.close();
 
       await setForecast(at(DAY, '06:55'));
       const week = await open(browser, 'sam', at(DAY, '07:03'), '/forward', { viewport });
@@ -655,7 +666,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       await openAll(week.page);
       await expectAccessible(week.page, `Forward at ${name}`);
       await expectNoHorizontalScroll(week.page, `Forward at ${name}`);
-      for (const page of [week.page]) {
+      for (const page of [today.page, week.page]) {
         for (const link of await page
           .locator('main a[aria-label="Forecast data: Open-Meteo"]')
           .all())
@@ -667,6 +678,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       }
       mkdirSync(SHOTS, { recursive: true });
       await shot(week.page, `forward-week-${name}`);
+      await today.context.close();
       await week.context.close();
     });
   });
