@@ -143,4 +143,14 @@ describe('export completeness', () => {
     expect(exportedTables.has('weather_forecast')).toBe(false);
     expect('weather_forecast' in EXCLUDED_COLUMNS).toBe(false);
   });
+
+  it('budget reservations are excluded, with their reason, and never exported (M8 Package 1a)', () => {
+    expect(EXCLUDED_TABLES.kev_budget_reservation).toBe(
+      "content-free spend-cap bookkeeping; each attempt's actual usage is exported as kevUsage",
+    );
+    expect(exportedTables.has('kev_budget_reservation')).toBe(false);
+    expect('kev_budget_reservation' in EXCLUDED_COLUMNS).toBe(false);
+    // kev_usage itself is still exported, with the columns it had before 0009.
+    expect(exportedTables.get('kev_usage')).toBe('kevUsage');
+  });
 });

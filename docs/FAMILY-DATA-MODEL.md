@@ -278,10 +278,34 @@ Service (M2 Package 5b): `recordUsage` only inserts, with the provider's cost in
 
 Implementation (`0006`): `kev_usage` is append-only: `home_app` has only `SELECT` and `INSERT`, and a trigger refuses update, delete and truncate for every role, as for `audit_log`. It holds no content. Cost is the provider's cost in micro-US-dollars (`cost_usd_micros`, bigint); there is no NZD column or conversion in M2 (the NZ$ spend cap is M8's). `user_id` and `conversation_id` are plain values with no foreign key, so deleting a user or conversation never blocks on or rewrites the log. Token counts and cost are non-negative.
 
-*Approved in M8 Package 0 (ADR 0012 §4, §35; contract §4.6, §13.6; owner decision, 2026-10-13), pending: migration-first in M8 Package 1a, merged and run in Production and Preview before the code that uses it. No schema change is made in Package 0.*
+*Approved in M8 Package 0 (ADR 0012 §4, §35; contract §4.6, §13.6; owner decision, 2026-10-13).* Built in **M8 Package 1a** as migration `0009_kev_budget_reservation` (in review; ADR 0012 §42), migration-first: it runs in Production and Preview before Package 1b, the first code that uses it, merges.
 
-- **`kev_usage.attempt_id`** (uuid, nullable): the attempt a provider call belonged to, so a reservation and its per-call usage reconcile. The table stays append-only.
-- **`kev_budget_reservation`**: one row per Kev attempt, holding the attempt's maximum permitted exposure while it runs, so the household spend cap stays hard when both adults' turns run at once. Columns: `id` (uuid), `attempt_id` (uuid, unique), `user_id` (no foreign key), `tier` (`fast` or `deep`), `period` (the home-zone month, as its first day), `reserved_usd_micros` (bigint, > 0), `status` (`open`, `settled` or `unreconciled`), `settled_usd_micros` (bigint, null while open), `created_at`, `closed_at`. Content-free; no visibility column (it is accounting, read only by the cap and the owner's Usage line, never shown per adult). `home_app` may select, insert and update; a trigger refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change once a row is not `open`, and every delete and truncate. A reservation is taken under a transaction-level advisory lock, checked against settled spend plus open and unreconciled reservations; an `open` row older than the turn route's `maxDuration` plus 30 seconds becomes `unreconciled` and counts in full. Index on `(period, status)`. Whether it is exported, as `kev_usage` is today, is decided in Package 1a. Never deleted by Clear or the retention cleanup.
+**`kev_usage.attempt_id`** (`0009`): uuid, nullable, no default, no backfill, no index, no foreign key: the attempt a provider call belonged to, so a reservation and its per-call usage reconcile. Existing rows keep a null attempt. The table stays append-only: its grants and triggers are unchanged and cover the new column. Its Drizzle definition, and so its place in the export (with `kevUsage`'s other columns, or excluded with a reason), arrive with Package 1b (MIGRATIONS.md, deferred columns).
+
+### KevBudgetReservation
+`kev_budget_reservation` (`0009`): one row per Kev attempt, holding the attempt's maximum permitted exposure while it runs, so the household spend cap stays hard when both adults' turns run at once (contract §13.6). Content-free accounting.
+
+| Field | Notes |
+|---|---|
+| `id` | uuid |
+| `attempt_id` | uuid, unique (`kev_budget_reservation_attempt_id_unique`): one reservation per attempt |
+| `user_id` | text: the adult whose turn it is. No foreign key, as `kev_usage.user_id` |
+| `tier` | `fast` \| `deep` (`CHECK`) |
+| `period` | date: the home-zone month the reservation was taken in, as its first day (`CHECK`: day 1) |
+| `reserved_usd_micros` | bigint, > 0: the attempt's maximum permitted exposure, in micro-US-dollars |
+| `status` | `open` (default) \| `settled` \| `unreconciled` (`CHECK`) |
+| `settled_usd_micros` | bigint, nullable, ≥ 0: the attempt's recorded usage, set only when settled |
+| `created_at` | timestamptz, default `now()` |
+| `closed_at` | timestamptz, nullable: when it was settled or marked unreconciled; never before `created_at` |
+
+- **Each state has one shape** (`kev_budget_reservation_lifecycle_check`): `open` has no settlement and no close time; `settled` has both; `unreconciled` is closed with no settlement, because it counts at its full reserved amount and is never settled. There is deliberately no upper bound on the settlement: recording what was actually billed is never refused, and the budget is enforced when reserving.
+- **Settle-only.** `home_app` has `SELECT`, `INSERT` and `UPDATE` only (`0009` revokes the rest of `0002`'s default privileges). A trigger, for every role, refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change to a row that is no longer `open`, any update that leaves a row `open`, and every delete and truncate. The only changes are `open` → `settled` and `open` → `unreconciled`.
+- **Born open.** A second trigger, for every role, refuses inserting a row that is `settled` or `unreconciled`, or whose `created_at` is in the future (ADR 0012 §42): a reservation is always taken `open`, now or earlier, and a closed row only ever comes from closing an open one.
+- **Money** is whole micro-US-dollars in `bigint`, as in `kev_usage`; there is no NZD column.
+- **No `created_by`, `created_via` or `visibility`: an exception to the common fields (§2).** It is accounting, not a user-facing record: read only through the bookkeeping and spend-cap services (the cap, and the owner's Usage line's count of unreconciled reservations), never by a page or route directly, never shown per adult. Not registered in Activity.
+- **Excluded from export,** with its reason (`src/domain/export/spec.ts`): content-free spend-cap bookkeeping; each attempt's actual usage is exported as `kevUsage`.
+- **Concurrency** (Package 1b; contract §13.6): a reservation is taken under a transaction-level advisory lock, checked against the month's settled spend (`kev_usage`) plus every `open` reservation, whatever its month, and the month's `unreconciled` reservations (with those created in the 120 seconds before it began: contract §13.6); an `open` row older than the turn route's `maxDuration` plus 30 seconds becomes `unreconciled` and counts in full. Never deleted by Clear or the retention cleanup (the trigger refuses it).
+- Indexes: the primary key, the unique attempt, and `(period, status)`, which serves the reservation's sum.
 
 ### WeatherCache
 Cached forecast. Built in **M7** as `weather_forecast`, migration `0008` (M7 Package 1a; contract §3.9, ADR 0011 §14, approved 2026-10-11, with the location fingerprint as amended at approval).

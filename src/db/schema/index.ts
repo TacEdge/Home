@@ -1,4 +1,5 @@
-// All tables: auth and audit (M1), HOME's domain tables (M2 on) and the forecast cache (M7).
+// All tables: auth and audit (M1), HOME's domain tables (M2 on), the forecast cache (M7)
+// and Kev's budget reservations (M8).
 export * from './common';
 export * from './auth';
 export * from './audit';
@@ -13,5 +14,6 @@ export * from './capture';
 export * from './context';
 export * from './proposal';
 export * from './kev-usage';
+export * from './kev-budget';
 export * from './insight-response';
 export * from './weather';

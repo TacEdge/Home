@@ -1842,6 +1842,7 @@ describe('0006: tables and columns', () => {
       ['cache_write_tokens', 'integer', 'NO', '0'],
       ['cost_usd_micros', 'bigint', 'NO', null],
       ['escalated', 'boolean', 'NO', 'false'],
+      ['attempt_id', 'uuid', 'YES', null], // added by 0009
     ]);
   });
 
@@ -3238,6 +3239,7 @@ describe('0008 upgrades the production schema (0000–0007) in place', () => {
     await admin.db.execute(sql.raw(`create database ${name}`));
     const upAdmin = createDb(adminUrl);
     const production = migrationsUpTo('0007_calendar_schema');
+    let upTo: string | undefined;
     try {
       await migrate(upAdmin.db, { migrationsFolder: production });
       await upAdmin.db.execute(
@@ -3274,11 +3276,16 @@ describe('0008 upgrades the production schema (0000–0007) in place', () => {
       expect(tablesBefore).not.toContain('weather_forecast');
       const before = await snapshot(tablesBefore);
 
-      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      // Up to 0008 only: later migrations (0009 adds kev_usage.attempt_id)
+      // have their own upgrade test.
+      upTo = migrationsUpTo('0008_weather_forecast');
+      await migrate(upAdmin.db, { migrationsFolder: upTo });
       const applied = await upAdmin.db.execute(
         sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
       );
-      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+      expect(applied.rows[0]?.n).toBe(
+        journal.entries.findIndex((e) => e.tag === '0008_weather_forecast') + 1,
+      );
 
       const tablesAfter = await tablesOf();
       expect(tablesAfter.filter((t) => !tablesBefore.includes(t))).toEqual(['weather_forecast']);
@@ -3286,6 +3293,859 @@ describe('0008 upgrades the production schema (0000–0007) in place', () => {
       expect(await snapshot(tablesBefore)).toEqual(before);
       const n = await upAdmin.db.execute(sql`select count(*)::int as n from weather_forecast`);
       expect(n.rows[0]?.n).toBe(0);
+    } finally {
+      await upAdmin.close();
+      rmSync(production, { recursive: true, force: true });
+      if (upTo) rmSync(upTo, { recursive: true, force: true });
+      await dropDatabase(name);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0009: kev_budget_reservation and kev_usage.attempt_id (M8 Package 1a,
+// migration only; contract §4.6, §13.6, ADR 0012 §35). Content-free
+// accounting for the household spend cap: settle-only for every role, and
+// kev_usage stays append-only with its new nullable attempt id.
+// ---------------------------------------------------------------------------
+
+const RESERVATION_COLUMNS: Col[] = [
+  ['id', 'uuid', 'NO', 'gen_random_uuid()'],
+  ['attempt_id', 'uuid', 'NO', null],
+  ['user_id', 'text', 'NO', null],
+  ['tier', 'text', 'NO', null],
+  ['period', 'date', 'NO', null],
+  ['reserved_usd_micros', 'bigint', 'NO', null],
+  ['status', 'text', 'NO', "'open'::text"],
+  ['settled_usd_micros', 'bigint', 'YES', null],
+  ['created_at', TS, 'NO', 'now()'],
+  ['closed_at', TS, 'YES', null],
+];
+
+/** The migration's statements, comments removed, split at the breakpoints. */
+const statementsOf = (tag: string) =>
+  readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8')
+    .split('--> statement-breakpoint')
+    .map((s) => s.replace(/--[^\n]*\n/g, '\n').trim())
+    .filter(Boolean);
+
+describe('0009: kev_budget_reservation table and columns', () => {
+  it('has exactly the contract columns, types, nullability and defaults', async () => {
+    expect(await columnsOf('kev_budget_reservation')).toEqual(RESERVATION_COLUMNS);
+  });
+
+  it('is content-free: no text, model, message, title, name, visibility or NZD column', async () => {
+    for (const [name] of await columnsOf('kev_budget_reservation'))
+      expect(name).not.toMatch(
+        /text|content|model|message|title|name|summary|prompt|visibility|created_by|nzd|cost/i,
+      );
+  });
+
+  it('adds one nullable attempt_id to kev_usage, with no default, as its last column', async () => {
+    expect((await columnsOf('kev_usage')).at(-1)).toEqual(['attempt_id', 'uuid', 'YES', null]);
+    expect(await columnsOf('kev_usage')).toHaveLength(13);
+  });
+
+  it('0009 creates the table, its index, grants and triggers, and adds only kev_usage.attempt_id', () => {
+    const statements = statementsOf('0009_kev_budget_reservation');
+    expect(statements.map((s) => s.split('\n')[0])).toEqual([
+      'CREATE TABLE "kev_budget_reservation" (',
+      'ALTER TABLE "kev_usage" ADD COLUMN "attempt_id" uuid;',
+      'CREATE INDEX "kev_budget_reservation_period_status_idx" ON "kev_budget_reservation" USING btree ("period","status");',
+      'DO $$ BEGIN',
+      'CREATE OR REPLACE FUNCTION kev_budget_reservation_settle_only() RETURNS trigger AS $$',
+      'CREATE TRIGGER kev_budget_reservation_settle_only',
+      'CREATE TRIGGER kev_budget_reservation_no_truncate',
+      'CREATE OR REPLACE FUNCTION kev_budget_reservation_born_open() RETURNS trigger AS $$',
+      'CREATE TRIGGER kev_budget_reservation_born_open',
+    ]);
+    const text = statements.join('\n');
+    // Only these two tables are named; nothing is dropped, renamed, granted,
+    // backfilled or altered beyond the one added column.
+    const named = new Set(
+      [...text.matchAll(/(?:TABLE|ON) "([^"]+)"/g)].map((m) => m[1] ?? '').filter(Boolean),
+    );
+    expect([...named].sort()).toEqual(['kev_budget_reservation', 'kev_usage']);
+    expect(text).not.toMatch(/\b(DROP|RENAME|ALTER COLUMN|GRANT|INSERT INTO|DELETE FROM)\b/);
+    expect(text).not.toMatch(/UPDATE "/);
+    expect(text).not.toMatch(/REFERENCES "/);
+    expect(statements[3]).toMatch(
+      /REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE "kev_budget_reservation" FROM home_app;/,
+    );
+  });
+});
+
+describe('0009: kev_budget_reservation constraints, indexes, triggers and grants', () => {
+  it('has the tier, status, period, amounts, lifecycle and close-time CHECKs, the unique attempt and the key, nothing else', async () => {
+    const r = await db.execute(sql`
+      select conname, contype from pg_constraint
+      where conrelid = 'kev_budget_reservation'::regclass order by 1`);
+    expect(r.rows.map((x) => `${x.conname} ${x.contype}`)).toEqual([
+      'kev_budget_reservation_amounts_check c',
+      'kev_budget_reservation_attempt_id_unique u',
+      'kev_budget_reservation_closed_at_check c',
+      'kev_budget_reservation_lifecycle_check c',
+      'kev_budget_reservation_period_check c',
+      'kev_budget_reservation_pkey p',
+      'kev_budget_reservation_status_check c',
+      'kev_budget_reservation_tier_check c',
+    ]);
+  });
+
+  it('is indexed by its primary key, the unique attempt and (period, status) only', async () => {
+    const r = await db.execute(sql`
+      select indexname, indexdef from pg_indexes
+      where tablename = 'kev_budget_reservation' order by 1`);
+    expect(r.rows.map((x) => [x.indexname, String(x.indexdef).replace(/^.* USING /, '')])).toEqual([
+      ['kev_budget_reservation_attempt_id_unique', 'btree (attempt_id)'],
+      ['kev_budget_reservation_period_status_idx', 'btree (period, status)'],
+      ['kev_budget_reservation_pkey', 'btree (id)'],
+    ]);
+    expect(String(r.rows[0]?.indexdef)).toMatch(/^CREATE UNIQUE INDEX/);
+    expect(String(r.rows[1]?.indexdef)).toMatch(/^CREATE INDEX/);
+  });
+
+  it('adds no index, constraint or foreign key to kev_usage, and none to or from the new table', async () => {
+    const idx = await db.execute(
+      sql`select indexname from pg_indexes where tablename = 'kev_usage' order by 1`,
+    );
+    expect(idx.rows.map((x) => x.indexname)).toEqual([
+      'kev_usage_at_idx',
+      'kev_usage_pkey',
+      'kev_usage_user_id_at_idx',
+    ]);
+    const cons = await db.execute(sql`
+      select conname from pg_constraint where conrelid = 'kev_usage'::regclass order by 1`);
+    expect(cons.rows.map((x) => x.conname)).toEqual([
+      'kev_usage_counts_check',
+      'kev_usage_pkey',
+      'kev_usage_tier_check',
+    ]);
+    const fks = await db.execute(sql`
+      select count(*)::int as n from pg_constraint where contype = 'f'
+        and (conrelid = any (array['kev_budget_reservation', 'kev_usage']::regclass[])
+             or confrelid = any (array['kev_budget_reservation', 'kev_usage']::regclass[]))`);
+    expect(fks.rows[0]?.n).toBe(0);
+  });
+
+  it('has the born-open insert trigger, the settle-only row trigger and the statement trigger against truncation, owned by the migration role', async () => {
+    const t = await admin.db.execute(sql`
+      select tgname, tgenabled, pg_get_triggerdef(g.oid) as def,
+             pg_get_userbyid(p.proowner) <> 'home_app' as not_app
+      from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+      where tgrelid = 'kev_budget_reservation'::regclass and not tgisinternal order by 1`);
+    expect(t.rows).toEqual([
+      {
+        tgname: 'kev_budget_reservation_born_open',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_budget_reservation_born_open BEFORE INSERT ON public.kev_budget_reservation FOR EACH ROW EXECUTE FUNCTION kev_budget_reservation_born_open()',
+        not_app: true,
+      },
+      {
+        tgname: 'kev_budget_reservation_no_truncate',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_budget_reservation_no_truncate BEFORE TRUNCATE ON public.kev_budget_reservation FOR EACH STATEMENT EXECUTE FUNCTION kev_budget_reservation_settle_only()',
+        not_app: true,
+      },
+      {
+        tgname: 'kev_budget_reservation_settle_only',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_budget_reservation_settle_only BEFORE DELETE OR UPDATE ON public.kev_budget_reservation FOR EACH ROW EXECUTE FUNCTION kev_budget_reservation_settle_only()',
+        not_app: true,
+      },
+    ]);
+  });
+
+  it('leaves the kev_usage append-only triggers exactly as 0006 made them', async () => {
+    const t = await admin.db.execute(sql`
+      select tgname, tgenabled, pg_get_triggerdef(g.oid) as def
+      from pg_trigger g where tgrelid = 'kev_usage'::regclass and not tgisinternal order by 1`);
+    expect(t.rows).toEqual([
+      {
+        tgname: 'kev_usage_no_truncate',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_usage_no_truncate BEFORE TRUNCATE ON public.kev_usage FOR EACH STATEMENT EXECUTE FUNCTION kev_usage_immutable()',
+      },
+      {
+        tgname: 'kev_usage_no_update_delete',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_usage_no_update_delete BEFORE DELETE OR UPDATE ON public.kev_usage FOR EACH ROW EXECUTE FUNCTION kev_usage_immutable()',
+      },
+    ]);
+  });
+
+  it('home_app has exactly SELECT, INSERT and UPDATE on kev_budget_reservation, no column grant; kev_usage keeps SELECT and INSERT', async () => {
+    const grants = async (table: string) =>
+      (
+        await db.execute(sql`
+          select privilege_type, is_grantable from information_schema.role_table_grants
+          where grantee = 'home_app' and table_name = ${table} order by 1`)
+      ).rows;
+    expect(await grants('kev_budget_reservation')).toEqual(
+      ['INSERT', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+        privilege_type,
+        is_grantable: 'NO',
+      })),
+    );
+    expect(await grants('kev_usage')).toEqual(
+      ['INSERT', 'SELECT'].map((privilege_type) => ({ privilege_type, is_grantable: 'NO' })),
+    );
+    const cols = await db.execute(sql`
+      select attname from pg_attribute
+      where attrelid = any (array['kev_budget_reservation', 'kev_usage']::regclass[])
+        and attacl is not null`);
+    expect(cols.rows).toEqual([]);
+  });
+});
+
+describe('0009: kev_budget_reservation behaviour (each case rolled back)', () => {
+  const U = 'u-0009';
+  const A1 = '00000000-0000-4000-8000-000000000901';
+  const A2 = '00000000-0000-4000-8000-000000000902';
+  type Row = {
+    attempt?: string;
+    user?: string | null;
+    tier?: string | null;
+    period?: string | null;
+    reserved?: string | null;
+    status?: string;
+    settled?: string | null;
+    closedAt?: string | null;
+    createdAt?: ReturnType<typeof sql>;
+  };
+  /**
+   * One reservation insert; unset fields take a valid open Sonnet-sized
+   * reservation for October. Only the born-open tests pass a closed status:
+   * every other closed row is reached by inserting open and closing it.
+   */
+  const reserve = (r: Row = {}) => {
+    const cols = ['attempt_id', 'user_id', 'tier', 'period', 'reserved_usd_micros'];
+    const vals = [
+      sql`${r.attempt ?? A1}::uuid`,
+      sql`${r.user === undefined ? U : r.user}`,
+      sql`${r.tier === undefined ? 'fast' : r.tier}`,
+      sql`${r.period === undefined ? '2026-10-01' : r.period}::date`,
+      sql`${r.reserved === undefined ? '665280' : r.reserved}::bigint`,
+    ];
+    if (r.status !== undefined) {
+      cols.push('status');
+      vals.push(sql`${r.status}`);
+    }
+    if (r.settled !== undefined) {
+      cols.push('settled_usd_micros');
+      vals.push(sql`${r.settled}::bigint`);
+    }
+    if (r.closedAt !== undefined) {
+      cols.push('closed_at');
+      vals.push(r.closedAt === 'now' ? sql`now()` : sql`${r.closedAt}::timestamptz`);
+    }
+    if (r.createdAt !== undefined) {
+      cols.push('created_at');
+      vals.push(r.createdAt);
+    }
+    return sql`insert into kev_budget_reservation (${sql.raw(cols.join(', '))})
+      values (${sql.join(vals, sql`, `)})`;
+  };
+  type Close = { status: string; settled?: string | null; closedAt?: string | null };
+  /** Closes (or tries to close) an open reservation in place: status, settlement and close time. */
+  const closeAs = (attemptId: string, c: Close) =>
+    sql`update kev_budget_reservation set status = ${c.status},
+          settled_usd_micros = ${c.settled ?? null}::bigint,
+          closed_at = ${
+            c.closedAt === 'now'
+              ? sql`now()`
+              : c.closedAt === undefined || c.closedAt === null
+                ? sql`null`
+                : sql`${c.closedAt}::timestamptz`
+          }
+        where attempt_id = ${attemptId}::uuid`;
+  /** Inserts an open reservation and closes it: the only way a closed row comes to be. */
+  const reserveClosed = async (tx: Db, attemptId: string, c: Close) => {
+    await tx.execute(reserve({ attempt: attemptId }));
+    await tx.execute(closeAs(attemptId, c));
+  };
+  /** Expects a failure inside a savepoint, so the case can go on after it. */
+  const refused = (tx: Db, q: ReturnType<typeof sql>, code: string) =>
+    expectCode(
+      tx.transaction(async (sp) => {
+        await sp.execute(q);
+      }),
+      code,
+    );
+  /** Expects the settle-only trigger's refusal (P0001) with this message, inside a savepoint. */
+  const triggerRefuses = async (tx: Db, q: ReturnType<typeof sql>, message: RegExp) => {
+    const error = await tx
+      .transaction(async (sp) => {
+        await sp.execute(q);
+      })
+      .then(
+        () => null,
+        (e: unknown) => e as Error & { cause?: Error & { code?: string } },
+      );
+    expect(error, `expected the trigger to refuse: ${String(message)}`).not.toBeNull();
+    expect(error?.cause?.code).toBe('P0001');
+    expect(error?.cause?.message).toMatch(message);
+  };
+  /** Accepts an insert inside a savepoint and removes nothing (rows stay until the case rolls back). */
+  const accepted = async (tx: Db, q: ReturnType<typeof sql>) => {
+    await tx.transaction(async (sp) => {
+      await sp.execute(q);
+    });
+  };
+  const KEPT = /keeps its id, attempt, user, tier, period, reserved amount and creation time/;
+  const CLOSED = /a closed kev_budget_reservation cannot change/;
+  const ONLY_CLOSES = /may only become settled or unreconciled/;
+  const NEVER_REMOVED = /kev_budget_reservation rows are never removed/;
+  let n = 0;
+  /** A fresh attempt id for each accepted row, so the unique attempt never gets in the way. */
+  const attempt = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+
+  it('applies the defaults: an id, open, created now, and no settlement or close time', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve());
+      const r = await tx.execute(sql`
+        select id is not null as has_id, status, created_at = now() as created_now,
+               settled_usd_micros, closed_at, reserved_usd_micros::text as reserved, period::text as period
+        from kev_budget_reservation`);
+      expect(r.rows).toEqual([
+        {
+          has_id: true,
+          status: 'open',
+          created_now: true,
+          settled_usd_micros: null,
+          closed_at: null,
+          reserved: '665280',
+          period: '2026-10-01',
+        },
+      ]);
+    }));
+
+  it('requires an attempt, a user, a tier, a period and a reserved amount (NOT NULL)', () =>
+    rolledBack(async (tx) => {
+      await refused(
+        tx,
+        sql`insert into kev_budget_reservation (user_id, tier, period, reserved_usd_micros) values (${U}, 'fast', '2026-10-01', 1)`,
+        '23502',
+      );
+      await refused(tx, reserve({ user: null }), '23502');
+      await refused(tx, reserve({ tier: null }), '23502');
+      await refused(tx, reserve({ period: null }), '23502');
+      await refused(tx, reserve({ reserved: null }), '23502');
+    }));
+
+  it('accepts only the fast and deep tiers', () =>
+    rolledBack(async (tx) => {
+      await accepted(tx, reserve({ attempt: attempt(), tier: 'fast' }));
+      await accepted(tx, reserve({ attempt: attempt(), tier: 'deep' }));
+      for (const tier of ['turbo', 'Fast', 'DEEP', 'haiku', ''])
+        await refused(tx, reserve({ attempt: attempt(), tier }), '23514');
+    }));
+
+  it('accepts a period only as the first day of a month', () =>
+    rolledBack(async (tx) => {
+      for (const period of ['2026-10-01', '2026-11-01', '2027-01-01', '2028-02-01'])
+        await accepted(tx, reserve({ attempt: attempt(), period }));
+      for (const period of ['2026-10-02', '2026-10-31', '2026-09-30', '2028-02-29', '2026-12-15'])
+        await refused(tx, reserve({ attempt: attempt(), period }), '23514');
+    }));
+
+  it('accepts only a positive reserved amount, in whole micro-US-dollars', () =>
+    rolledBack(async (tx) => {
+      await accepted(tx, reserve({ attempt: attempt(), reserved: '1' }));
+      await accepted(tx, reserve({ attempt: attempt(), reserved: '1500000' }));
+      await refused(tx, reserve({ attempt: attempt(), reserved: '0' }), '23514');
+      await refused(tx, reserve({ attempt: attempt(), reserved: '-1' }), '23514');
+      // bigint: a fraction is not a micro-dollar amount.
+      await refused(
+        tx,
+        sql`insert into kev_budget_reservation (attempt_id, user_id, tier, period, reserved_usd_micros)
+            values (${attempt()}::uuid, ${U}, 'fast', '2026-10-01', '1.5')`,
+        '22P02',
+      );
+    }));
+
+  it('accepts only the open, settled and unreconciled statuses', () =>
+    rolledBack(async (tx) => {
+      for (const status of ['pending', 'OPEN', 'closed', 'released', ''])
+        await refused(tx, reserve({ attempt: attempt(), status }), '23514');
+      await refused(
+        tx,
+        sql`insert into kev_budget_reservation (attempt_id, user_id, tier, period, reserved_usd_micros, status)
+            values (${attempt()}::uuid, ${U}, 'fast', '2026-10-01', 1, null)`,
+        '23502',
+      );
+    }));
+
+  // Open shapes are inserted; closed shapes are reached the only way they
+  // can be, by closing an open row, so the lifecycle CHECK (23514) still
+  // judges each shape and the born-open trigger never gets in its way.
+  it.each([
+    ['open, with nothing closed', 'open', null, null, true],
+    ['open with a settlement', 'open', '10', null, false],
+    ['open with a zero settlement', 'open', '0', null, false],
+    ['open with a close time', 'open', null, 'now', false],
+    ['open with both', 'open', '10', 'now', false],
+    ['settled with its amount and close time', 'settled', '10', 'now', true],
+    ['settled at zero (no call reached the provider)', 'settled', '0', 'now', true],
+    ['settled without an amount', 'settled', null, 'now', false],
+    ['settled without a close time', 'settled', '10', null, false],
+    ['settled with neither', 'settled', null, null, false],
+    ['unreconciled, closed with no settlement', 'unreconciled', null, 'now', true],
+    ['unreconciled with a settlement', 'unreconciled', '10', 'now', false],
+    ['unreconciled without a close time', 'unreconciled', null, null, false],
+    ['unreconciled with a settlement and no close time', 'unreconciled', '10', null, false],
+  ] as const)('lifecycle: %s', (_l, status, settled, closedAt, ok) =>
+    rolledBack(async (tx) => {
+      const id = attempt();
+      let q: ReturnType<typeof sql>;
+      if (status === 'open') q = reserve({ attempt: id, status, settled, closedAt });
+      else {
+        await tx.execute(reserve({ attempt: id }));
+        q = closeAs(id, { status, settled, closedAt });
+      }
+      if (ok) await accepted(tx, q);
+      else await refused(tx, q, '23514');
+      const r = await tx.execute(
+        sql`select status from kev_budget_reservation where attempt_id = ${id}::uuid`,
+      );
+      expect(r.rows).toEqual(ok ? [{ status }] : status === 'open' ? [] : [{ status: 'open' }]);
+    }),
+  );
+
+  it('refuses a negative settlement; accepts and stores one above the reservation (recording real usage is never refused)', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1, reserved: '665280' }));
+      await refused(
+        tx,
+        closeAs(A1, { status: 'settled', settled: '-1', closedAt: 'now' }),
+        '23514',
+      );
+      await accepted(tx, closeAs(A1, { status: 'settled', settled: '700000', closedAt: 'now' }));
+      const r = await tx.execute(sql`
+        select status, reserved_usd_micros::text as reserved, settled_usd_micros::text as settled
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([{ status: 'settled', reserved: '665280', settled: '700000' }]);
+    }));
+
+  it('refuses a close time before the creation time; accepts the same instant', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await refused(
+        tx,
+        closeAs(A1, {
+          status: 'unreconciled',
+          closedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        }),
+        '23514',
+      );
+      await accepted(tx, closeAs(A1, { status: 'unreconciled', closedAt: 'now' }));
+    }));
+
+  // Born open (the reviewed 0009 fix): a reservation is always taken open,
+  // now or earlier, never closed and never in the future, for every role.
+  const BORN_OPEN = /a kev_budget_reservation is always taken open/;
+  const NOT_FUTURE = /a kev_budget_reservation cannot be created in the future/;
+  it.each([
+    ['the runtime role (home_app)', () => db],
+    ['the migration/admin role', () => admin.db],
+  ] as const)(
+    'refuses inserting a settled or unreconciled reservation, as %s (born open)',
+    (_r, on) =>
+      rolledBackAs(on(), async (tx) => {
+        for (const [status, settled] of [
+          ['settled', '81000'],
+          ['settled', '0'],
+          ['unreconciled', null],
+        ] as const)
+          await triggerRefuses(
+            tx,
+            reserve({ attempt: attempt(), status, settled, closedAt: 'now' }),
+            BORN_OPEN,
+          );
+        // Even a shape the lifecycle CHECK would refuse meets the trigger first.
+        await triggerRefuses(tx, reserve({ attempt: attempt(), status: 'settled' }), BORN_OPEN);
+        // Naming open explicitly is still an open reservation.
+        await accepted(tx, reserve({ attempt: attempt(), status: 'open' }));
+        const r = await tx.execute(
+          sql`select status, count(*)::int as n from kev_budget_reservation group by 1`,
+        );
+        expect(r.rows).toEqual([{ status: 'open', n: 1 }]);
+      }),
+  );
+
+  it.each([
+    ['the runtime role (home_app)', () => db],
+    ['the migration/admin role', () => admin.db],
+  ] as const)(
+    'refuses a reservation created in the future, as %s; accepts now and earlier',
+    (_r, on) =>
+      rolledBackAs(on(), async (tx) => {
+        for (const createdAt of [
+          sql`now() + interval '1 second'`,
+          sql`now() + interval '1 microsecond'`,
+          sql`now() + interval '10 years'`,
+          sql`'9999-12-31T00:00:00Z'::timestamptz`,
+        ])
+          await triggerRefuses(tx, reserve({ attempt: attempt(), createdAt }), NOT_FUTURE);
+        // The default (now()), now() named, and a backdated time are all taken.
+        await accepted(tx, reserve({ attempt: attempt() }));
+        await accepted(tx, reserve({ attempt: attempt(), createdAt: sql`now()` }));
+        await accepted(tx, reserve({ attempt: A1, createdAt: sql`now() - interval '1 hour'` }));
+        const r = await tx.execute(sql`
+        select count(*)::int as n, count(*) filter (where created_at = now())::int as now_n,
+               count(*) filter (where created_at = now() - interval '1 hour')::int as back_n
+        from kev_budget_reservation`);
+        expect(r.rows).toEqual([{ n: 3, now_n: 2, back_n: 1 }]);
+      }),
+  );
+
+  it('a backdated open reservation can still close (as the stale sweep will close it, unreconciled)', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1, createdAt: sql`now() - interval '5 minutes'` }));
+      await tx.execute(sql`
+        update kev_budget_reservation set status = 'unreconciled', closed_at = now()
+        where status = 'open' and created_at < now() - interval '120 seconds'`);
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros, closed_at = now() as closed_now
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([
+        { status: 'unreconciled', settled_usd_micros: null, closed_now: true },
+      ]);
+    }));
+
+  it('a settlement refused inside a transaction leaves the reservation open and none of its usage rows', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      // One settlement, all or nothing: the usage rows and the close together.
+      const error = await tx
+        .transaction(async (sp) => {
+          await sp.execute(sql`
+            insert into kev_usage (user_id, tier, model, cost_usd_micros, attempt_id)
+            values (${U}, 'fast', 'm', 40000, ${A1}::uuid), (${U}, 'fast', 'm', 41000, ${A1}::uuid)`);
+          // Refused by the trigger (the reserved amount is fixed).
+          await sp.execute(sql`
+            update kev_budget_reservation set status = 'settled', settled_usd_micros = 81000,
+              closed_at = now(), reserved_usd_micros = 81000
+            where attempt_id = ${A1} and status = 'open'`);
+        })
+        .then(
+          () => null,
+          (e: unknown) => e as Error & { cause?: { code?: string } },
+        );
+      expect(error?.cause?.code).toBe('P0001');
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros, closed_at from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([{ status: 'open', settled_usd_micros: null, closed_at: null }]);
+      const u = await tx.execute(
+        sql`select count(*)::int as n from kev_usage where attempt_id = ${A1}::uuid`,
+      );
+      expect(u.rows[0]?.n).toBe(0);
+    }));
+
+  it('holds one reservation per attempt (UNIQUE), whoever, whichever tier or month', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await refused(tx, reserve({ attempt: A1 }), '23505');
+      await refused(
+        tx,
+        reserve({ attempt: A1, user: 'u-other', tier: 'deep', period: '2026-11-01' }),
+        '23505',
+      );
+      await accepted(tx, reserve({ attempt: A2 }));
+      const r = await tx.execute(sql`select count(*)::int as n from kev_budget_reservation`);
+      expect(r.rows[0]?.n).toBe(2);
+    }));
+
+  it('settles an open reservation: status, amount and close time, once', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await tx.execute(sql`
+        update kev_budget_reservation set status = 'settled', settled_usd_micros = 81000, closed_at = now()
+        where attempt_id = ${A1} and status = 'open'`);
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros::text as settled, reserved_usd_micros::text as reserved,
+               closed_at = now() as closed_now
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([
+        { status: 'settled', settled: '81000', reserved: '665280', closed_now: true },
+      ]);
+      // Settling it again, or anything else about it, is refused.
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set settled_usd_micros = 1 where attempt_id = ${A1}`,
+        CLOSED,
+      );
+      // A settlement written only for open rows finds nothing to change.
+      const again = await tx.execute(sql`
+        update kev_budget_reservation set status = 'settled', settled_usd_micros = 1, closed_at = now()
+        where attempt_id = ${A1} and status = 'open'`);
+      expect(again.rowCount).toBe(0);
+    }));
+
+  it('marks an open reservation unreconciled: closed, no settlement, counted at its full amount', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await tx.execute(sql`
+        update kev_budget_reservation set status = 'unreconciled', closed_at = now()
+        where attempt_id = ${A1} and status = 'open'`);
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros, reserved_usd_micros::text as reserved
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([
+        { status: 'unreconciled', settled_usd_micros: null, reserved: '665280' },
+      ]);
+      // Never settled afterwards.
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set status = 'settled', settled_usd_micros = 1 where attempt_id = ${A1}`,
+        CLOSED,
+      );
+    }));
+
+  it('closing still needs its fields: the lifecycle CHECK refuses a settle without an amount or close time', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await refused(
+        tx,
+        sql`update kev_budget_reservation set status = 'settled', closed_at = now() where attempt_id = ${A1}`,
+        '23514',
+      );
+      await refused(
+        tx,
+        sql`update kev_budget_reservation set status = 'settled', settled_usd_micros = 5 where attempt_id = ${A1}`,
+        '23514',
+      );
+      await refused(
+        tx,
+        sql`update kev_budget_reservation set status = 'unreconciled' where attempt_id = ${A1}`,
+        '23514',
+      );
+    }));
+
+  it.each([
+    ['id', sql`id = gen_random_uuid()`],
+    ['attempt_id', sql`attempt_id = ${A2}::uuid`],
+    ['user_id', sql`user_id = 'u-other'`],
+    ['tier', sql`tier = 'deep'`],
+    ['period', sql`period = '2026-11-01'`],
+    ['reserved_usd_micros (down)', sql`reserved_usd_micros = 1`],
+    ['reserved_usd_micros (up)', sql`reserved_usd_micros = 1500000`],
+    ['created_at', sql`created_at = now() - interval '1 hour'`],
+  ])('refuses changing an open reservation’s %s, alone or while closing it', (_c, set) =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set ${set} where attempt_id = ${A1}`,
+        KEPT,
+      );
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set ${set}, status = 'settled', settled_usd_micros = 5, closed_at = now() where attempt_id = ${A1}`,
+        KEPT,
+      );
+      const r = await tx.execute(sql`select status from kev_budget_reservation`);
+      expect(r.rows).toEqual([{ status: 'open' }]);
+    }),
+  );
+
+  it('refuses an update that leaves a reservation open, even one that changes nothing', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set status = 'open' where attempt_id = ${A1}`,
+        ONLY_CLOSES,
+      );
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set reserved_usd_micros = reserved_usd_micros where attempt_id = ${A1}`,
+        ONLY_CLOSES,
+      );
+    }));
+
+  it.each([
+    ['reopen it', sql`status = 'open', settled_usd_micros = null, closed_at = null`],
+    ['change its settled amount', sql`settled_usd_micros = 1`],
+    ['change its close time', sql`closed_at = now() + interval '1 minute'`],
+    ['mark it unreconciled', sql`status = 'unreconciled', settled_usd_micros = null`],
+    ['change nothing', sql`status = status`],
+  ])('refuses any change to a settled reservation: %s', (_l, set) =>
+    rolledBack(async (tx) => {
+      await reserveClosed(tx, A1, { status: 'settled', settled: '81000', closedAt: 'now' });
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set ${set} where attempt_id = ${A1}`,
+        CLOSED,
+      );
+    }),
+  );
+
+  it.each([
+    ['reopen it', sql`status = 'open', closed_at = null`],
+    ['settle it', sql`status = 'settled', settled_usd_micros = 1`],
+    ['change its close time', sql`closed_at = now() + interval '1 minute'`],
+  ])('refuses any change to an unreconciled reservation: %s', (_l, set) =>
+    rolledBack(async (tx) => {
+      await reserveClosed(tx, A1, { status: 'unreconciled', closedAt: 'now' });
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set ${set} where attempt_id = ${A1}`,
+        CLOSED,
+      );
+    }),
+  );
+
+  it('refuses every delete and truncate, and a reserved-amount change, even for the migration/admin role (trigger, not permission)', () =>
+    rolledBackAs(admin.db, async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      await reserveClosed(tx, A2, { status: 'settled', settled: '81000', closedAt: 'now' });
+      await triggerRefuses(
+        tx,
+        sql`delete from kev_budget_reservation where attempt_id = ${A1}`,
+        NEVER_REMOVED,
+      );
+      await triggerRefuses(
+        tx,
+        sql`delete from kev_budget_reservation where attempt_id = ${A2}`,
+        NEVER_REMOVED,
+      );
+      await triggerRefuses(tx, sql`truncate kev_budget_reservation`, NEVER_REMOVED);
+      await triggerRefuses(
+        tx,
+        sql`update kev_budget_reservation set reserved_usd_micros = 1 where attempt_id = ${A1}`,
+        KEPT,
+      );
+      const r = await tx.execute(sql`select count(*)::int as n from kev_budget_reservation`);
+      expect(r.rows[0]?.n).toBe(2);
+    }));
+
+  it('kev_usage takes an attempt id or none; still append-only, attempt id included, for every role (trigger)', () =>
+    rolledBackAs(admin.db, async (tx) => {
+      await tx.execute(sql`
+        insert into kev_usage (user_id, tier, model, cost_usd_micros, attempt_id)
+        values (${U}, 'fast', 'm', 81000, ${A1}::uuid), (${U}, 'fast', 'm', 0, null)`);
+      const r = await tx.execute(sql`
+        select attempt_id from kev_usage where user_id = ${U} order by attempt_id nulls last`);
+      expect(r.rows).toEqual([{ attempt_id: A1 }, { attempt_id: null }]);
+      await refused(
+        tx,
+        sql`insert into kev_usage (user_id, tier, model, cost_usd_micros, attempt_id) values (${U}, 'fast', 'm', 1, 'not-a-uuid')`,
+        '22P02',
+      );
+      for (const q of [
+        sql`update kev_usage set attempt_id = ${A2}::uuid where user_id = ${U}`,
+        sql`update kev_usage set attempt_id = null where user_id = ${U}`,
+        sql`update kev_usage set cost_usd_micros = 0 where user_id = ${U}`,
+        sql`delete from kev_usage where user_id = ${U}`,
+        sql`truncate kev_usage`,
+      ])
+        await refused(tx, q, 'P0001');
+    }));
+});
+
+describe('0009 upgrades the production schema (0000–0008) in place', () => {
+  it('applies on top of 0008 with existing usage rows, changing nothing that was there; their attempt id is null', async () => {
+    const name = 'home_upgrade_0009_test';
+    const adminUrl = onDatabase(TEST_DATABASE_URL, name);
+    await admin.db.execute(sql.raw(`drop database if exists ${name}`));
+    await admin.db.execute(sql.raw(`create database ${name}`));
+    const upAdmin = createDb(adminUrl);
+    const production = migrationsUpTo('0008_weather_forecast');
+    try {
+      await migrate(upAdmin.db, { migrationsFolder: production });
+      await upAdmin.db.execute(
+        sql`insert into "user" (id, name, email) values ('u-up9', 'Sam', 'sam@example.test')`,
+      );
+      await upAdmin.db.execute(sql`insert into conversation (user_id) values ('u-up9')`);
+      await upAdmin.db.execute(sql`
+        insert into kev_usage (user_id, tier, model, input_tokens, output_tokens, cost_usd_micros, escalated)
+        values ('u-up9', 'fast', 'synthetic-fast', 1200, 300, 81000, false),
+               ('u-up9', 'deep', 'synthetic-deep', 4000, 900, 284000, true)`);
+      await upAdmin.db.execute(
+        sql`insert into weather_forecast (provider, last_attempt_status) values ('open_meteo', 'unreachable')`,
+      );
+      await upAdmin.db.execute(
+        sql`insert into audit_log (actor_via, event) values ('system', 'test.upgrade_0009')`,
+      );
+      const tablesOf = async () =>
+        (
+          await upAdmin.db.execute(sql`
+            select table_name from information_schema.tables
+            where table_schema = 'public' order by 1`)
+        ).rows.map((r) => String(r.table_name));
+      /** Each table's columns and rows; kev_usage in its columns before 0009. */
+      const snapshot = async (tables: string[], kevUsageColumns?: string[]) => {
+        const out: Record<string, unknown> = {};
+        for (const t of tables) {
+          const cols = (
+            await upAdmin.db.execute(sql`
+              select column_name, data_type, is_nullable, column_default from information_schema.columns
+              where table_schema = 'public' and table_name = ${t} order by ordinal_position`)
+          ).rows.filter(
+            (c) =>
+              t !== 'kev_usage' ||
+              !kevUsageColumns ||
+              kevUsageColumns.includes(String(c.column_name)),
+          );
+          const list = cols.map((c) => `"${String(c.column_name)}"`).join(', ');
+          const rows = await upAdmin.db.execute(sql.raw(`select ${list} from "${t}" order by 1`));
+          out[t] = { cols, rows: rows.rows };
+        }
+        return out;
+      };
+      const privileges = async () =>
+        (
+          await upAdmin.db.execute(sql`
+            select t, p, has_table_privilege('home_app', t, p) as granted
+            from unnest(array['kev_usage', 'audit_log']) as t,
+                 unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) as p
+            order by 1, 2`)
+        ).rows;
+      const tablesBefore = await tablesOf();
+      expect(tablesBefore).not.toContain('kev_budget_reservation');
+      const usageColumns = (
+        await upAdmin.db.execute(sql`
+          select column_name from information_schema.columns
+          where table_schema = 'public' and table_name = 'kev_usage'`)
+      ).rows.map((r) => String(r.column_name));
+      expect(usageColumns).not.toContain('attempt_id');
+      const before = await snapshot(tablesBefore);
+      const privilegesBefore = await privileges();
+
+      await migrate(upAdmin.db, { migrationsFolder: MIGRATIONS });
+      const applied = await upAdmin.db.execute(
+        sql`select count(*)::int as n from drizzle.__drizzle_migrations`,
+      );
+      expect(applied.rows[0]?.n).toBe(journal.entries.length);
+
+      const tablesAfter = await tablesOf();
+      expect(tablesAfter.filter((t) => !tablesBefore.includes(t))).toEqual([
+        'kev_budget_reservation',
+      ]);
+      expect(tablesAfter).toHaveLength(tablesBefore.length + 1);
+      // Every existing table, kev_usage in its pre-0009 columns, unchanged.
+      expect(await snapshot(tablesBefore, usageColumns)).toEqual(before);
+      // The existing usage rows carry no attempt (no default, no backfill).
+      const attempts = await upAdmin.db.execute(
+        sql`select attempt_id, count(*)::int as n from kev_usage group by 1`,
+      );
+      expect(attempts.rows).toEqual([{ attempt_id: null, n: 2 }]);
+      // kev_usage's privileges are unchanged, and it is still append-only.
+      expect(await privileges()).toEqual(privilegesBefore);
+      await expectCode(
+        upAdmin.db.execute(sql`update kev_usage set attempt_id = gen_random_uuid()`),
+        'P0001',
+      );
+      await expectCode(upAdmin.db.execute(sql`delete from kev_usage`), 'P0001');
+      const n = await upAdmin.db.execute(
+        sql`select count(*)::int as n from kev_budget_reservation`,
+      );
+      expect(n.rows[0]?.n).toBe(0);
+      const granted = await upAdmin.db.execute(sql`
+        select p from unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) as p
+        where has_table_privilege('home_app', 'kev_budget_reservation', p) order by 1`);
+      expect(granted.rows.map((r) => r.p)).toEqual(['INSERT', 'SELECT', 'UPDATE']);
     } finally {
       await upAdmin.close();
       rmSync(production, { recursive: true, force: true });

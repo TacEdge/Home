@@ -275,6 +275,11 @@ export const EXCLUDED_TABLES: Record<string, string> = {
   // M7 (migration 0008, ADR 0011 §14). A household-level cache of the
   // provider's forecast: nothing either adult recorded.
   weather_forecast: 'derived, non-personal forecast cache; fetched again on use',
+  // M8 (migration 0009, contract §4.6, §13.6; ADR 0012 §35). Content-free
+  // accounting that keeps the household spend cap hard while attempts run;
+  // what each attempt actually cost is exported as kevUsage.
+  kev_budget_reservation:
+    "content-free spend-cap bookkeeping; each attempt's actual usage is exported as kevUsage",
 };
 
 /**

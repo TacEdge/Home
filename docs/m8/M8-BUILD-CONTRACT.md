@@ -2,7 +2,7 @@
 
 Status: **Approved by the owner on 2026-10-13**: D1–D22 as written in §19.2, the owner decisions O1–O6 and the evaluation allocation (O7, §12.4), recorded in §19.2 and in ADR 0012 §39–§41. The approval takes effect when PR #81 (Package 0) merges.
 
-- **Progress:** nothing is built. No provider account, key, dependency, secret, migration, scheduled job or billing setting exists for Kev or its evaluations anywhere. Package 1 (1a, the migration, then 1b) starts only when the owner says so, after Package 0 merges.
+- **Progress:** Package 0 merged (PR #81). **Package 1a in review** (migration `0009_kev_budget_reservation`: the `kev_budget_reservation` table and `kev_usage.attempt_id`; migration-only PR; ADR 0012 §42). Its migration must run in Production and Preview (owner, **Migrate production database** and **Migrate preview database**) before Package 1b merges. Package 1b not started; nothing else built: no provider account, key, dependency, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere.
 
 The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev-intelligence.md`).
 
@@ -220,9 +220,18 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
 
 - **Package 1a:**
   - The migration merges and runs in Production and Preview before Package 1b merges (MIGRATIONS.md).
-  - Schema tests: the exact columns; `home_app` has `SELECT`, `INSERT` and `UPDATE` on `kev_budget_reservation` and nothing else; a trigger refuses any change to a reservation's amount, owner, attempt or creation time, any change to a closed reservation, and every delete and truncate; `kev_usage` stays append-only with its new nullable `attempt_id`.
+  - Schema tests: the exact columns; `home_app` has `SELECT`, `INSERT` and `UPDATE` on `kev_budget_reservation` and nothing else; a trigger refuses any change to a reservation's amount, owner, attempt or creation time, any change to a closed reservation, and every delete and truncate; a second trigger refuses inserting a reservation that is not `open` or is dated in the future (*added in Package 1a review, owner-approved:* ADR 0012 §42); `kev_usage` stays append-only with its new nullable `attempt_id`.
+  - *Note (Package 1a, in review):* `kev_usage.attempt_id`'s Drizzle definition is deferred to Package 1b by MIGRATIONS.md's migration-first rule (the deployed usage service inserts and returns every defined column); 1b defines it and, through the export-completeness guard, exports it with `kevUsage`'s other columns or excludes it with a reason. `kev_budget_reservation` is excluded from the export (ADR 0012 §42).
 - **Package 1b:**
-  - Matrix rows N1–N8, N10, N12–N14, N16, L6, L9–L11, L13–L18, L20, S4, S5, S10, S12–S14 and S16 pass; the turn-level rows wait for Package 3.
+  - Matrix rows N1–N8, N10, N12–N14, N16, L6, L9–L11, L13–L18, L20–L29, S4, S5, S10, S12–S14 and S16 pass; the turn-level rows wait for Package 3.
+  - **The reservation's financial rules** (*added from the Package 1a review, owner-approved;* §13.6, ADR 0012 §42), each with its matrix row:
+    - **Cross-month:** the cap sum counts every `open` reservation whatever its `period`, and every `unreconciled` one of this month or created in the last 120 seconds of the month before (L21, L22).
+    - **Late settlement:** usage that arrives after its reservation was marked `unreconciled` is still recorded, the reservation is never reopened, and the double count is visible (L23).
+    - **Household-wide:** the cap sums both adults; there is no per-adult sum (L24).
+    - **Settlement:** the settled amount is the sum of the attempt's `kev_usage` rows (L25), all or nothing (L26).
+    - **Duplicate attempt:** `23505` on `attempt_id` becomes a refusal, never a crash (L27).
+    - **Clock:** `created_at` and each usage row's `at` are the database's (L28).
+    - **Overrun:** a settlement above its reservation counts in full (L29).
   - Every verification gate G1–G21 in §5.7 is recorded in the PR as passed, failed (with the owner's decision) or, for the owner's account gates, pending at a named §E item. A failed technical gate stops the package for the owner. G18's result decides whether Package 3 adds the daily schedule; if it fails, the owner's choice of scheduler is recorded in the PR (§7.2).
   - Nothing calls the provider in CI: the required checks run with `HOME_TEST_KEV=scripted` and no key.
   - The adapter is the only file importing the SDK; ESLint and a unit test prove it.
@@ -478,9 +487,9 @@ M8 builds five seams that a later orchestrator could use, and nothing on top of 
 
 ### 4.6 Schema
 
-**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is approved here (D19, D20) and pending Package 1a: no schema change is made in Package 0.
+**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is approved here (D19, D20). Built in Package 1a as migration `0009_kev_budget_reservation` (in review); the Drizzle definition is `src/db/schema/kev-budget.ts`, and the as-built detail, with the constraints derived from §13.6, is ADR 0012 §42.
 
-- **`kev_budget_reservation`** (§13.6): `id` (uuid), `attempt_id` (uuid, unique), `user_id` (no foreign key, like `kev_usage`), `tier`, `period` (the home-zone month, as its first day), `reserved_usd_micros` (bigint, > 0), `status` (`open`, `settled` or `unreconciled`), `settled_usd_micros` (bigint, null while open), `created_at`, `closed_at`. Content-free. `home_app` may select, insert and update; a trigger refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change to a row that is no longer `open`, and every delete and truncate. Index on `(period, status)`.
+- **`kev_budget_reservation`** (§13.6): `id` (uuid), `attempt_id` (uuid, unique), `user_id` (no foreign key, like `kev_usage`), `tier`, `period` (the home-zone month, as its first day), `reserved_usd_micros` (bigint, > 0), `status` (`open`, `settled` or `unreconciled`), `settled_usd_micros` (bigint, null while open), `created_at`, `closed_at`. Content-free. `home_app` may select, insert and update; a trigger refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change to a row that is no longer `open`, and every delete and truncate. A second trigger refuses inserting a row that is `settled` or `unreconciled`, or whose `created_at` is in the future: a reservation is always taken `open`, now or earlier (*added in Package 1a review, owner-approved;* ADR 0012 §42). Index on `(period, status)`.
 - **`kev_usage.attempt_id`** (uuid, nullable): every row M8 writes carries its attempt, so a reservation and its per-call usage reconcile. The table stays append-only.
 - `message.content` is checked in the database only as an object with a numeric `v` (`message_content_check`); each version's schema is the application's. Content **v2** (§7.6) is an application change. v1 stays readable.
 - `message.created_at` (indexed) is the retention clock: each message expires 90 days after it (§7.2). `conversation.last_message_at` is no longer the purge clock.
@@ -1345,9 +1354,9 @@ So **one turn can never expose more than US$1.50**, and with one turn at a time 
 
 **The cycle, per attempt** (the fast attempt, and separately an escalated deep attempt):
 
-1. **Reserve,** in one short transaction serialised by a transaction-level advisory lock (`pg_advisory_xact_lock` on a fixed key) or, if G16 prefers it, `SELECT … FOR UPDATE` on a single budget row: first mark any `open` reservation older than the route's `maxDuration` plus 30 seconds (120 seconds) as `unreconciled`; then compute **settled spend this month** (`kev_usage`) **+ open and unreconciled reservations + this reservation**, and insert this attempt's `open` reservation only if the total is within the cap; otherwise refuse, and the turn shows the cap-reached state. The lock is held for milliseconds and never across a model call.
+1. **Reserve,** in one short transaction serialised by a transaction-level advisory lock (`pg_advisory_xact_lock` on a fixed key) or, if G16 prefers it, `SELECT … FOR UPDATE` on a single budget row: first mark any `open` reservation older than the route's `maxDuration` plus 30 seconds (120 seconds) as `unreconciled`; then compute **settled spend this month** (`kev_usage`) **+ open and unreconciled reservations** (as "Which reservations count" below) **+ this reservation**, and insert this attempt's `open` reservation only if the total is within the cap; otherwise refuse, and the turn shows the cap-reached state. The lock is held for milliseconds and never across a model call.
 2. **Run the attempt** outside any transaction, recording each provider call's `usage` in memory as it arrives.
-3. **Settle,** in a `finally` path and one short transaction (all or nothing): insert one `kev_usage` row per provider call (retried and aborted calls included, with the `attempt_id`), then set the reservation `settled` with the sum. A call whose usage is unknown (a timeout or failure before the provider reported it) is charged at its share of the reservation (the per-call maximum): conservative.
+3. **Settle,** in a `finally` path and one short transaction (all or nothing): insert one `kev_usage` row per provider call (retried and aborted calls included, with the `attempt_id`, and `at` left to the database, so every row of the attempt falls at the settlement's time), then set the reservation `settled` with the sum. A call whose usage is unknown (a timeout or failure before the provider reported it) is charged at its share of the reservation (the per-call maximum): conservative.
 
 **Each case:**
 
@@ -1358,7 +1367,16 @@ So **one turn can never expose more than US$1.50**, and with one turn at a time 
 | Client disconnect | The function continues (`supportsCancellation` is never enabled, G4), so the attempt settles normally |
 | Provider failure or timeout | Settled with known usage; unknown usage charged at the per-call maximum |
 | Function crash or timeout before settlement | The reservation stays `open` until the next reservation marks it `unreconciled` (after 120 seconds); an `unreconciled` reservation counts at its full reserved amount and is **never silently released** (settlement is one transaction, so a crashed attempt has no usage rows to net off). The owner's Usage view shows the month's count of unreconciled reservations |
-| Month boundary | A reservation belongs to the home-zone month it was created in; settlement records usage at its own time, as now |
+| Month boundary | A reservation belongs to the home-zone month it was created in; settlement records usage at its own time, as now. While `open`, it counts in every month's check (see "Which reservations count") |
+| Late settlement (usage reported after the reservation was marked `unreconciled`) | Not expected: the route stops at `maxDuration` (90 s) and the sweep waits 120 s. If it happens, the usage rows are still inserted with their `attempt_id` (real usage is never discarded) and committed; the reservation stays `unreconciled` (the trigger forbids reopening or settling it) and keeps counting at its full amount, so the attempt is counted twice (reserved plus actual): conservative, and visible, because the usage rows join to an `unreconciled` reservation by `attempt_id`. 1b reports the month's late-settled count and amount through the spend-cap service (*added from the Package 1a review;* ADR 0012 §42) |
+
+**Which reservations count** (*added from the Package 1a review: the owner approved the requirements, cross-month counting, the late-settlement principles and the extra financial tests; this exact rule, the 120-second straddle window and double-counting a late settlement are proposed and need the owner's confirmation before Package 1b starts;* ADR 0012 §42). The check for home-zone month *M* sums:
+
+- `kev_usage.cost_usd_micros` whose `at` falls in *M*;
+- `reserved_usd_micros` of **every `open` reservation, whatever its `period`** (there are at most two; an attempt taken at 23:59:59 on the last day keeps its `period` but may spend after midnight, and until it settles nothing else counts it in *M*);
+- `reserved_usd_micros` of every `unreconciled` reservation whose `period` is *M*, **or** whose `created_at` falls within the 120 seconds before *M* began (a crashed attempt that straddled midnight may have spent in *M*; one taken earlier could not, because the route stops at 90 seconds).
+
+This cannot under-count: an attempt's money is in the sum from the moment it reserves, as `open` in every month, then as its usage rows in the month of settlement (or, if it never settles, as `unreconciled` in its own month and, when it straddled midnight, the next). It can over-count, by design: a settled straddling attempt counts in *M* only through its usage; an `unreconciled` straddler counts in both months. `kev_budget_reservation.period` and `created_at` are derived together from the database's clock in the home zone (as `src/domain/kev-usage/service.ts` derives the month), never from the application's clock.
 
 **The 80% and 100% thresholds** read settled spend plus open and unreconciled reservations. Near the cap, Kev pauses when the next fast reservation (US$0.665 on Sonnet) would not fit, slightly before the cap itself: the hard cap is kept at the cost of at most one reservation's worth of unused budget (about NZ$1.20).
 
@@ -1403,7 +1421,7 @@ Evidence is recorded as M7's is: dates, initials, yes/no and counts, never quest
 - **Context assembly:** the bundle's exact contents and size; the prefix's byte stability.
 - **The validator:** every rule in §8.3 with passing and failing fixtures; the code-added sentences; regeneration and fallback.
 - **The budget and limits:** each limit in §13.4 driven to its edge, ±1.
-- **The cap:** conversion, thresholds, the maximum-exposure formula per tier, reservation and settlement arithmetic, the unreconciled rule, month boundaries in the home zone.
+- **The cap:** conversion, thresholds, the maximum-exposure formula per tier, reservation and settlement arithmetic, the unreconciled rule, month boundaries in the home zone, which reservations count (§13.6), late settlement.
 - **The request:** consecutive request bodies within an attempt are byte-prefix extensions (N15); the window's three limits; the deadline-aware timeouts.
 - **The retention route:** the secret check (constant time), the 404 without `CRON_SECRET`, the batch bounds.
 - **The network policy:** destinations, addresses, redirects, sizes, timeouts, retries.
@@ -1506,6 +1524,15 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 | L18 | An escalated turn on Sonnet whose fast attempt settled at US$0.08 | The deep reservation is US$1.42; the deep attempt makes at most three calls at US$0.356 each |
 | L19 | Sam makes 6 turns in a minute, clears, and tries a 7th | Refused: the limit counts audit rows, which Clear does not remove |
 | L20 | Every reservation and settlement | Taken in its own short transaction; no transaction or pooled connection is held across a provider call (a test provider asserts no open transaction while it runs) |
+| L21 | Sam's and Alex's attempts each reserve at 23:59:59 on 31 October (`period` 2026-10-01) and stay open; a third reservation is checked at 00:00:01 on 1 November with room for it only if the two are left out | Both October reservations count in November's check; the third is refused; once the two settle, their usage rows fall in November (`at` is the settlement's) and the reservations no longer count; at no instant does November's settled spend plus counted reservations pass the cap |
+| L22 | `unreconciled` October reservations created at 23:58:30 and at 23:55:00 on 31 October, checked on 1 November | The first counts in November (created within 120 s of the month); the second does not; both count in October |
+| L23 | An attempt's reservation marked `unreconciled` by the sweep, then its settlement arriving (late settlement) | The settlement's usage rows are inserted with its `attempt_id` and committed; the reservation stays `unreconciled` (no reopen, no error to the person); the month's sum includes both the reserved amount and the usage; the spend-cap service reports one late-settled attempt and its amount |
+| L24 | Sam's settled usage plus Sam's open reservation leave less than one reservation of room; Alex reserves | Alex's reservation is refused: the cap sums the household, never per adult |
+| L25 | An attempt with three calls, one of unknown usage | `settled_usd_micros` equals the sum of the attempt's `kev_usage.cost_usd_micros` rows, the unknown call at the per-call maximum |
+| L26 | A settlement that fails after its usage rows are written (a fault injected between the inserts and the update) | No usage row and no settlement remain; the reservation is still `open`, later swept `unreconciled` |
+| L27 | A second reservation for an attempt that already has one | `23505` on `kev_budget_reservation_attempt_id_unique` becomes a refusal outcome, never a thrown error; one row remains |
+| L28 | A reservation and a settlement with the application's clock (fake timers) a day ahead and a day behind | Both succeed; `created_at`, `closed_at` and each usage row's `at` are the database's `now()`; `period` is the home-zone month of `created_at` |
+| L29 | An attempt reserved at 665,280 µ$ whose calls cost 700,000 µ$ | Settled at 700,000 µ$; the next check's sum includes the full 700,000 µ$ of usage |
 
 #### T — Tools
 

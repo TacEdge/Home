@@ -36,6 +36,9 @@ export const kevUsage = pgTable(
     cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
     costUsdMicros: bigint('cost_usd_micros', { mode: 'bigint' }).notNull(),
     escalated: boolean('escalated').notNull().default(false),
+    // `attempt_id` (uuid, nullable) is added by migration 0009 (M8 Package
+    // 1a) and defined here by Package 1b, once 0009 has run in Production and
+    // Preview (migration-first; tests/unit/deferred-columns.test.ts).
   },
   (t) => [
     check('kev_usage_tier_check', oneOf(t.tier, KEV_TIERS)),
