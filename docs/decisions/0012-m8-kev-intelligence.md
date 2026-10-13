@@ -116,7 +116,7 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     - **Not `claude-fable-5-1`:** it requires 30-day retention and is not available under zero data retention without express authorisation; it costs 2.5 times Opus 5.5.
     - Tool use with `strict: true` and `tool_choice: auto`; the answer as structured output (or a strict answer tool if structured output does not compose with tools on a tier, checked in Package 1); no personal data in any JSON schema, because schemas are cached by the provider for up to 24 hours without message content's protections.
     - Refusals end the attempt plainly; the server-side `fallbacks` parameter is not used, since it would switch models within a turn. Thinking is never stored or replayed across turns. The cached prefix (tools and system prompt) holds no personal data.
-    - Prices, effort and ids come from the facts bundled on 2026-10-06 and are re-checked against the Models API in Package 1; Opus 5.5's cache-read price is taken conservatively (contract §5.7).
+    - Prices, effort and ids come from the facts bundled on 2026-10-06 and are re-checked against the Models API in Package 1; the facts state each model's cache-read price explicitly (US$0.20 per MTok for Opus 5.5).
 
 14. **HOME's network boundary and key** (contract §5.4).
     - Every SDK request goes through HOME's own fetch: `https://api.anthropic.com` exactly, two paths, public addresses checked at connect time, no redirects, 1 MiB requests and 2 MiB responses, per-call and idle timeouts, closed error codes, nothing logged. Whether the SDK accepts a custom fetch that streams is verified first in Package 1; if not, Package 1 stops for the owner's choice.
@@ -210,7 +210,7 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     - At 80%, escalation is withdrawn and Kev answers on the fast tier; at 100%, Kev is paused until the 1st (home zone) and the adult's words are still stored.
     - Before each model call, its maximum cost is reserved against the month; the call is not made if the cap would be passed.
     - Per turn: five model calls, three tool rounds, eight tool calls, one escalation, 32,000 input tokens per call, 55 seconds, US$1.50. Per adult: six turns a minute, sixty a day, one at a time. No loop is unbounded.
-    - **The cost model** (contract §13): a typical fast turn costs about US$0.048 on Sonnet 5.5 or US$0.0024 on Haiku 5.5, a deep turn about US$0.22, the worst case US$1.47. At typical household use (15 turns a day, 10% escalated) the month is about NZ$55 with Sonnet 5.5 as fast and about NZ$20 with Haiku 5.5, so with Sonnet the cap would bind in a typical month. The owner revisits the cap with Preview's and the first month's evidence.
+    - **The cost model** (contract §13): a typical fast turn costs about US$0.048 on Sonnet 5.5 or US$0.0024 on Haiku 5.5, a deep turn about US$0.218, the worst case US$1.47. At typical household use (15 turns a day, 10% escalated) the month is about NZ$54 with Sonnet 5.5 as fast and about NZ$19 with Haiku 5.5, so with Sonnet the cap would bind in a typical month. The owner revisits the cap with Preview's and the first month's evidence.
 
 ### Process and production
 

@@ -506,7 +506,7 @@ Sources: the Anthropic API facts bundled with this session (model table cached 2
 
 | Tier | Model | Effort | `max_tokens` (incl. thinking) | Per-call timeout | Price per MTok, in / out / cache write / cache read (US$) |
 |---|---|---|---|---|---|
-| `deep` | `claude-opus-5-5` | `medium` | 4,096 | 40 s | 4.00 / 20.00 / 5.00 / 0.40 (see §5.7 item 8) |
+| `deep` | `claude-opus-5-5` | `medium` | 4,096 | 40 s | 4.00 / 20.00 / 5.00 / 0.20 |
 | `fast`, candidate A (provisional) | `claude-sonnet-5-5` | `low` | 2,048 | 20 s | 2.00 / 10.00 / 2.50 / 0.20 |
 | `fast`, candidate B | `claude-haiku-5-5` | `low` | 2,048 | 20 s | 0.10 / 0.50 / 0.125 / 0.01 (prompts ≤ 100K tokens) |
 
@@ -583,10 +583,9 @@ To be checked in Package 1 (or by the owner at §14's items), each recorded in t
 5. That the TypeScript SDK accepts a custom `fetch` and streams through it (N4).
 6. That structured output composes with tool use on each tier (§5.1).
 7. The three model ids, their context windows and effort support, through the Models API.
-8. Opus 5.5's cache-read price: the facts file lists US$0.20 per MTok; the general rule (about 0.1× input) gives US$0.40. §13 uses US$0.40.
-9. Whether the Console offers a per-workspace spend limit (used as a second cap; HOME's cap does not depend on it).
-10. Bedrock's Australian profiles for Sonnet 5.5 and Opus 5.5 (Haiku 5.5's is listed: verified from search only), only if the contingency is ever wanted.
-11. The text of s 27 after the Privacy Amendment Act 2025.
+8. Whether the Console offers a per-workspace spend limit (used as a second cap; HOME's cap does not depend on it).
+9. Bedrock's Australian profiles for Sonnet 5.5 and Opus 5.5 (Haiku 5.5's is listed: verified from search only), only if the contingency is ever wanted.
+10. The text of s 27 after the Privacy Amendment Act 2025.
 
 ---
 
@@ -1096,7 +1095,7 @@ The owner chooses the fast tier (D2) from these results. A threshold changes onl
 ### 12.4 Running live evals
 
 - **Workflow:** `.github/workflows/kev-evals.yml`, `workflow_dispatch` only, environment `kev-evals` requiring the owner's approval, secret `KEV_EVAL_PROVIDER_KEY` (an eval-only key, never Preview's or Production's). It seeds its own test database with the fixture family and runs `src/kev/evals/run.mts` with a tier and a scenario filter.
-- **Budget:** the runner estimates each call's maximum cost and stops before exceeding **US$25 per run** (D18); the owner sets a monthly eval budget (recommended US$60) and, if the Console offers one, a workspace spend limit (§5.7 item 9).
+- **Budget:** the runner estimates each call's maximum cost and stops before exceeding **US$25 per run** (D18); the owner sets a monthly eval budget (recommended US$60) and, if the Console offers one, a workspace spend limit (§5.7 item 8).
 - **Expected cost:** a full Package 5 run (Sonnet 5.5 and Haiku 5.5 three times each, Opus 5.5 once, 60 scenarios) about US$22; an acceptance run with deep three times about US$40, split over two runs; a targeted run before a later change, US$3–8.
 - **Output:** a summary artifact (pass rates, codes, latencies, costs) and the synthetic transcripts for review. No key, header or provider body is logged.
 
@@ -1106,7 +1105,7 @@ The owner chooses the fast tier (D2) from these results. A threshold changes onl
 
 ### 13.1 Assumptions
 
-- **Prices:** §5.3 (facts file, 2026-10-06; Opus 5.5's cache read taken as US$0.40, §5.7 item 8).
+- **Prices:** §5.3, from the facts file (2026-10-06), which states each model's cache-read price explicitly: US$0.20 per MTok for both Opus 5.5 and Sonnet 5.5 and US$0.01 for Haiku 5.5. Cache writes are 1.25× input (5-minute lifetime). Cost = cache-write tokens × write price + cache-read tokens × read price + uncached input × input price + output (thinking included) × output price.
 - **Tokens:** stable prefix (system prompt and tool definitions) 5,000, cached; bundle and question 4,100; tool results about 1,500 each; a tool-use step 150 output tokens; an answer 400 (fast) or 600 (deep); thinking 300 per fast call and 1,500 per deep call.
 - **Typical turns:** fast, two model calls (one tool round, two tools in parallel); deep, three model calls (two rounds), plus the discarded fast attempt (one call).
 - **Caching:** the first call of each turn writes the prefix (turns are usually more than five minutes apart); later calls in the turn read it.
@@ -1119,9 +1118,11 @@ The owner chooses the fast tier (D2) from these results. A threshold changes onl
 |---|---|---|---|---|---|---|
 | Fast, Sonnet 5.5 | 2 | 2 | 10,000 / 11,350 | 1,150 | **US$0.048** | US$0.054 |
 | Fast, Haiku 5.5 | 2 | 2 | 10,000 / 11,350 | 1,150 | **US$0.0024** | US$0.0027 |
-| Deep, Opus 5.5 | 3 | 4 | 15,000 / 20,700 | 5,400 | **US$0.22** | US$0.25 |
-| Escalated (fast attempt + deep) | 4 | 4 | | | US$0.25 (Sonnet) / US$0.22 (Haiku) | |
+| Deep, Opus 5.5 | 3 | 4 | 15,000 / 20,700 | 5,400 | **US$0.218** | US$0.25 |
+| Escalated (fast attempt + deep) | 4 | 4 | | | US$0.243 (Sonnet) / US$0.219 (Haiku) | |
 | **Worst case** (every cap reached, a regeneration, an escalation) | 10 | 16 | 32,000 per call | 2,048 fast, 4,096 deep per call | **US$1.47** (Sonnet) / US$1.07 (Haiku) | |
+
+Deep, worked: 5,000 cache-write × US$5.00 + 10,000 cache-read × US$0.20 + 20,700 input × US$4.00 + 5,400 output × US$20.00 = US$0.025 + 0.002 + 0.0828 + 0.108 = US$0.2178 per turn. The worst case reads nothing from the cache, so the cache price does not move it.
 
 Caching saves little within a turn (about 12%), because each turn usually starts cold; it is kept because it is free to keep and helps follow-ups within five minutes. The deep tier dominates cost: an escalated turn costs about five times a Sonnet fast turn and a hundred times a Haiku one.
 
@@ -1129,14 +1130,14 @@ Caching saves little within a turn (about 12%), because each turn usually starts
 
 | Usage | Turns a month | Fast = Sonnet 5.5 | Fast = Haiku 5.5 |
 |---|---|---|---|
-| Light (5 a day, 5% deep) | 150 | US$8.60 ≈ **NZ$16** (NZ$8–23) | US$2.00 ≈ **NZ$4** (NZ$2–5) |
-| Typical (15 a day, 10% deep) | 450 | US$30.30 ≈ **NZ$55** (NZ$27–82) | US$10.90 ≈ **NZ$20** (NZ$10–29) |
-| Heavy (40 a day, 15% deep) | 1,200 | US$92.80 ≈ **NZ$167** (NZ$83–250) | US$42.20 ≈ **NZ$76** (NZ$38–114) |
+| Light (5 a day, 5% deep) | 150 | US$8.62 ≈ **NZ$16** (NZ$8–23) | US$1.98 ≈ **NZ$4** (NZ$2–5) |
+| Typical (15 a day, 10% deep) | 450 | US$30.25 ≈ **NZ$54** (NZ$27–82) | US$10.82 ≈ **NZ$19** (NZ$10–29) |
+| Heavy (40 a day, 15% deep) | 1,200 | US$92.39 ≈ **NZ$166** (NZ$83–249) | US$41.86 ≈ **NZ$75** (NZ$38–113) |
 
 Ranges are ±50% on token counts. Reading:
 
 - **With Sonnet 5.5 as fast, typical use sits at the NZ$50 cap.** Deep would switch off after about three weeks (80%) and the month would end on the fast tier alone. Heavy use would reach the cap in about ten days.
-- **With Haiku 5.5 as fast,** typical use is about NZ$20; heavy use reaches the cap in about three weeks.
+- **With Haiku 5.5 as fast,** typical use is about NZ$19; heavy use reaches the cap in about three weeks.
 - **The levers,** in order: the escalation rate (prompt and routing), the deep tier's effort, the bundle's size, then the fast model (on eval evidence only, D2). The cap is ADR 0001's NZ$50; raising it is the owner's decision (D19).
 - **Worst case is bounded:** US$27.78 a month (the cap) plus at most two calls' reservation overshoot when both adults' turns run at once (about US$0.40).
 

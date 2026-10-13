@@ -2,7 +2,7 @@
 
 Status: **Accepted** (owner, 2026-10-11). The owner approved decisions D1–D19 as recommended, with five amendments (§41; contract §12.4). This takes effect when PR #70 (Package 0) merges. The contract is `docs/m7/M7-BUILD-CONTRACT.md`. Decisions marked "Approved — owner decision D*n* (2026-10-11)" are listed, with the options weighed, in contract §12.2.
 
-- **Implementation:** Package 0 merged (PR #70). Package 1a merged (PR #71; `0008_weather_forecast` run in Production and Preview). Package 1b merged (PR #72). Package 2 merged (PR #75; §44). Package 3 merged (PR #76; §45). Package 4 merged (PR #78; §46). The acceptance evidence corrections, owner-approved, merged (PR #80; §47). Package 5 (acceptance assessment) is in review (§48, `docs/m7/M7-ACCEPTANCE.md`); M7 is technically accepted only on the owner's sign-off. Nothing else is built (see "Implementation" below).
+- **Implementation:** Package 0 merged (PR #70). Package 1a merged (PR #71; `0008_weather_forecast` run in Production and Preview). Package 1b merged (PR #72). Package 2 merged (PR #75; §44). Package 3 merged (PR #76; §45). Package 4 merged (PR #78; §46). The acceptance evidence corrections, owner-approved, merged (PR #80; §47). Package 5 (acceptance assessment) merged (PR #79; §48, `docs/m7/M7-ACCEPTANCE.md`): M7 is technically accepted on synthetic data; its operational acceptance waits on DEPLOY.md §E items 20–22. Nothing else is built (see "Implementation" below).
 
 ## Context
 
@@ -507,7 +507,7 @@ The ROADMAP M7 row commits M7 to: *"Open-Meteo adapter; `windows` engine (people
     - **Remaining limitations.** Q1 proves the 25 s idle setting by its value on the refresh's connection, and its effect only through W22; Q5's Today first-run state is proven at integration level only; the browser tests still depend on the fixture family's records.
     - **Two owner-approved behaviours, unchanged.** Openings with no weather configured are plain, bounded by planning hours (contract §3.6, O15); calendar-health insights keep their priority over openings, which rank last and may sit behind "+ N more" (contract §5.8).
 
-### Package 5: acceptance (for review with its PR)
+### Package 5: acceptance (merged, PR #79)
 
 48. **Assessment only; no decision changed.** No product code, test, script, configuration, schema or Production setting changes in this package. `docs/m7/M7-ACCEPTANCE.md` and `docs/m7/M7-ACCEPTANCE-MATRIX.md` check every §2.2 package criterion, every §8.6 row and every §10.1 criterion against the assertions CI runs, first on `main` at `331bf7b` and, reconciled, on `main` at `a1f1ce3` (PR #80 merged); DEPLOY.md §E gains items 20–22 and the environment rows for `HOME_LAT`, `HOME_LON`, `HOME_ELEVATION` and `HOME_WEATHER_LOCATION_KEY`; LOCAL-DEV's weather paragraph is corrected (the refresh is mounted on Today and Forward Week).
     - **Original assessment (2026-10-13, on `331bf7b`):** verdict B, accept on synthetic data after targeted corrections. No row was FAIL and no caveat class A; the assessment named weak rows and proposed tests Q1–Q6 and Q8.
