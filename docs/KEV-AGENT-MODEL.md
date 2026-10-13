@@ -60,6 +60,8 @@ type KevEvent =
 - Approvals are a domain action (`proposals.approve(actor, id)`), callable from any channel.
 - Kev's answers lead with one short sentence that works read aloud, followed by optional detail. This is also simply good calm design.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* `KevRequest` gains `now`, from the adapter's time source, and `conversationId` is resolved from the actor, never taken from the client. `KevEvent` gains `working` (fixed progress strings); `detail` becomes structured blocks, each a fact or **Kev's view**, with citations; `error` carries a closed code. `captured` and `proposal` are not emitted until M9. An answer is shown only after code has checked it against the records the tools returned (ADR 0012 §8, §11, §33).
+
 ## 4. How a Kev turn works
 
 1. **Request** arrives through a channel adapter as a `KevRequest`.
@@ -75,6 +77,8 @@ type KevEvent =
 5. **Capture / proposals**: store the user's words if they are telling HOME something; propose structure.
 6. **Approval**: the user approves, edits or rejects; the domain service executes; audited.
 7. **Limits**: max tool calls per turn, max tokens, monthly spend cap. On limit or error, Kev says so plainly — and if the user was telling HOME something, it has already been captured.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* M8's context bundle is smaller than step 3 lists: the date and time, the reader, the people the reader can see (age, not date of birth), the reader's today, calendar and forecast freshness and the To sort count. The next seven days, conflicts, projects and context come through tools when a question needs them. The home location is never sent: it stays in private configuration (ADR 0011). Step 5's capture is M9's; in M8 the person's words are stored verbatim as their conversation message before any model call (ADR 0012 §21, §24).
 
 ### Prompting principles
 - A short, stable system prompt (cached) defines persona, principles and rules. Volatile context comes after it.
@@ -122,6 +126,8 @@ Routing rules (V0.1 — intentionally simple):
 
 Transcripts are stored in HOME's provider-neutral format and rebuilt per request, so moving between tiers (or providers) across turns is safe.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* deep is `claude-opus-5-5` at effort `medium`; fast is `claude-sonnet-5-5` at effort `low` provisionally, with `claude-haiku-5-5` evaluated in M8 Package 5 and the owner choosing on the results. In M8, deep runs only when fast escalates (ADR 0012 §13).
+
 ## 6. Tool / capability model (V0.1)
 
 All tools have Zod schemas, run server-side through domain services under the Actor, return compact structured results, and are audited. Kev never touches SQL.
@@ -143,6 +149,8 @@ All tools have Zod schemas, run server-side through domain services under the Ac
 | `get_insights(from, to)` | Deterministic insight candidates for the range, with their facts, minus those this user dismissed. |
 
 *M7 (ADR 0011, approved 2026-10-11):* `find_free_windows` and `get_weather` stay M8's tools. They will call M7's gap engine, openings and forecast service as the requesting user, and their results keep M7's language: what is recorded, for whom, and the forecast with its time, never that anyone is free or available.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* `find_free_windows` is built as `get_gaps` (stretches where nothing is recorded, never ranked by fit); `get_conflicts` returns only the engine's two rules (no "both adults away"); `get_context` has no `include_sensitive` parameter, because Kev never requests or receives sensitive context (ADR 0005 §37); `search` matches titles only; `list_captures` waits for M9. Tool calls are recorded in a per-turn trace with Kev's message, not as audit rows. The composite behaviours "recommend one window" and "Find us a night out" (for both adults) are superseded: Kev lays out what is recorded with its facts and never names "the best" time or says anyone is free (ADR 0012 §7, §17–§19, §26).
 
 ### The capture tool (executes immediately, tightly constrained)
 
@@ -218,6 +226,8 @@ Insights (SYSTEM-ARCHITECTURE §2.6) are detected by code; Kev's job is to **exp
 
 Kev never pushes insights anywhere in V0.1. They wait until someone looks.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* phrasing and prioritising Today's insights is deferred beyond M8; Kev reads insights through `get_insights` when asked (ADR 0012 §31).
+
 ## 8. Memory model
 
 | Kind | Where it lives | Visible to the family? | Lifetime |
@@ -266,6 +276,8 @@ From the first Kev milestone:
   - Tone: responses avoid the "Kev is not" column (LLM-graded).
 - Deterministic checks first; LLM-graded checks only for tone and helpfulness.
 - Run before any prompt, tool, routing or model change, against both tiers.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* evaluation runs in four layers: deterministic and scripted-model tests in every CI run; live runs of a synthetic scenario set against both tiers through a manual, owner-approved workflow, not a required check; and the owner's review. Tone is judged by a person, not a model (ADR 0012 §34).
 
 ## 11. What Kev will eventually become (not now)
 

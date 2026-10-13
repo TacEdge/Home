@@ -85,6 +85,8 @@ See [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md). In short:
 - **Tools** — thin wrappers over domain services, executed **as the requesting user**. Read tools execute immediately. **Write tools create Proposals.** The one exception is `capture`, which stores the user's own words verbatim (see §5.4).
 - **Provider adapter** — only `src/kev/providers/anthropic.ts` knows about the Anthropic SDK. Conversation history is stored in HOME's own provider-neutral format, so switching model or provider between turns is safe.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev's own transcript and usage are written by a named bookkeeping path in `src/domain/kev-bookkeeping/`, acting as the requesting adult and unreachable from tools; the provider adapter's requests go through HOME's own network policy, to `api.anthropic.com` only (ADR 0012 §14, §25).
+
 ### 2.4 Integration layer
 Adapters that bring outside information in. Each adapter:
 - is **read-only** in V0.1;
@@ -167,6 +169,8 @@ Rules:
 
 **Today never waits for Kev.** The screen renders from deterministic data and template text immediately; Kev's phrasing is used when cached and fades in quietly when first generated.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev's phrasing and ordering of insights is deferred beyond M8: nothing Kev writes is cached or shown on Today or Forward (ADR 0012 §31).
+
 ## 3. Technology stack
 
 Boring, mainstream, one language end to end.
@@ -208,6 +212,8 @@ Other LLM rules:
 - **Provider neutrality:** the orchestrator, tools, context and transcripts are provider-agnostic. Only the provider adapter imports the SDK.
 - **Resilience:** handle `refusal` stop reasons and API errors gracefully. If Kev is unavailable, the user's message is still saved as a capture, and every non-Kev screen works fully.
 - **Cost guardrail:** monthly spend cap enforced in code from the usage log, plus per-request token and tool-call limits.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* in M8, before any capture tool exists, the user's message is stored verbatim as their conversation message before the model is called, and the adult can keep it in To sort themselves (ADR 0012 §24). The cap is NZ$50 a month for the household, converted at a fixed rate, with deep withdrawn at 80% (ADR 0012 §35).
 
 ## 4. Proposed repository structure
 
@@ -313,12 +319,16 @@ Context records also carry `sensitivity`:
 
 Both are enforced in **one place** — the domain query layer, via the Actor — never in UI code and never by asking the LLM to keep secrets. Conversations with Kev are **private to the user**.
 
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev never requests or receives sensitive context, on explicit request or otherwise (ADR 0005 §37; ADR 0012 §26). Explicit retrieval of sensitive context is a person's, through the UI.
+
 ### 5.4 Kev's permission boundary
 - Read tools: filtered by the Actor's visibility and sensitivity rules.
 - Write tools: produce **Proposals** only. Approval is a separate authenticated request by a user (from any channel); the domain service performs the write, audited with both Kev and the approving user.
 - **The capture exception:** `capture` stores the *current user message, verbatim*, as a private Capture. The tool takes no content argument — the server copies the user's own words — so Kev cannot author or alter what is stored. Capturing records what the user said; it is not Kev changing family data. Organising a capture into anything else is a proposal.
 - No tool in V0.1 can send messages, email, make bookings, spend money, write to external calendars, or delete data permanently.
 - Tool calls per turn, tokens per request and monthly spend are capped.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev's bookkeeping (its transcript, usage, the 90-day purge and Clear) is a second named exception beside capture: five functions acting as the requesting adult, audited, gated and unreachable from tools (ADR 0012 §25).
 
 ### 5.5 Untrusted content
 All text from integrations (event titles/descriptions, locations; later emails and documents) is untrusted external data. Calendar text is stored as bounded plain text with HTML stripped, rendered only through React's escaping under the nonce-based script CSP, and never treated as instructions (ADR 0007 §9). In Kev's context it is wrapped and labelled as external data. Because Kev cannot take external actions and all writes require approval, the blast radius of a successful injection in V0.1 is an odd *proposal* that a human rejects. This must be re-examined before any email or write-capable integration is added.
@@ -338,6 +348,8 @@ All text from integrations (event titles/descriptions, locations; later emails a
 ### 5.8 Audit and usage
 - `audit_log` (append-only): every write (who, via which path and channel, which proposal, before/after summary) and every Kev tool call (name, argument summary, result count — not full payloads). Visible in Settings.
 - `kev_usage`: per run — tier, model, input/output tokens, cost estimate, escalated or not. Drives the spend cap and routing decisions.
+
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev's tool calls are recorded in a per-turn trace stored with its message (tool, structural argument summary, result count, refs), not as `audit_log` rows; every write, Kev's bookkeeping included, is still audited (ADR 0012 §18).
 
 ## 6. Key architectural risks and how we are handling them
 
