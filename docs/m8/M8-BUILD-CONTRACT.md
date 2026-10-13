@@ -2,7 +2,7 @@
 
 Status: **Approved by the owner on 2026-10-13**: D1–D22 as written in §19.2, the owner decisions O1–O6 and the evaluation allocation (O7, §12.4), recorded in §19.2 and in ADR 0012 §39–§41. The approval takes effect when PR #81 (Package 0) merges.
 
-- **Progress:** nothing is built. No provider account, key, dependency, secret, migration, scheduled job or billing setting exists for Kev or its evaluations anywhere. Package 1 (1a, the migration, then 1b) starts only when the owner says so, after Package 0 merges.
+- **Progress:** Package 0 merged (PR #81). **Package 1a in review** (migration `0009_kev_budget_reservation`: the `kev_budget_reservation` table and `kev_usage.attempt_id`; migration-only PR; ADR 0012 §42). Its migration must run in Production and Preview (owner, **Migrate production database** and **Migrate preview database**) before Package 1b merges. Package 1b not started; nothing else built: no provider account, key, dependency, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere.
 
 The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev-intelligence.md`).
 
@@ -221,6 +221,7 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
 - **Package 1a:**
   - The migration merges and runs in Production and Preview before Package 1b merges (MIGRATIONS.md).
   - Schema tests: the exact columns; `home_app` has `SELECT`, `INSERT` and `UPDATE` on `kev_budget_reservation` and nothing else; a trigger refuses any change to a reservation's amount, owner, attempt or creation time, any change to a closed reservation, and every delete and truncate; `kev_usage` stays append-only with its new nullable `attempt_id`.
+  - *Note (Package 1a, in review):* `kev_usage.attempt_id`'s Drizzle definition is deferred to Package 1b by MIGRATIONS.md's migration-first rule (the deployed usage service inserts and returns every defined column); 1b defines it and, through the export-completeness guard, exports it with `kevUsage`'s other columns or excludes it with a reason. `kev_budget_reservation` is excluded from the export (ADR 0012 §42).
 - **Package 1b:**
   - Matrix rows N1–N8, N10, N12–N14, N16, L6, L9–L11, L13–L18, L20, S4, S5, S10, S12–S14 and S16 pass; the turn-level rows wait for Package 3.
   - Every verification gate G1–G21 in §5.7 is recorded in the PR as passed, failed (with the owner's decision) or, for the owner's account gates, pending at a named §E item. A failed technical gate stops the package for the owner. G18's result decides whether Package 3 adds the daily schedule; if it fails, the owner's choice of scheduler is recorded in the PR (§7.2).
@@ -478,7 +479,7 @@ M8 builds five seams that a later orchestrator could use, and nothing on top of 
 
 ### 4.6 Schema
 
-**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is approved here (D19, D20) and pending Package 1a: no schema change is made in Package 0.
+**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is approved here (D19, D20). Built in Package 1a as migration `0009_kev_budget_reservation` (in review); the Drizzle definition is `src/db/schema/kev-budget.ts`, and the as-built detail, with the constraints derived from §13.6, is ADR 0012 §42.
 
 - **`kev_budget_reservation`** (§13.6): `id` (uuid), `attempt_id` (uuid, unique), `user_id` (no foreign key, like `kev_usage`), `tier`, `period` (the home-zone month, as its first day), `reserved_usd_micros` (bigint, > 0), `status` (`open`, `settled` or `unreconciled`), `settled_usd_micros` (bigint, null while open), `created_at`, `closed_at`. Content-free. `home_app` may select, insert and update; a trigger refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change to a row that is no longer `open`, and every delete and truncate. Index on `(period, status)`.
 - **`kev_usage.attempt_id`** (uuid, nullable): every row M8 writes carries its attempt, so a reservation and its per-call usage reconcile. The table stays append-only.
