@@ -126,7 +126,9 @@ Routing rules (V0.1 — intentionally simple):
 
 Transcripts are stored in HOME's provider-neutral format and rebuilt per request, so moving between tiers (or providers) across turns is safe.
 
-*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* deep is `claude-opus-5-5` at effort `medium`; fast is `claude-sonnet-5-5` at effort `low` provisionally, with `claude-haiku-5-5` evaluated in M8 Package 5 and the owner choosing on the results. In M8, deep runs only when fast escalates (ADR 0012 §13).
+*Decided in M8 Package 0 (ADR 0012 §13, owner decision O5, 2026-10-13):* deep is `claude-opus-5-5` at effort `medium`; fast is `claude-sonnet-5-5` at effort `medium` to start (the "low effort" above is superseded; `low` is swept in M8 Package 5), with `claude-haiku-5-5` evaluated before any substitution and the owner choosing on the results; ids and capabilities are verified in M8 Package 1. In M8, deep runs only when fast escalates.
+
+*Proposed in M8 Package 0 (ADR 0012 §11, §23, 2026-10-13), pending the merge:* besides rule 2's `escalate`, code escalates when the fast answer fails HOME's answer check twice, if time and budget allow. Within one attempt the request to the provider only grows: earlier content, thinking included, is replayed verbatim and never edited, which is how "rebuilt per request" applies inside a turn. Across turns, the model sees the adult's last 12 hours of conversation (at most 10 exchanges and 6,000 tokens), rebuilt from HOME's stored text with citation ids, never thinking or tool results (owner decision O3).
 
 ## 6. Tool / capability model (V0.1)
 

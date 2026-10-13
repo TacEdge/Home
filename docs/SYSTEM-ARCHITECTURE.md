@@ -125,6 +125,8 @@ Open-Meteo (free, no key, good NZ coverage), hourly forecast for the home locati
 
 No background job infrastructure in V0.1: syncs happen lazily on use with a staleness threshold (M4 contract §3.3). A scheduled job (e.g. Sunday Week Ahead) can be added later with a single cron.
 
+*Decided in M8 Package 0 (ADR 0012 §23, owner decision O6, 2026-10-13):* one scheduled job is approved: a daily, secret-protected cleanup that deletes Kev conversation messages older than 90 days. It calls no model, reads no table but `message`, sends nothing and is not Kev. Nothing else runs on a schedule.
+
 ### 2.5 Trust & permissions layer
 Cross-cutting. Detailed in §5.
 
@@ -213,7 +215,7 @@ Other LLM rules:
 - **Resilience:** handle `refusal` stop reasons and API errors gracefully. If Kev is unavailable, the user's message is still saved as a capture, and every non-Kev screen works fully.
 - **Cost guardrail:** monthly spend cap enforced in code from the usage log, plus per-request token and tool-call limits.
 
-*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* in M8, before any capture tool exists, the user's message is stored verbatim as their conversation message before the model is called, and the adult can keep it in To sort themselves (ADR 0012 §24). The cap is NZ$50 a month for the household, converted at a fixed rate, with deep withdrawn at 80% (ADR 0012 §35).
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* in M8, before any capture tool exists, the user's message is stored verbatim as their conversation message before the model is called, and the adult can keep it in To sort themselves (ADR 0012 §24). The cap is NZ$50 a month for the household, converted at a fixed rate, with deep withdrawn at 80% (ADR 0012 §35). *Decided by the owner, 2026-10-13 (O2):* the cap for M8's trial is NZ$100, from a validated setting, kept hard under concurrency by reserving each attempt's maximum cost under a lock before it runs; the fast tier starts on `claude-sonnet-5-5` at `medium` effort (O5).
 
 ## 4. Proposed repository structure
 
@@ -328,7 +330,7 @@ Both are enforced in **one place** — the domain query layer, via the Actor —
 - No tool in V0.1 can send messages, email, make bookings, spend money, write to external calendars, or delete data permanently.
 - Tool calls per turn, tokens per request and monthly spend are capped.
 
-*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval:* Kev's bookkeeping (its transcript, usage, the 90-day purge and Clear) is a second named exception beside capture: five functions acting as the requesting adult, audited, gated and unreachable from tools (ADR 0012 §25).
+*Proposed in M8 Package 0 (ADR 0012, 2026-10-13), pending owner approval; amended the same day:* Kev's bookkeeping (its transcript, usage, budget reservations, the 90-day purge and Clear) is a second named exception beside capture: six functions acting as the requesting adult, audited, gated and unreachable from tools, and one system function for the daily retention cleanup, reachable only from its secret-protected route (ADR 0012 §25).
 
 ### 5.5 Untrusted content
 All text from integrations (event titles/descriptions, locations; later emails and documents) is untrusted external data. Calendar text is stored as bounded plain text with HTML stripped, rendered only through React's escaping under the nonce-based script CSP, and never treated as instructions (ADR 0007 §9). In Kev's context it is wrapped and labelled as external data. Because Kev cannot take external actions and all writes require approval, the blast radius of a successful injection in V0.1 is an odd *proposal* that a human rejects. This must be re-examined before any email or write-capable integration is added.
@@ -340,7 +342,7 @@ All text from integrations (event titles/descriptions, locations; later emails a
 
 ### 5.7 Storage, retention and deletion
 - Encryption in transit and at rest. Integration credentials (ICS URLs now, OAuth tokens later) encrypted at the application level: AES-256-GCM bound to their row, a per-environment key, destroyed on disconnect, and never sent to the client, logs, audit, exports or the LLM (ADR 0007 §11).
-- Kev conversation transcripts retained **90 days** (approved), then deleted. Transcripts are not Kev's memory — context records are.
+- Kev conversation transcripts retained **90 days** (approved), then deleted. Transcripts are not Kev's memory — context records are. *Decided in M8 Package 0 (ADR 0012 §23, owner decisions O3 and O6, 2026-10-13):* 90 days per message from when it was written; expired messages hidden at every read and deleted by a daily cleanup, with purge on the adult's next turn as a backstop; Clear deletes them all at once.
 - Captures remain until organised or dismissed; dismissed captures are purged after 30 days.
 - Soft delete with 30-day purge; hard delete on request.
 - Daily database backups; restore tested before V0.1 is used for real. Full JSON export from Settings.

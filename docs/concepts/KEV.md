@@ -167,6 +167,8 @@ First ever open:
 
 Each new day starts clean (yesterday is a scroll up), with two or three suggestions.
 
+*M8 (ADR 0012 §23, owner decision O3, 2026-10-13):* "starts clean" is the screen. What Kev itself sees is a rolling window of the last 12 hours (at most 10 exchanges), so a follow-up just after midnight to an evening question still makes sense; the screen still shows the day separator.
+
 ## 8. Busy / complex state
 
 **Planning across domains** — "Help me plan the exterior painting."
