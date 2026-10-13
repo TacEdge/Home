@@ -70,3 +70,23 @@ CREATE TRIGGER kev_budget_reservation_settle_only
 CREATE TRIGGER kev_budget_reservation_no_truncate
   BEFORE TRUNCATE ON "kev_budget_reservation"
   FOR EACH STATEMENT EXECUTE FUNCTION kev_budget_reservation_settle_only();
+--> statement-breakpoint
+-- A reservation is always taken open, now or earlier, never in the future:
+-- a row born closed would be a reservation no attempt ever held, and a row
+-- dated ahead could never close (closed_at >= created_at) nor go stale.
+-- Unknown and null statuses still meet the status CHECK and NOT NULL.
+CREATE OR REPLACE FUNCTION kev_budget_reservation_born_open() RETURNS trigger AS $$
+BEGIN
+  IF NEW.status IN ('settled', 'unreconciled') THEN
+    RAISE EXCEPTION 'a kev_budget_reservation is always taken open';
+  END IF;
+  IF NEW.created_at > now() THEN
+    RAISE EXCEPTION 'a kev_budget_reservation cannot be created in the future';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+CREATE TRIGGER kev_budget_reservation_born_open
+  BEFORE INSERT ON "kev_budget_reservation"
+  FOR EACH ROW EXECUTE FUNCTION kev_budget_reservation_born_open();

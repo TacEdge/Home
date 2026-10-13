@@ -3346,7 +3346,7 @@ describe('0009: kev_budget_reservation table and columns', () => {
     expect(await columnsOf('kev_usage')).toHaveLength(13);
   });
 
-  it('0009 creates the table, its index, grants and trigger, and adds only kev_usage.attempt_id', () => {
+  it('0009 creates the table, its index, grants and triggers, and adds only kev_usage.attempt_id', () => {
     const statements = statementsOf('0009_kev_budget_reservation');
     expect(statements.map((s) => s.split('\n')[0])).toEqual([
       'CREATE TABLE "kev_budget_reservation" (',
@@ -3356,6 +3356,8 @@ describe('0009: kev_budget_reservation table and columns', () => {
       'CREATE OR REPLACE FUNCTION kev_budget_reservation_settle_only() RETURNS trigger AS $$',
       'CREATE TRIGGER kev_budget_reservation_settle_only',
       'CREATE TRIGGER kev_budget_reservation_no_truncate',
+      'CREATE OR REPLACE FUNCTION kev_budget_reservation_born_open() RETURNS trigger AS $$',
+      'CREATE TRIGGER kev_budget_reservation_born_open',
     ]);
     const text = statements.join('\n');
     // Only these two tables are named; nothing is dropped, renamed, granted,
@@ -3426,13 +3428,19 @@ describe('0009: kev_budget_reservation constraints, indexes, triggers and grants
     expect(fks.rows[0]?.n).toBe(0);
   });
 
-  it('has the settle-only row trigger and the statement trigger against truncation, owned by the migration role', async () => {
+  it('has the born-open insert trigger, the settle-only row trigger and the statement trigger against truncation, owned by the migration role', async () => {
     const t = await admin.db.execute(sql`
       select tgname, tgenabled, pg_get_triggerdef(g.oid) as def,
              pg_get_userbyid(p.proowner) <> 'home_app' as not_app
       from pg_trigger g join pg_proc p on p.oid = g.tgfoid
       where tgrelid = 'kev_budget_reservation'::regclass and not tgisinternal order by 1`);
     expect(t.rows).toEqual([
+      {
+        tgname: 'kev_budget_reservation_born_open',
+        tgenabled: 'O',
+        def: 'CREATE TRIGGER kev_budget_reservation_born_open BEFORE INSERT ON public.kev_budget_reservation FOR EACH ROW EXECUTE FUNCTION kev_budget_reservation_born_open()',
+        not_app: true,
+      },
       {
         tgname: 'kev_budget_reservation_no_truncate',
         tgenabled: 'O',
@@ -3503,8 +3511,13 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
     status?: string;
     settled?: string | null;
     closedAt?: string | null;
+    createdAt?: ReturnType<typeof sql>;
   };
-  /** One reservation insert; unset fields take a valid open Sonnet-sized reservation for October. */
+  /**
+   * One reservation insert; unset fields take a valid open Sonnet-sized
+   * reservation for October. Only the born-open tests pass a closed status:
+   * every other closed row is reached by inserting open and closing it.
+   */
   const reserve = (r: Row = {}) => {
     const cols = ['attempt_id', 'user_id', 'tier', 'period', 'reserved_usd_micros'];
     const vals = [
@@ -3526,8 +3539,30 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
       cols.push('closed_at');
       vals.push(r.closedAt === 'now' ? sql`now()` : sql`${r.closedAt}::timestamptz`);
     }
+    if (r.createdAt !== undefined) {
+      cols.push('created_at');
+      vals.push(r.createdAt);
+    }
     return sql`insert into kev_budget_reservation (${sql.raw(cols.join(', '))})
       values (${sql.join(vals, sql`, `)})`;
+  };
+  type Close = { status: string; settled?: string | null; closedAt?: string | null };
+  /** Closes (or tries to close) an open reservation in place: status, settlement and close time. */
+  const closeAs = (attemptId: string, c: Close) =>
+    sql`update kev_budget_reservation set status = ${c.status},
+          settled_usd_micros = ${c.settled ?? null}::bigint,
+          closed_at = ${
+            c.closedAt === 'now'
+              ? sql`now()`
+              : c.closedAt === undefined || c.closedAt === null
+                ? sql`null`
+                : sql`${c.closedAt}::timestamptz`
+          }
+        where attempt_id = ${attemptId}::uuid`;
+  /** Inserts an open reservation and closes it: the only way a closed row comes to be. */
+  const reserveClosed = async (tx: Db, attemptId: string, c: Close) => {
+    await tx.execute(reserve({ attempt: attemptId }));
+    await tx.execute(closeAs(attemptId, c));
   };
   /** Expects a failure inside a savepoint, so the case can go on after it. */
   const refused = (tx: Db, q: ReturnType<typeof sql>, code: string) =>
@@ -3641,6 +3676,9 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
       );
     }));
 
+  // Open shapes are inserted; closed shapes are reached the only way they
+  // can be, by closing an open row, so the lifecycle CHECK (23514) still
+  // judges each shape and the born-open trigger never gets in its way.
   it.each([
     ['open, with nothing closed', 'open', null, null, true],
     ['open with a settlement', 'open', '10', null, false],
@@ -3658,43 +3696,150 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
     ['unreconciled with a settlement and no close time', 'unreconciled', '10', null, false],
   ] as const)('lifecycle: %s', (_l, status, settled, closedAt, ok) =>
     rolledBack(async (tx) => {
-      const q = reserve({ attempt: attempt(), status, settled, closedAt });
+      const id = attempt();
+      let q: ReturnType<typeof sql>;
+      if (status === 'open') q = reserve({ attempt: id, status, settled, closedAt });
+      else {
+        await tx.execute(reserve({ attempt: id }));
+        q = closeAs(id, { status, settled, closedAt });
+      }
       if (ok) await accepted(tx, q);
       else await refused(tx, q, '23514');
+      const r = await tx.execute(
+        sql`select status from kev_budget_reservation where attempt_id = ${id}::uuid`,
+      );
+      expect(r.rows).toEqual(ok ? [{ status }] : status === 'open' ? [] : [{ status: 'open' }]);
     }),
   );
 
-  it('refuses a negative settlement; accepts one above the reservation (recording real usage is never refused)', () =>
+  it('refuses a negative settlement; accepts and stores one above the reservation (recording real usage is never refused)', () =>
     rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1, reserved: '665280' }));
       await refused(
         tx,
-        reserve({ attempt: attempt(), status: 'settled', settled: '-1', closedAt: 'now' }),
+        closeAs(A1, { status: 'settled', settled: '-1', closedAt: 'now' }),
         '23514',
       );
-      await accepted(
-        tx,
-        reserve({
-          attempt: attempt(),
-          reserved: '665280',
-          status: 'settled',
-          settled: '700000',
-          closedAt: 'now',
-        }),
-      );
+      await accepted(tx, closeAs(A1, { status: 'settled', settled: '700000', closedAt: 'now' }));
+      const r = await tx.execute(sql`
+        select status, reserved_usd_micros::text as reserved, settled_usd_micros::text as settled
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([{ status: 'settled', reserved: '665280', settled: '700000' }]);
     }));
 
   it('refuses a close time before the creation time; accepts the same instant', () =>
     rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
       await refused(
         tx,
-        reserve({
-          attempt: attempt(),
+        closeAs(A1, {
           status: 'unreconciled',
           closedAt: new Date(Date.now() - 3_600_000).toISOString(),
         }),
         '23514',
       );
-      await accepted(tx, reserve({ attempt: attempt(), status: 'unreconciled', closedAt: 'now' }));
+      await accepted(tx, closeAs(A1, { status: 'unreconciled', closedAt: 'now' }));
+    }));
+
+  // Born open (the reviewed 0009 fix): a reservation is always taken open,
+  // now or earlier, never closed and never in the future, for every role.
+  const BORN_OPEN = /a kev_budget_reservation is always taken open/;
+  const NOT_FUTURE = /a kev_budget_reservation cannot be created in the future/;
+  it.each([
+    ['the runtime role (home_app)', () => db],
+    ['the migration/admin role', () => admin.db],
+  ] as const)(
+    'refuses inserting a settled or unreconciled reservation, as %s (born open)',
+    (_r, on) =>
+      rolledBackAs(on(), async (tx) => {
+        for (const [status, settled] of [
+          ['settled', '81000'],
+          ['settled', '0'],
+          ['unreconciled', null],
+        ] as const)
+          await triggerRefuses(
+            tx,
+            reserve({ attempt: attempt(), status, settled, closedAt: 'now' }),
+            BORN_OPEN,
+          );
+        // Even a shape the lifecycle CHECK would refuse meets the trigger first.
+        await triggerRefuses(tx, reserve({ attempt: attempt(), status: 'settled' }), BORN_OPEN);
+        // Naming open explicitly is still an open reservation.
+        await accepted(tx, reserve({ attempt: attempt(), status: 'open' }));
+        const r = await tx.execute(
+          sql`select status, count(*)::int as n from kev_budget_reservation group by 1`,
+        );
+        expect(r.rows).toEqual([{ status: 'open', n: 1 }]);
+      }),
+  );
+
+  it.each([
+    ['the runtime role (home_app)', () => db],
+    ['the migration/admin role', () => admin.db],
+  ] as const)(
+    'refuses a reservation created in the future, as %s; accepts now and earlier',
+    (_r, on) =>
+      rolledBackAs(on(), async (tx) => {
+        for (const createdAt of [
+          sql`now() + interval '1 second'`,
+          sql`now() + interval '1 microsecond'`,
+          sql`now() + interval '10 years'`,
+          sql`'9999-12-31T00:00:00Z'::timestamptz`,
+        ])
+          await triggerRefuses(tx, reserve({ attempt: attempt(), createdAt }), NOT_FUTURE);
+        // The default (now()), now() named, and a backdated time are all taken.
+        await accepted(tx, reserve({ attempt: attempt() }));
+        await accepted(tx, reserve({ attempt: attempt(), createdAt: sql`now()` }));
+        await accepted(tx, reserve({ attempt: A1, createdAt: sql`now() - interval '1 hour'` }));
+        const r = await tx.execute(sql`
+        select count(*)::int as n, count(*) filter (where created_at = now())::int as now_n,
+               count(*) filter (where created_at = now() - interval '1 hour')::int as back_n
+        from kev_budget_reservation`);
+        expect(r.rows).toEqual([{ n: 3, now_n: 2, back_n: 1 }]);
+      }),
+  );
+
+  it('a backdated open reservation can still close (as the stale sweep will close it, unreconciled)', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1, createdAt: sql`now() - interval '5 minutes'` }));
+      await tx.execute(sql`
+        update kev_budget_reservation set status = 'unreconciled', closed_at = now()
+        where status = 'open' and created_at < now() - interval '120 seconds'`);
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros, closed_at = now() as closed_now
+        from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([
+        { status: 'unreconciled', settled_usd_micros: null, closed_now: true },
+      ]);
+    }));
+
+  it('a settlement refused inside a transaction leaves the reservation open and none of its usage rows', () =>
+    rolledBack(async (tx) => {
+      await tx.execute(reserve({ attempt: A1 }));
+      // One settlement, all or nothing: the usage rows and the close together.
+      const error = await tx
+        .transaction(async (sp) => {
+          await sp.execute(sql`
+            insert into kev_usage (user_id, tier, model, cost_usd_micros, attempt_id)
+            values (${U}, 'fast', 'm', 40000, ${A1}::uuid), (${U}, 'fast', 'm', 41000, ${A1}::uuid)`);
+          // Refused by the trigger (the reserved amount is fixed).
+          await sp.execute(sql`
+            update kev_budget_reservation set status = 'settled', settled_usd_micros = 81000,
+              closed_at = now(), reserved_usd_micros = 81000
+            where attempt_id = ${A1} and status = 'open'`);
+        })
+        .then(
+          () => null,
+          (e: unknown) => e as Error & { cause?: { code?: string } },
+        );
+      expect(error?.cause?.code).toBe('P0001');
+      const r = await tx.execute(sql`
+        select status, settled_usd_micros, closed_at from kev_budget_reservation where attempt_id = ${A1}`);
+      expect(r.rows).toEqual([{ status: 'open', settled_usd_micros: null, closed_at: null }]);
+      const u = await tx.execute(
+        sql`select count(*)::int as n from kev_usage where attempt_id = ${A1}::uuid`,
+      );
+      expect(u.rows[0]?.n).toBe(0);
     }));
 
   it('holds one reservation per attempt (UNIQUE), whoever, whichever tier or month', () =>
@@ -3827,9 +3972,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
     ['change nothing', sql`status = status`],
   ])('refuses any change to a settled reservation: %s', (_l, set) =>
     rolledBack(async (tx) => {
-      await tx.execute(
-        reserve({ attempt: A1, status: 'settled', settled: '81000', closedAt: 'now' }),
-      );
+      await reserveClosed(tx, A1, { status: 'settled', settled: '81000', closedAt: 'now' });
       await triggerRefuses(
         tx,
         sql`update kev_budget_reservation set ${set} where attempt_id = ${A1}`,
@@ -3844,7 +3987,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
     ['change its close time', sql`closed_at = now() + interval '1 minute'`],
   ])('refuses any change to an unreconciled reservation: %s', (_l, set) =>
     rolledBack(async (tx) => {
-      await tx.execute(reserve({ attempt: A1, status: 'unreconciled', closedAt: 'now' }));
+      await reserveClosed(tx, A1, { status: 'unreconciled', closedAt: 'now' });
       await triggerRefuses(
         tx,
         sql`update kev_budget_reservation set ${set} where attempt_id = ${A1}`,
@@ -3856,9 +3999,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
   it('refuses every delete and truncate, and a reserved-amount change, even for the migration/admin role (trigger, not permission)', () =>
     rolledBackAs(admin.db, async (tx) => {
       await tx.execute(reserve({ attempt: A1 }));
-      await tx.execute(
-        reserve({ attempt: A2, status: 'settled', settled: '81000', closedAt: 'now' }),
-      );
+      await reserveClosed(tx, A2, { status: 'settled', settled: '81000', closedAt: 'now' });
       await triggerRefuses(
         tx,
         sql`delete from kev_budget_reservation where attempt_id = ${A1}`,

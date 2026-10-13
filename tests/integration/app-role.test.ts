@@ -320,21 +320,43 @@ describe('runtime/app role (home_app)', () => {
     await expectPermissionDenied(db.execute(sql`truncate kev_budget_reservation`));
   });
 
-  it('cannot disable or drop the kev_budget_reservation triggers, or replace their function', async () => {
+  it('cannot disable, alter or drop the kev_budget_reservation triggers, replace their functions, or skip triggers by replication role', async () => {
     await expectPermissionDenied(
       db.execute(sql`alter table kev_budget_reservation disable trigger all`),
     );
-    await expectPermissionDenied(
-      db.execute(sql`drop trigger kev_budget_reservation_settle_only on kev_budget_reservation`),
-    );
-    await expectPermissionDenied(
-      db.execute(sql`create or replace function kev_budget_reservation_settle_only() returns trigger as $$
-        begin return new; end $$ language plpgsql`),
-    );
+    for (const trigger of [
+      'kev_budget_reservation_born_open',
+      'kev_budget_reservation_settle_only',
+      'kev_budget_reservation_no_truncate',
+    ]) {
+      await expectPermissionDenied(
+        db.execute(sql.raw(`alter table kev_budget_reservation disable trigger ${trigger}`)),
+      );
+      await expectPermissionDenied(
+        db.execute(
+          sql.raw(`alter trigger ${trigger} on kev_budget_reservation rename to x_${trigger}`),
+        ),
+      );
+      await expectPermissionDenied(
+        db.execute(sql.raw(`drop trigger ${trigger} on kev_budget_reservation`)),
+      );
+    }
+    for (const fn of ['kev_budget_reservation_settle_only', 'kev_budget_reservation_born_open']) {
+      await expectPermissionDenied(
+        db.execute(
+          sql.raw(`create or replace function ${fn}() returns trigger as $$
+            begin return new; end $$ language plpgsql`),
+        ),
+      );
+      await expectPermissionDenied(db.execute(sql.raw(`drop function ${fn}()`)));
+    }
+    // Replica mode would skip every ordinary trigger; only a superuser may set it.
+    await expectPermissionDenied(db.execute(sql`set session_replication_role = replica`));
     const r = await db.execute(
       sql`select tgname, tgenabled from pg_trigger where tgrelid = 'kev_budget_reservation'::regclass and not tgisinternal order by 1`,
     );
     expect(r.rows).toEqual([
+      { tgname: 'kev_budget_reservation_born_open', tgenabled: 'O' },
       { tgname: 'kev_budget_reservation_no_truncate', tgenabled: 'O' },
       { tgname: 'kev_budget_reservation_settle_only', tgenabled: 'O' },
     ]);
