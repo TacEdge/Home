@@ -19,10 +19,10 @@ import type { UserActor } from '@/trust/actor';
 import {
   CHRISTCHURCH,
   FINGERPRINT_VECTORS,
-  LOCATION_LEAKS,
   TEST_WEATHER_KEY_ROTATED,
   WEATHER_VARIABLES,
   WELLINGTON_UNROUNDED,
+  locationLeaksIn,
   weatherEnv,
 } from '../fixtures/weather';
 import { adminDb, testDb } from './db';
@@ -156,9 +156,12 @@ const refresh = (p = fake(), now = T0, actor: UserActor = h.sam, d: { db: typeof
   refreshForecast(actor, p, { now }, d);
 const read = (now = T0, actor: UserActor = h.sam) => readForecast(actor, { now }, deps);
 
-/** Asserts nothing location-bearing in a text. */
+/**
+ * Asserts nothing location-bearing in a text: a coordinate only as a
+ * standalone number, so a timestamp's or a uuid's digits never trip it (Q8).
+ */
 const clean = (label: string, text: string) => {
-  for (const leak of LOCATION_LEAKS) expect(text, `${label}: ${leak}`).not.toContain(leak);
+  expect(locationLeaksIn(text), label).toEqual([]);
 };
 
 describe('a successful refresh, and reading it', () => {
