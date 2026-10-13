@@ -342,6 +342,54 @@ describe('Today: the weather sentence, its credit and its Why (W15, W19, §4.1, 
   });
 });
 
+describe('X6: first run (no live calendar) with a fresh forecast', () => {
+  it('Today is in its first-run state and still says the weather, with one credit link and no opening; Forward Week has its phrases and credit line and no openings', async () => {
+    const phrases = (html: string) =>
+      [...html.matchAll(/data-testid="day-phrase"[^>]*>([^<]+)</g)].map((m) => m[1]);
+    const noOpenings = (html: string) =>
+      expect(rows(html).filter((r) => r.startsWith('open_window'))).toEqual([]);
+    // Not vacuous: with the calendar live, Alex's Forward Week lists openings.
+    expect(rows((await renderForward(h.alex)).html)).toContain('open_window.task');
+    const archived = (
+      await admin.db.execute<{ id: string }>(
+        sql`update calendar_source set archived_at = now() where archived_at is null returning id`,
+      )
+    ).rows.map((r) => r.id);
+    expect(archived).toContain(id.calendar);
+    try {
+      // No live calendar: coverage unknown, so no opening anywhere (contract §4.4).
+      let f = await renderForward(h.alex);
+      expect(phrases(f.html)).toHaveLength(7);
+      expect(words(f.html)).toContain('Forecast as of 06:55 · Open-Meteo');
+      expect(visibleCreditLinks(f.html)).toBe(1);
+      noOpenings(f.html);
+      // Today's first run is no live calendar and nothing recorded.
+      await admin.db.execute(
+        sql`update event set archived_at = now() where title in ('Football WS', 'Swimming WS')`,
+      );
+      const { html, c } = await renderToday(h.alex);
+      expect(c.props.model.state).toBe('first_run');
+      expect(words(html)).toContain('HOME is quiet because it doesn’t know your calendars yet.');
+      expect(words(html)).toContain('Looks dry until midday, then showers possible.');
+      expect(html).toContain('data-testid="weather-sentence"');
+      expect(visibleCreditLinks(html)).toBe(1);
+      noOpenings(html);
+      f = await renderForward(h.alex);
+      expect(phrases(f.html)).toHaveLength(7);
+      expect(visibleCreditLinks(f.html)).toBe(1);
+      noOpenings(f.html);
+    } finally {
+      await admin.db.execute(
+        sql`update event set archived_at = null where title in ('Football WS', 'Swimming WS')`,
+      );
+      for (const calendar of archived)
+        await admin.db.execute(
+          sql`update calendar_source set archived_at = null where id = ${calendar}::uuid`,
+        );
+    }
+  });
+});
+
 describe('Forward Week: day phrases, the credit line and its Why, openings (W14, W19, §4.2)', () => {
   it('a phrase on each of the seven days, the credit line beside Coming up with its own Why, and the openings as the contract words them', async () => {
     for (const actor of [h.sam, h.alex]) {
