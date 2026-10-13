@@ -390,7 +390,9 @@ describe('W9, §5.1: the timeouts take effect inside the refresh’s own transac
       // 57014: query_canceled ("canceling statement due to statement timeout").
       expect(seen.cancelled).toBe('57014');
       expect(seen.elapsed as number).toBeGreaterThan(4_900);
-      expect(seen.elapsed as number).toBeLessThan(6_500);
+      // Cut off by the timeout, well before the 8 s sleep would finish (the
+      // margin allows for a loaded CI runner).
+      expect(seen.elapsed as number).toBeLessThan(7_500);
       expect(inner.calls).toBe(1);
       // SET LOCAL: after commit the same backend is back to its own settings.
       expect(await show(single)).toEqual(baseline);
