@@ -24,7 +24,10 @@ import { oneOf } from './common';
 // revokes DELETE and TRUNCATE), and a trigger, for every role, refuses any
 // change to the identity, owner, tier, period, reserved amount or creation
 // time, any change to a row that is no longer open, any update that leaves
-// a row open, and every delete and truncate. `user_id` is a plain value with
+// a row open, and every delete and truncate. Born open: a second trigger,
+// for every role, refuses inserting a row that is settled or unreconciled,
+// or whose created_at is in the future (ADR 0012 §42), so a closed row only
+// comes from closing an open one. `user_id` is a plain value with
 // no foreign key, as in kev_usage. No application code uses the table until
 // Package 1b (migration-first).
 
