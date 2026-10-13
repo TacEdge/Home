@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
 import { sql } from 'drizzle-orm';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -519,22 +522,46 @@ describe('every rendered string avoids the forbidden lists (O26, §5.8)', () => 
 });
 
 describe('X1, X9: rendering never reaches the network and is byte-identical for a fixed now and forecast', () => {
-  it('Today and Forward Week render twice to the same bytes, and nothing is fetched while rendering', async () => {
-    const fetched = vi.fn(() => {
+  it('Today and Forward Week render twice to the same bytes, and nothing is fetched while rendering, even with a refresh due: no fetch, no node:https or node:http request or get', async () => {
+    // An older forecast whose last attempt was ten hours ago: a refresh is due,
+    // so a page that refreshed while rendering would reach the provider here.
+    await writeForecast(at('2026-10-13', '21:00'));
+    const network = () => {
       throw new Error('the network was reached while rendering');
-    });
+    };
+    const fetched = vi.fn(network);
     vi.stubGlobal('fetch', fetched);
+    // safe-fetch (the provider's only transport) calls node:https / node:http
+    // `request`; `get` too, for completeness. Named imports follow the spies.
+    const spies = [
+      vi.spyOn(https, 'request').mockImplementation(network),
+      vi.spyOn(https, 'get').mockImplementation(network),
+      vi.spyOn(http, 'request').mockImplementation(network),
+      vi.spyOn(http, 'get').mockImplementation(network),
+    ];
+    syncBuiltinESMExports();
+    const untouched = (label: string) => {
+      expect(fetched, label).not.toHaveBeenCalled();
+      for (const spy of spies) expect(spy, label).not.toHaveBeenCalled();
+    };
     try {
       for (const actor of [h.sam, h.alex]) {
-        const t1 = (await renderToday(actor)).html;
+        const t1 = await renderToday(actor);
+        untouched('Today');
         const t2 = (await renderToday(actor)).html;
-        const f1 = (await renderForward(actor)).html;
+        const f1 = await renderForward(actor);
+        untouched('Forward Week');
         const f2 = (await renderForward(actor)).html;
-        expect(t2).toBe(t1);
-        expect(f2).toBe(f1);
+        expect(t1.c.askWeather).toBe(true);
+        expect(f1.c.askWeather).toBe(true);
+        expect(words(t1.html)).toContain('As of yesterday 21:00');
+        expect(t2).toBe(t1.html);
+        expect(f2).toBe(f1.html);
       }
-      expect(fetched).not.toHaveBeenCalled();
+      untouched('after every render');
     } finally {
+      for (const spy of spies) spy.mockRestore();
+      syncBuiltinESMExports();
       vi.unstubAllGlobals();
     }
   });
