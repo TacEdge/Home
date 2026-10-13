@@ -382,10 +382,9 @@ describe('W9, §5.1: the timeouts take effect inside the refresh’s own transac
           return inner.fetchForecast(point);
         },
       };
-      expect(await refresh(probing, T0, h.sam, { db: singleDb as typeof db })).toEqual({
-        status: 'ok',
-        changed: true,
-      });
+      expect(
+        await refreshForecast(h.sam, probing, { now: T0 }, { db: singleDb as typeof db }),
+      ).toEqual({ status: 'ok', changed: true });
       expect(seen.during).toEqual({ s: '5s', i: '25s', pid: baseline.pid });
       expect(seen.own).toEqual({ locks: 1, tx: true });
       // 57014: query_canceled ("canceling statement due to statement timeout").
