@@ -1,8 +1,8 @@
 # M8 — Kev Intelligence: Build Contract
 
-Status: **Proposed**, 2026-10-13 (Package 0, in review). The owner decided O1–O6 on 2026-10-13; they are recorded in §19.2 (as D2, D3, D13 and D19) and in ADR 0012 §39. The other decisions remain proposed in §19.2. This contract is approved, as amended by those decisions and the review amendments the owner approved the same day, when the owner merges Package 0.
+Status: **Approved by the owner on 2026-10-13**: D1–D22 as written in §19.2, the owner decisions O1–O6 and the evaluation allocation (O7, §12.4), recorded in §19.2 and in ADR 0012 §39–§41. The approval takes effect when PR #81 (Package 0) merges.
 
-- **Progress:** nothing is built. No provider account, key, dependency, secret, migration or scheduled job exists for Kev anywhere. Package 1a starts only after Package 0 merges and the owner says to start.
+- **Progress:** nothing is built. No provider account, key, dependency, secret, migration, scheduled job or billing setting exists for Kev or its evaluations anywhere. Package 1 (1a, the migration, then 1b) starts only when the owner says so, after Package 0 merges.
 
 The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev-intelligence.md`).
 
@@ -31,6 +31,7 @@ The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev
 | 19 | The ADR | ADR 0012 |
 | 20 | Package 1 verification gates | §5.7 (G1–G21) |
 | 21 | Budget reservations and retention | §13.6; §7.2 |
+| 22 | The evaluation allocation (O7) | §12.4 |
 
 The production gate is §14 and the risks §18.
 
@@ -139,7 +140,7 @@ Where this contract narrows, defers or changes part of those documents, ADR 0012
 
 **Explicitly excluded:** §1.4.
 
-**Approved additions, not in the roadmap row:** two, decided by the owner on 2026-10-13: the **daily retention cleanup** of expired Kev messages (O6, D13; the one scheduled job, which calls no model and reads only `message`), and the **budget reservation record** that makes the spend cap hard under concurrency (D19; one migration, Package 1a). Three small items are proposed for approval (D6's "Keep in To sort" on the person's own message, D10's title search, D13's purge on use as a backstop); each is cheaper than the alternative it replaces.
+**Approved additions, not in the roadmap row:** two, decided by the owner on 2026-10-13: the **daily retention cleanup** of expired Kev messages (O6, D13; the one scheduled job, which calls no model and reads only `message`), and the **budget reservation record** that makes the spend cap hard under concurrency (D19; one migration, Package 1a). Three small items were approved with the rest on 2026-10-13 (D6's "Keep in To sort" on the person's own message, D10's title search, D13's purge on use as a backstop); each is cheaper than the alternative it replaces.
 
 ### 1.2 Classification of the owner's brief
 
@@ -147,7 +148,7 @@ Where this contract narrows, defers or changes part of those documents, ADR 0012
 |---|---|---|
 | **A. Existing approved commitments** | The ROADMAP M8 row; the bookkeeping decision (ADR 0005 §39, ADR 0006 §12); NZD conversion; `get_insights`; "Tell me about today"; Kev tools over M7's engines in M7's language; untrusted calendar text; `search`; Usage in Settings; evals against both tiers | M8, as §1.1 says, with the narrowings recorded |
 | **B. Architectural intentions** (binding) | `KevRequest`/`KevEvent`; the turn (KEV-AGENT-MODEL §4); routing and provider-neutral transcripts (§5); the tool rules (§6); memory (§8); autonomy tiers (§9); evaluation (§10); the `src/kev/` layout and SDK isolation (SYSTEM-ARCHITECTURE §4); one continuing conversation per person (KEV.md §6); tone (D13) | M8 builds them; where ADR 0012 changes one, the doc is annotated, not rewritten |
-| **C. New capabilities proposed here** | A HOME-owned network policy for the provider; the answer format and the grounding check; the bookkeeping path; Kev's view segments; static suggestions; the eval layers and live-eval workflow; the spend-cap degradation and budget reservations; "Keep in To sort"; purge on use; the daily retention cleanup | Each is an owner decision (§19.2); O1–O6 were decided on 2026-10-13 |
+| **C. New capabilities proposed here** | A HOME-owned network policy for the provider; the answer format and the grounding check; the bookkeeping path; Kev's view segments; static suggestions; the eval layers and live-eval workflow; the spend-cap degradation and budget reservations; "Keep in To sort"; purge on use; the daily retention cleanup | Each is an owner decision (§19.2), all approved on 2026-10-13 |
 | **D. Deferred** | Capture tool, triage, proposals, approval cards, Kev-driven *What Kev knows*, "Sort it" (M9); Week Ahead, sheets, the Kev panel, Forward long-press, PWA (M10); cached insight phrasing (M10 or later, D15); scheduled observation and notifications (V0.4); external actions (V0.5, each approved); persistent goals, specialist agents, long-term memory (Appendix A; ROADMAP "Not yet") | Not built in M8 |
 
 The owner's brief asks to "reserve authorised execution for M9". The roadmap's M9 is **"Kev: capture + propose"**, and external execution is V0.5 at the earliest and "Not yet" today. ADR 0012 records the honest framing as D21: M9 brings proposals and approval cards, executed on approval by HOME's existing internal executor; nothing outside HOME is executed in M9.
@@ -208,9 +209,9 @@ Package *n* starts only after the one before has merged and the owner says to st
 | **1a** | **Budget reservation migration** | The table the hard spend cap needs, before any code uses it | Migration `kev_budget_reservation` and `kev_usage.attempt_id` (§4.6, §13.6); grants, the append-only and settle-only triggers, indexes; schema tests; FAMILY-DATA-MODEL; no application code | 0 | A grant wider than settle-only; a trigger that lets a reserved amount change; the migration not run before 1b merges | **Critical** (migration) | Opus | **High, focused** on grants and triggers. |
 | **1b** | **Provider gateway and security** | A safe, bounded, observable path to the model, with no UI and no tools | `@anthropic-ai/sdk` (pinned); `KevProvider`; Anthropic adapter; scripted provider; HOME network policy for `api.anthropic.com`; config and router; turn budget; limits, budget reservations and spend cap (`src/trust/usage.ts`, §13.6); rate limits from audit rows; the atomic one-turn guard; env, boot line, redaction; the bookkeeping path and message content v2 (§7.6); the privacy suite's Kev write list updated; the Package 1 verification gates (§5.7) recorded in the PR | 1a merged and run | The key leaking; the SDK bypassing the network policy; unbounded retries or time; a silent widening of Kev's write refusal; the gate weakened; a reservation race | **Critical** (dependency, env, `src/trust`, privacy suite) | Opus | **High.** New secret, new outbound host, a deliberate exception to `kev_cannot_write`, the budget lock. |
 | **2** | **Authorised read tools** | Every tool reads only what the actor may see, minimised, with no model involved | `loadAgenda` and the Today input builder into `src/domain`; the twelve tools and `escalate` with Zod input and output schemas; minimisation; untrusted-text labelling; `search` (D10); the non-interference invariant over every tool; the sensitive-context guard extended to `src/kev` | 1b | A tool returning another adult's private record or sensitive context; the shared loader moved with a behaviour change; personal data in a JSON schema | High (domain, shared agenda loader, `src/kev`) | Opus | **High.** This defines what can ever reach the provider. |
-| **3** | **Orchestrator, conversation and grounding** | A complete, checked turn, end to end, with a scripted model | `kev.handle()`; context assembly; the tool loop and caps; the append-only request within an attempt (N15); deadline-aware timeouts; escalation, model- and validator-initiated; the conversation window (12 hours, 10 exchanges, 6,000 tokens); purge on use, Clear and the daily retention cleanup route and its schedule (§7.2); the answer schema, validator, regeneration and fallback; the provisional system prompt; the scenario dataset format and the first 30 scenarios run against the scripted provider | 2 | A fact shown that no tool returned; the validator too loose or too strict; a lost message on failure; a turn exceeding its budget | **Critical** (bookkeeping use, prompts, validator) | Opus | **High.** This defines what Kev may show. |
+| **3** | **Orchestrator, conversation and grounding** | A complete, checked turn, end to end, with a scripted model | `kev.handle()`; context assembly; the tool loop and caps; the append-only request within an attempt (N15); deadline-aware timeouts; escalation, model- and validator-initiated; the conversation window (12 hours, 10 exchanges, 6,000 tokens); purge on use, Clear and the daily retention cleanup route, with its daily schedule only if G18 passed (otherwise the owner's chosen alternative; §7.2); the answer schema, validator, regeneration and fallback; the provisional system prompt; the scenario dataset format and the first 30 scenarios run against the scripted provider | 2 | A fact shown that no tool returned; the validator too loose or too strict; a lost message on failure; a turn exceeding its budget | **Critical** (bookkeeping use, prompts, validator) | Opus | **High.** This defines what Kev may show. |
 | **4** | **The Kev screen** | Kev usable on a phone, calm and complete, with and without JavaScript | `/kev` and its turn route (`maxDuration` 90 s, subject to G3); progress streaming; the answer, cited rows, Kev's view, "What's this based on?"; suggestions; states; Clear; no-JS form; entry links (shell, Today); Settings › Usage; four viewports; accessibility; KEV.md, TODAY.md and BRAND.md annotations | 3 | Unchecked text reaching the screen; a stream cut off without an honest state; Kev crowding Today; the capture bar's promise broken | High or Critical, as the classifier decides (shell, route) | **Fable** | **High.** A new route and the first model text on screen. |
-| **5** | **Evaluation and tuning** | Evidence that Kev meets §12.3 on both tiers, and the fast-tier choice | The live runner (`src/kev/evals/`); the `workflow_dispatch` job and its `kev-evals` environment; the full dataset (≥ 90 scenarios, ≥ 48 adversarial); runs on deep, Sonnet 5.5 at `medium` and `low`, and Haiku 5.5; refusal rates; the conversation-window limits evaluated; prompt tuning; recorded results for D2 and the deferred O4 | 4 | Tuning to the tests; flaky thresholds; eval spend; an eval key used elsewhere | **Critical** (`.github/`, scripts) | Opus | **High, focused** on the evidence and the thresholds. |
+| **5** | **Evaluation and tuning** | Evidence that Kev meets §12.3 on both tiers, and the fast-tier choice | The live runner (`src/kev/evals/`); the `workflow_dispatch` job and its `kev-evals` environment; the full dataset (≥ 90 scenarios, ≥ 48 adversarial); runs on deep, Sonnet 5.5 at `medium` and `low`, and Haiku 5.5; refusal rates; the conversation-window limits evaluated; prompt tuning; recorded results for D2 and the deferred O4; the campaign ledger; all within the evaluation allocation (O7, §12.4) | 4 | Tuning to the tests; flaky thresholds; eval spend beyond the allocation; an eval key used elsewhere | **Critical** (`.github/`, scripts) | Opus | **High, focused** on the evidence and the thresholds. |
 | **6** | **Acceptance** | Prove M8 against §17 | `docs/m8/M8-ACCEPTANCE.md` and its matrix; screenshots; measurements; DEPLOY.md's environment rows; the evidence for §E items 23–31 (added in Package 0) where they can be done on synthetic data; status docs | 5 | Evidence asserted rather than tested | **Critical** | Opus | **High, focused** on the evidence. Settled reviews are not repeated. |
 
 Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3's merge if seeing the live results before the screen is preferred; nothing else changes.
@@ -222,7 +223,7 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
   - Schema tests: the exact columns; `home_app` has `SELECT`, `INSERT` and `UPDATE` on `kev_budget_reservation` and nothing else; a trigger refuses any change to a reservation's amount, owner, attempt or creation time, any change to a closed reservation, and every delete and truncate; `kev_usage` stays append-only with its new nullable `attempt_id`.
 - **Package 1b:**
   - Matrix rows N1–N8, N10, N12–N14, N16, L6, L9–L11, L13–L18, L20, S4, S5, S10, S12–S14 and S16 pass; the turn-level rows wait for Package 3.
-  - Every verification gate G1–G21 in §5.7 is recorded in the PR as passed, failed (with the owner's decision) or, for the owner's account gates, pending at a named §E item. A failed technical gate stops the package for the owner.
+  - Every verification gate G1–G21 in §5.7 is recorded in the PR as passed, failed (with the owner's decision) or, for the owner's account gates, pending at a named §E item. A failed technical gate stops the package for the owner. G18's result decides whether Package 3 adds the daily schedule; if it fails, the owner's choice of scheduler is recorded in the PR (§7.2).
   - Nothing calls the provider in CI: the required checks run with `HOME_TEST_KEV=scripted` and no key.
   - The adapter is the only file importing the SDK; ESLint and a unit test prove it.
   - The SDK's every request goes through HOME's fetch (N4, N5), or Package 1 stops and the owner decides (§5.4).
@@ -237,15 +238,17 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
   - Matrix rows C1–C13, C15–C23, V1–V18, N9, N11, N15, L1–L5, L7, L8, L12, L19, S6 and S7 pass, and S1–S2 for the bundle, ledger and trace.
   - The person's words are stored before any provider call, in every failure path (C1, C2).
   - Thirty scripted scenarios pass deterministically, including every adversarial class in §12.2.
+  - The retention route is built and tested whatever G18 found; the `crons` entry is added only if G18 passed, and otherwise the PR records the owner's chosen scheduler or that read-time filtering and purge on use stand alone until one exists.
 - **Package 4:**
   - Matrix rows U1–U15, C14, S8, S9 and S15 pass, at four viewports, with JavaScript on and off.
   - No model text reaches the browser before the validator has passed it (U3).
   - Today and Forward suites pass, with only the entry link added and named in the PR.
   - The owner approves the wording and layout from screenshots.
 - **Package 5:**
-  - Matrix rows E1–E11 pass.
-  - Every §12.3 threshold is met on deep and on the fast tier the owner chooses, with the run's summary linked.
-  - The live workflow cannot run without the owner's approval and stops at its budget.
+  - Before the first live run: the eval-only key exists in its own provider workspace (§E item 25), separate from Preview's and Production's, with US inference enforced (G11) and, if G12 found a workspace spend limit available, one set no higher than the campaign remainder.
+  - Matrix rows E1–E13 pass.
+  - Every §12.3 threshold is met on deep and on the fast tier the owner chooses, with the runs' summaries linked.
+  - The live workflow cannot run without the owner's approval, refuses a run whose computed maximum passes the evaluation allocation's limits, and stops at them (§12.4). Every live run is in the campaign ledger, within US$175 each and US$200 in all.
 - **Package 6:** every criterion in §17 is met, with evidence that cites tests and recorded runs.
 
 ### 2.3 Verification by package
@@ -258,12 +261,12 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
 | 2 | `pnpm verify:focused` | **Full `pnpm verify`** | The shared agenda loader moves; Today and Forward must not change |
 | 3 | `pnpm verify:focused` | **Full `pnpm verify`** + the scripted scenarios | The turn, the validator, the bookkeeping writes |
 | 4 | `pnpm verify:focused` | **Full `pnpm verify`** | A new route, the shell, devices and the privacy sweep |
-| 5 | `pnpm verify:focused` | **Full `pnpm verify`** + one full live run on both tiers | Thresholds on real models |
+| 5 | `pnpm verify:focused` | **Full `pnpm verify`** + the full live evidence on both tiers, in runs within the evaluation allocation (§12.4) | Thresholds on real models |
 | 6 | — | **Full `pnpm verify`** + CI | Milestone evidence |
 
 **CI tiers.** `src/kev/` is already high (`scripts/ci-select.mts`); `src/domain/` is high; `src/trust/`, `env.ts`, `package.json`, `.github/`, scripts, the privacy suite and fixtures are critical. No classifier change is proposed; Package 5 adds an eval rule only if its runner lives outside a path already classified (it should not).
 
-**Live evals and CLAUDE.md.** From Package 5 on, CLAUDE.md's rule ("run the Kev eval suite against both tiers before merging any change to prompts, tools, context assembly, routing or model config") is met by the deterministic and scripted layers in every CI run and by one live run of the affected scenarios, on both tiers, linked in the PR (D18). Packages 1–4 ship no prompt that any deployed environment can run: Kev is `off` everywhere deployed until Package 5's evidence and §14's Preview item.
+**Live evals and CLAUDE.md.** From Package 5 on, CLAUDE.md's rule ("run the Kev eval suite against both tiers before merging any change to prompts, tools, context assembly, routing or model config") is met by the deterministic and scripted layers in every CI run and by one live run of the affected scenarios, on both tiers, linked in the PR (D18). During Package 5 those runs come out of the evaluation allocation; after it, each needs a further owner allocation first (§12.4). Packages 1–4 ship no prompt that any deployed environment can run: Kev is `off` everywhere deployed until Package 5's evidence and §14's Preview item.
 
 **Settled reviews are not repeated:** auth, CSP, the M4 sync model, the response service, M7's gap engine and forecast service. Package 1 opens a new outbound host, a new table and an exception to Kev's write refusal; Package 2 re-opens the shared agenda loader's location only; Package 3 adds the one scheduled route; nothing else is re-opened.
 
@@ -344,7 +347,7 @@ Kev never claims access HOME doesn't hold, and never says "I don't have access t
 | **Extensibility** | Poor: every new domain grows the bundle | Good: a new domain adds tools to the registry | Good, but premature |
 | **Verdict** | Rejected: over-shares and under-answers | **Chosen** | Rejected for M8; its seams are kept (§4.5, Appendix A) |
 
-**Recommendation:** B (D1). It is what KEV-AGENT-MODEL §4 already describes ("agent loop: Claude API, tool use, streaming"). The loop is **HOME's own code** in the orchestrator, not the SDK's beta Tool Runner and not a hosted agent service: HOME must count and cap calls, bind every tool to the actor, record the trace and validate the answer, and a framework that runs tools for us would hide all four.
+**Approved (D1, owner decision, 2026-10-13):** B. It is what KEV-AGENT-MODEL §4 already describes ("agent loop: Claude API, tool use, streaming"). The loop is **HOME's own code** in the orchestrator, not the SDK's beta Tool Runner and not a hosted agent service: HOME must count and cap calls, bind every tool to the actor, record the trace and validate the answer, and a framework that runs tools for us would hide all four.
 
 ### 4.2 The turn
 
@@ -475,7 +478,7 @@ M8 builds five seams that a later orchestrator could use, and nothing on top of 
 
 ### 4.6 Schema
 
-**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is proposed here and pending: no schema change is made in Package 0.
+**One migration, Package 1a, merged and run in Production and Preview before the code that uses it** (MIGRATIONS.md). It is approved here (D19, D20) and pending Package 1a: no schema change is made in Package 0.
 
 - **`kev_budget_reservation`** (§13.6): `id` (uuid), `attempt_id` (uuid, unique), `user_id` (no foreign key, like `kev_usage`), `tier`, `period` (the home-zone month, as its first day), `reserved_usd_micros` (bigint, > 0), `status` (`open`, `settled` or `unreconciled`), `settled_usd_micros` (bigint, null while open), `created_at`, `closed_at`. Content-free. `home_app` may select, insert and update; a trigger refuses any change to `id`, `attempt_id`, `user_id`, `tier`, `period`, `reserved_usd_micros` or `created_at`, any change to a row that is no longer `open`, and every delete and truncate. Index on `(period, status)`.
 - **`kev_usage.attempt_id`** (uuid, nullable): every row M8 writes carries its attempt, so a reservation and its per-call usage reconcile. The table stays append-only.
@@ -533,7 +536,7 @@ Sources: the Anthropic API facts bundled with this session (model table cached 2
 | **Where inference runs** | `global` (default) or `us` at 1.1× price; storage at rest in the US; no AU or NZ option (verified) | Australian cross-region profile (Sydney, Melbourne; Auckland added as a source) (verified from search only); per-model availability for the 5.5 tiers **not confirmed** | australia-southeast1 listed; per-model Claude availability **not confirmed** | Australian storage region; inference may stay offshore (not confirmed) | No documented region pinning (not confirmed) |
 | **Fit** | Approved stack (D3, D10 of ADR 0001); one SDK; the eval suite targets it | **Contingency 1** if AU/NZ inference is ever required; AWS credentials and partner pricing | Contingency 2 | Contingency only; prompts, tools and evals redone | Not suitable unpaid; contingency only when paid |
 
-**Recommendation:** the Anthropic API, first party, through `@anthropic-ai/sdk` behind `KevProvider` (D2). Nothing else is configured or paid for in M8.
+**Approved (D2, owner decision, 2026-10-13):** the Anthropic API, first party, through `@anthropic-ai/sdk` behind `KevProvider` (D2). Nothing else is configured or paid for in M8.
 
 ### 5.3 Tiers, models and effort (D2)
 
@@ -602,7 +605,7 @@ The key is **`HOME_KEV_PROVIDER_KEY`**, read only by `env.ts` and passed explici
 **Decision (D3, owner, 2026-10-13, O1):**
 
 1. **Request zero data retention.** A request is not evidence. Only **written confirmation from Anthropic** (the contract, or the account representative in writing) naming the organisation counts; it is filed privately and recorded at DEPLOY.md §E item 23 as a date and yes/no.
-2. **If ZDR is unavailable or unconfirmed, standard retention is not accepted automatically for real family data.** Development on synthetic data continues. Real-data model access then needs a **separate, informed owner decision**, recorded at DEPLOY.md §E item 24, among these alternatives, none of them pre-chosen:
+2. **Real family data reaches the provider only after a separate, informed owner decision,** recorded at DEPLOY.md §E item 24 with both adults' agreement. It is required whatever ZDR's outcome: written ZDR confirmation, passing the Package 1 gates (§5.7) and opening the real-data gate are evidence or preconditions for it, never a substitute. With written ZDR the decision may be to proceed under it. **If ZDR is unavailable or unconfirmed, standard retention is not accepted automatically;** the decision is among these alternatives, none of them pre-chosen. Development on synthetic data continues meanwhile.
 
    | Alternative | What it means | Residual |
    |---|---|---|
@@ -617,14 +620,14 @@ The key is **`HOME_KEV_PROVIDER_KEY`**, read only by `env.ts` and passed explici
 
 1. **Account:** an Anthropic Console organisation under the Commercial Terms, not a consumer plan; the Terms' and DPA's effective dates accepted (17 June 2025 and 24 February 2025, or whatever is current).
 2. **Retention, read from the Console:** the value shown at Console › Settings › Data retention for the Production organisation, as text (for example "30 days"). Any screenshot stays with the owner, outside the repository.
-3. **ZDR:** "ZDR confirmed in writing on [date]: yes/no". If no, item 24's decision is required before item 29.
+3. **ZDR:** "ZDR confirmed in writing on [date]: yes/no". Either way, item 24's decision is required before item 29; the answer here decides which alternatives it may choose among.
 4. **Residency enforced in the workspace,** not only in code: `allowed_inference_geos: ["us"]` and `default_inference_geo: "us"` on the Production workspace (yes/no); N16 passed.
 5. **Sub-processors:** the list reviewed on [date], with the count and any outside the US noted (no names needed).
 6. **Provider spend limit:** set on the workspace if the Console offers one (yes/no; the value in US$).
 7. **The flagged-content exception acknowledged:** up to 2 years, and classification scores up to 7 years (verified from search only), under ZDR too, recorded as accepted residual risk.
 8. **Both adults have read ADR 0012's privacy note** (§38): initials and date.
 
-Passing the Package 1 verification gates (§5.7) never switches on real-data model access by itself: that needs items 23 and 24 (or written ZDR) as well as the real-data gate.
+Passing the Package 1 verification gates (§5.7), confirming ZDR or opening the real-data gate never switches on real-data model access by itself: that needs item 23's evidence and item 24's decision, always, as well as the real-data gate.
 
 **New Zealand privacy** (Privacy Act 2020; not legal advice):
 
@@ -647,7 +650,7 @@ Passing the Package 1 verification gates (§5.7) never switches on real-data mod
 
 Every provider or platform capability M8 depends on that is not yet confirmed by current official documentation (URL and date) or authorised account evidence is a gate here. Package 1b records each one in its PR, with its date and evidence (never a key, header or body). The technical gates (G1–G12, G16–G21) must pass before Package 1b merges, or the package stops for the owner. The owner's account gates (G13–G15) are recorded at DEPLOY.md §E item 23 and may still be open when Package 1b merges; Kev cannot reach real data while they are. Live checks use a synthetic prompt and an eval or development key, run by the owner.
 
-**Passing these gates never activates real-data model access.** That needs, as well, written ZDR or the owner's separate privacy decision (§5.5; §E items 23–24) and the real-data gate.
+**Passing these gates never activates real-data model access.** That needs, as well, item 23's evidence, the owner's separate privacy decision at item 24 (always, whether or not ZDR is confirmed; §5.5) and the real-data gate.
 
 | # | Verify | How | Passes when | If it fails |
 |---|---|---|---|---|
@@ -662,13 +665,13 @@ Every provider or platform capability M8 depends on that is not yet confirmed by
 | G9 | The grow-only request (N15) against a real model | A manual live attempt with a synthetic tool round and a regeneration, thinking on, comparing consecutive request bodies | Each body is a byte-prefix extension of the one before; no 400 for an edited history | Stop: a fix in the adapter before merge |
 | G10 | `usage.inference_geo` is reported | A manual live call with `inference_geo: "us"` | Present on every response and equal to `us` | Stop: without it N16 cannot check residency; the owner decides |
 | G11 | Workspace inference-geo enforcement is available on the owner's account | The Console, for the eval, Preview and Production workspaces | `allowed_inference_geos` and `default_inference_geo` can be set to `["us"]` and `us` | Recorded; the per-request parameter and N16 remain; the owner decides at item 23 whether that is enough |
-| G12 | A provider workspace spend limit is available | The Console | Available, and its granularity noted | Recorded as unavailable; HOME's own cap (§13.6) stands alone, and provider billing exposure is stated as unmitigated by the provider |
-| G13 | ZDR: availability for this account, and written confirmation | The owner's request to Anthropic | Written confirmation naming the organisation | §5.5: no automatic acceptance; the owner's separate decision at item 24 |
+| G12 | A provider workspace spend limit is available, for the eval, Preview and Production workspaces | The Console | Available, and its granularity noted | Recorded as unavailable; HOME's own cap (§13.6) and, for evaluations, the harness's allocation limits (§12.4) stand alone, and provider billing exposure is stated as unmitigated by the provider |
+| G13 | ZDR: availability for this account, and written confirmation | The owner's request to Anthropic | Written confirmation naming the organisation | §5.5: no automatic acceptance of standard retention; the owner's separate decision at item 24 chooses among the alternatives (that decision is required even when this gate passes) |
 | G14 | The default retention value | Console › Settings › Data retention, for the Production organisation | Recorded as text at item 23 | — (it is evidence, whatever it says) |
 | G15 | The sub-processor list | anthropic.com/subprocessors (trust.anthropic.com) | Reviewed and dated at item 23 | If unreachable, the owner asks Anthropic in writing; item 23 waits |
 | G16 | Pooled connections and the budget lock under concurrent turns | Two concurrent turns (one per adult) in Preview against Neon's pooled connection, with transaction-level advisory locks (or `SELECT … FOR UPDATE` on one budget row) | No deadlock, no connection exhaustion; reservations serialise; L14 and L15 pass on Neon | Use the row lock instead of the advisory lock; if neither serialises through the pooler, stop for the owner |
 | G17 | Cold start in `syd1` | Preview: first turn after idle, ten samples | First `working` event p95 ≤ 2 s from a cold start | Recorded; the latency targets (§12.3) are revisited with the owner |
-| G18 | The scheduled cleanup on the owner's Vercel plan | Vercel's current cron docs and the dashboard: availability, minimum interval, whether cron runs on Preview, and that the platform sends `CRON_SECRET` as a bearer token | A daily schedule is available in Production and the route receives the secret | If cron is unavailable, the owner chooses another scheduler that can call a secret-protected route, or relies on purge on use plus read-time filtering until one exists |
+| G18 | The scheduled cleanup on the owner's Vercel plan | Vercel's current cron docs and the dashboard: availability, minimum interval, whether cron runs on Preview, and that the platform sends `CRON_SECRET` as a bearer token | A daily schedule is available in Production and the route receives the secret | The daily schedule is not added. Expiry stays exact through read-time filtering and purge on the adult's next turn, and the owner decides the alternative scheduler (one that can call the secret-protected route), or that those two stand alone until one exists; nothing is pre-chosen (§7.2) |
 | G19 | Top-level automatic prompt caching, as the cost model's optional saving assumes | The prompt-caching docs and one manual two-call attempt | The second call reports a cache read covering the first call's history and bundle | Not used; the planning figures (§13.3) already assume it is off |
 | G20 | The usage of a failed, retried or aborted call is reported | A stub and one manual live call aborted mid-stream | Input tokens from `message_start` and output so far are available | Settlement charges such a call at its full share of the reservation (§13.6) |
 | G21 | Thinking blocks with signatures replay verbatim within an attempt, including empty-text ones | Part of G9 | Accepted by the provider | As G9 |
@@ -786,11 +789,12 @@ Transcripts are not memory (SYSTEM-ARCHITECTURE §5.7). Nothing Kev reads or say
   - **Clock:** each message expires **90 days after its `created_at`** (an instant; the home zone is irrelevant). `conversation.last_message_at` is no longer the purge clock (FAMILY-DATA-MODEL amended).
   - **Exact at read:** every conversation and bookkeeping read, including the window, the screen and the export, filters out messages with `created_at` older than 90 days, so an expired message is never shown, replayed or exported, whatever the schedule.
   - **The daily cleanup** deletes expired messages once a day. Daily is enough because reads already hide expired messages, so the schedule decides only how long an expired row physically lingers (at most about a day, plus any missed runs); more often would add runs without adding privacy, and once a day fits the Vercel plans' cron limits (G18).
+  - **The scheduling mechanism is subject to Package 1 gate G18** (§5.7). The daily Vercel cron entry is used only if G18 passes. Until it passes, or if it fails, expiry is still exact through read-time filtering and purge on use (below), and the owner decides the alternative scheduler; none is chosen in advance.
   - **Purge on use, as a backstop:** `purgeExpired(actor)` also deletes the adult's expired messages at the start of their next turn, so a missed schedule never leaves them longer than the adult's next use.
   - **What the job does:** `DELETE FROM message WHERE created_at < now() - interval '90 days'` in bounded batches (at most 1,000 rows a statement, at most 20 statements a run), as `home_app`, through `purgeExpiredMessages` in the bookkeeping path with the system actor. Idempotent: a failed or partial run leaves only rows the next run deletes; there is no partial state to repair. The database's existing `ON DELETE SET NULL` clears `capture.message_id` on any kept capture; the words are untouched. `last_message_at` is left as it is (a timestamp, no content).
   - **What it never does:** call a model, read any table but `message`, read message content, write anything but the deletion and its audit row, or send anything. It is not Kev, observes nothing and has no actor of an adult.
   - **Logs and audit:** one log line per run with counts only (`kev_retention: deleted N in B batches`). One structural system audit row, `message.retention_purge`, with the total and batch counts and no user id, content or per-adult count, shown in neither adult's Activity (so neither learns the other's message volume).
-  - **The route:** `POST` (or the platform cron's `GET`) `/kev/retention`, outside the signed-in group. It requires `Authorization: Bearer` with the value of **`CRON_SECRET`** (the name the platform sends, G18), compared in constant time; any other request gets 401 and does nothing. With `CRON_SECRET` unset (an environment without Kev), the route does nothing and returns 404. The schedule is one `crons` entry in `vercel.json` (Package 3). No value is ever committed.
+  - **The route:** `POST` (or the platform cron's `GET`) `/kev/retention`, outside the signed-in group. It requires `Authorization: Bearer` with the value of **`CRON_SECRET`** (the name the platform sends, G18), compared in constant time; any other request gets 401 and does nothing. With `CRON_SECRET` unset (an environment without Kev), the route does nothing and returns 404. The schedule is one `crons` entry in `vercel.json` (Package 3), added only if G18 passed; otherwise the owner's chosen scheduler calls the same route. No value is ever committed.
   - **Failure and retry:** a failed run is retried at the next schedule; nothing alerts or notifies. Package 6 and §E item 28 check a run happened.
   - **Restores:** a point-in-time restore can bring back messages already deleted or cleared. Read-time filtering hides any that are expired at once, and the next cleanup deletes them; a Clear made after the restore point must be repeated by the adult. DEPLOY.md §D says so.
   - **Usage and audit retention:** HOME has no stated retention period for `audit_log` or `kev_usage` (none is found in the docs); both are append-only and content-free, and are kept, as now. Changing that is its own decision.
@@ -1223,14 +1227,26 @@ Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 c
 **Process:**
 
 - **Every PR:** layers 1–2 (required checks).
-- **A PR that changes prompts, tools, context assembly, routing or model config:** a live run of the affected scenarios **plus every safety-class scenario** (privacy, sensitive, injection, fabrication), on both tiers, once each. It merges only with zero safety failures and no scenario going from pass to fail against the stored baseline.
-- **Package 5, Package 6 and any model change:** the full suite: fast × 3 (safety classes × 5) and deep × 3.
+- **A PR that changes prompts, tools, context assembly, routing or model config:** a live run of the affected scenarios **plus every safety-class scenario** (privacy, sensitive, injection, fabrication), on both tiers, once each. It merges only with zero safety failures and no scenario going from pass to fail against the stored baseline. During Package 5 the run comes out of the evaluation allocation; after Package 5 it needs a further owner allocation first, and the PR does not merge until that run is recorded (§12.4).
+- **Package 5 and any model change:** the full suite: fast × 3 (safety classes × 5) and deep × 3. **Package 6** cites Package 5's recorded runs; a fresh full run there, or for a model change, needs a further owner allocation (§12.4).
 
 ### 12.4 Running live evals
 
 - **Workflow:** `.github/workflows/kev-evals.yml`, `workflow_dispatch` only, environment `kev-evals` requiring the owner's approval, secret `KEV_EVAL_PROVIDER_KEY` (an eval-only key, never Preview's or Production's). It seeds its own test database with the fixture family and runs `src/kev/evals/run.mts` with a tier and a scenario filter.
-- **Budget:** the runner reserves each call's maximum exposure (as §13.6, with the 1.1×) and stops before exceeding **US$50 per run** (D18); the owner sets a monthly eval budget (recommended US$100) and, if the Console offers one (G12), a workspace spend limit on the eval workspace.
-- **Expected cost** (assumption, from §13.2's planning figures; about 366 turns per fast cell with the safety classes at five runs, 270 on deep): deep × 3 about US$77; Sonnet 5.5 `medium` about US$30–40 (with its escalations); Sonnet 5.5 `low` about US$25; Haiku 5.5 about US$12, mostly its escalations. **Package 5's full evidence is therefore about US$150**, at least three runs under the per-run cap and more than one month at US$100 a month, unless the owner raises the eval budget for Package 5 (recorded in its PR). A targeted run before a later change (the affected scenarios plus the 48 safety scenarios, both tiers once) is about US$20–25.
+- **The evaluation allocation (owner decision O7, 2026-10-13; ADR 0012 §41, with the same rules).** A one-time **US$200** for M8 Package 5's live-model evaluations, on these rules:
+  1. **Campaign ceiling:** at most **US$200** for the initial evaluation campaign: every Package 5 live run together, including the targeted per-PR runs during Package 5 (§12.3).
+  2. **Run ceiling:** at most **US$175** for any one run.
+  3. **Owner approval for every run:** the `kev-evals` environment's protection rule makes every run of the workflow wait for the owner's approval; the approval request states the run's planned maximum cost (rule 4), the campaign's recorded spend and its remainder. The full live-model evaluation run never starts without it.
+  4. **The maximum is computed before anything is spent.** A preflight job, which holds no key and runs before the protected job, computes the run's maximum exposure: its scenario turns (scenarios × their turns × repeats) × the per-turn maximum, by §13.6's reservation formula with the eval key's prices from `config.ts` and the 1.1× `us` multiplier (the fast attempt's reservation plus, where escalation is possible, the deep attempt's, never above the US$1.50 turn ceiling). It refuses the run, before the owner is asked and before any provider call, if that maximum exceeds US$175 or the campaign remainder (US$200 less the spend recorded in the ledger, rule 7).
+  5. **No automatic spending beyond the allocation.** During the run the harness reserves each attempt's maximum as §13.6 does, and stops, finishing no further scenario, as soon as actual spend plus open reservations would cross US$175 or the campaign remainder. A call whose usage is unknown is counted at its per-call maximum. Nothing retries, resumes or continues past a limit.
+  6. **More needs a new decision.** A further full run that would exceed the campaign budget needs the owner's new approval, recorded in ADR 0012 as a new allocation decision; approving a workflow run never extends the allocation.
+  7. **Recorded, synthetic only.** Each run's report artefact holds the provider's per-call usage (input, output, cache-read and cache-write tokens, read from the responses) and the estimated cost per call and per run. The **campaign ledger**, `docs/m8/M8-EVAL-LEDGER.md` (committed in Package 5, with the PR that records each run), holds one row per run: the date, the workflow run, the cells and scenario filter, the number of turns, the planned maximum, the usage totals, the estimated cost, the campaign total and remainder, and the outcome (completed, or stopped at a limit). The ledger holds no transcript, question, answer, key, header or provider body; the synthetic transcripts stay in the run artefact. Only synthetic data is involved: the fixture family, in the run's own seeded test database. The owner does not approve a run while an earlier run's ledger row is missing.
+  8. **Kept apart from household usage.** Evaluation calls use the eval-only key (`KEV_EVAL_PROVIDER_KEY`) in its own provider workspace (at minimum its own key), never Preview's or Production's key, against the run's own test database, discarded afterwards. They are never recorded in Preview's or Production's `kev_usage`, never counted against the household cap, and never read or write `kev_budget_reservation` or any other household budget state; the household cap's reservation mechanism never sees an evaluation call.
+  9. **The household cap is unchanged:** NZ$100 a household month (O2, §13.4). **The household cap and the evaluation allocation are bounded independently and never share state:** separate keys, workspaces, databases, ledgers and limits.
+  10. **Nothing is configured now.** No provider credential, key, workspace or billing setting is created in Package 0. Package 5 creates the eval key and workspace (§E item 25) and, where G12 finds a workspace spend limit available, sets it no higher than the campaign remainder, as a provider-side backstop.
+- **After Package 5** there is no live-evaluation budget. Any further live run (Package 6's, the run §12.3 requires before a later change to prompts, tools, context assembly, routing or model config, or a model change) needs a further owner allocation first; until one is approved and the run recorded, such a change does not merge. No ongoing budget is set here.
+- **Expected cost** (assumption, from §13.2's planning figures; about 366 turns per fast cell with the safety classes at five runs, 270 on deep): deep × 3 about US$77; Sonnet 5.5 `medium` about US$30–40 (with its escalations); Sonnet 5.5 `low` about US$25; Haiku 5.5 about US$12, mostly its escalations. **Package 5's full evidence is therefore about US$150, within the US$200.** A targeted run (the affected scenarios plus the 48 safety scenarios, both tiers once) is about US$20–25.
+- **Run size** (computed from rule 4; to be confirmed in Package 5): a turn's maximum is the US$1.50 ceiling whenever escalation is possible, so one run holds at most about 116 scenario turns (US$175 ÷ US$1.50), and Package 5's roughly 1,370 turns are split by cell and scenario filter into a dozen or so runs. Expected spend is far below each run's maximum, but as the remainder shrinks later runs must be smaller; if the remainder cannot hold the runs still needed, Package 5 stops for the owner (rule 6).
 - **Output:** a summary artifact (pass rates, codes, latencies, costs) and the synthetic transcripts for review. No key, header or provider body is logged.
 
 ---
@@ -1353,12 +1369,12 @@ So **one turn can never expose more than US$1.50**, and with one turn at a time 
 ## 14. Environments, data and the production gate
 
 - **Local and CI:** the fixture family; `HOME_TEST_KEV=scripted` (refused when deployed, like `HOME_TEST_WEATHER`); no key; no network to the provider. The boot line reads `kev: scripted`.
-- **Live evals:** the `kev-evals` environment only (§12.4): an eval-only key in its own workspace (inference geo enforced, a spend limit if offered), the owner's approval per run, a test database seeded with the fixture family. Never Preview's or Production's key or data.
-- **Preview:** `HOME_KEV=on` only after Package 5's thresholds are met and §E item 27; a Preview-only key; synthetic data only (the throwaway account and the synthetic calendar). The retention cleanup runs there only if the platform schedules Preview (G18); otherwise purge on use and read-time filtering apply, and item 28 checks the route by an authenticated manual call.
+- **Live evals:** the `kev-evals` environment only (§12.4): an eval-only key in its own workspace (inference geo enforced, a spend limit if offered), the owner's approval per run, a test database seeded with the fixture family, and the evaluation allocation's limits (US$200 for the Package 5 campaign, US$175 a run). Never Preview's or Production's key or data, and never the household's usage or cap.
+- **Preview:** `HOME_KEV=on` only after Package 5's thresholds are met and §E item 27; a Preview-only key; synthetic data only (the throwaway account and the synthetic calendar). The retention cleanup runs there on a schedule only if G18 found that the platform schedules Preview; otherwise purge on use and read-time filtering apply, and item 28 checks the route by an authenticated manual call.
 - **Production:**
   - Kev deploys with `HOME_KEV=off` and no key;
   - code refuses Kev in Production while `HOME_REAL_DATA` is not exactly `open`, whatever `HOME_KEV` says; the boot line reads `kev: off (gate closed)`;
-  - the key and `HOME_KEV=on` are set only at item 29: after the gate opens (item 11), item 23, item 24 or written ZDR, and items 25–28;
+  - the key and `HOME_KEV=on` are set only at item 29: after the gate opens (item 11), item 23, item 24's separate privacy decision (always required, whether or not ZDR is confirmed in writing; §5.5), and items 25–28. Neither opening the gate nor passing any gate enables Kev on real data by itself;
   - the boot line never shows the key: `kev: on | off | off (gate closed) | no key | scripted`.
 
 **DEPLOY.md §E items 23–31** were added in Package 0 (owner decisions, 2026-10-13), so the evidence is defined before anything is built; they are completed only after Packages 1–6, and each says whether it may be done while the gate is closed. DEPLOY.md holds the authoritative wording and the evidence to record.
@@ -1366,12 +1382,12 @@ So **one turn can never expose more than US$1.50**, and with one turn at a time 
 | # | Item | Proves |
 |---|---|---|
 | 23 | **Provider account and data-handling evidence:** §5.5's eight points (account under the Commercial Terms, retention value from the Console, ZDR in writing yes/no, workspace residency enforced, sub-processors reviewed, provider spend limit, flagged-content exception acknowledged, both adults have read ADR 0012 §38) | The household knows where its words go, for how long, and on what evidence |
-| 24 | **The real-data privacy decision** (only if item 23 records no written ZDR): the owner's separate, informed choice among the four alternatives of §5.5, with both adults' agreement and the rationale | Standard retention is never accepted by default |
+| 24 | **The real-data privacy decision**, always required before real family data reaches the provider, whether or not item 23 records written ZDR: the owner's separate, informed decision, with both adults' agreement and the rationale; with written ZDR it may be to proceed under it, and without it it is among the four alternatives of §5.5 | No privacy trade-off is made silently; standard retention is never accepted by default |
 | 25 | **Keys per environment:** separate keys for evals, Preview and Production, in separate workspaces with US inference enforced; `HOME_KEV_PROVIDER_KEY` set per environment; boot lines as expected | Keys are separated, bounded and resident |
 | 26 | **Spend cap and provider spend limit:** `HOME_KEV_MONTHLY_CAP_NZD` (or the NZ$100 default) confirmed in Settings › Usage; the provider workspace spend limit set if offered (G12) | HOME's cap is in force, and the provider's where it exists |
 | 27 | **Kev in Preview on synthetic data:** the §3.1 questions and five adversarial ones; correct citations; Alex's private record never shown to Sam; Usage and Activity structural | Kev works end to end in a deployed environment, privately |
-| 28 | **The retention cleanup verified:** `CRON_SECRET` set; a call without it refused; a scheduled (or authenticated manual) run deletes a planted synthetic expired message in Preview and logs counts only; the Production schedule shows a daily run | Retention happens without anyone remembering to do it |
-| 29 | **Kev in Production, after the gate opens (item 11)** and items 23–28: the key and `HOME_KEV=on` set; each adult asks about their real day; answers match the records; nothing private to the other adult appears | Kev works on the family's real records, privately |
+| 28 | **The retention cleanup verified:** `CRON_SECRET` set; a call without it refused; a scheduled (or authenticated manual) run deletes a planted synthetic expired message in Preview and logs counts only; the Production schedule shows a daily run, or, if G18 failed, the scheduler the owner chose instead is recorded and seen to run | Retention happens without anyone remembering to do it |
+| 29 | **Kev in Production, after the gate opens (item 11)** and items 23–28, item 24's decision included: the key and `HOME_KEV=on` set; each adult asks about their real day; answers match the records; nothing private to the other adult appears | Kev works on the family's real records, privately |
 | 30 | **Logs review:** Preview's runtime logs after item 27, Production's after item 29: no question, answer, title, name, prompt or key | Kev's data does not leak into logs |
 | 31 | **The trust check:** the owner confirms on their own phone that answers read as facts with Kev's view marked, nothing reads as availability or "the best" time, and declines are honest (design tests 5, 7) | The approved design holds in real use |
 
@@ -1625,22 +1641,24 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 | E7 | The out-of-scope scenarios | The right decline code ≥ 95% |
 | E8 | The routing scenarios | §12.3's routing thresholds |
 | E9 | Every run | Latency, cost and refusal rate per tier recorded against §12.3 |
-| E10 | The workflow | Owner approval required; stops at US$50 (proved with a test price table); only the eval key; no key in the artifact |
+| E10 | The workflow | The owner's approval required for every run, with the planned maximum, the campaign's recorded spend and its remainder in the approval request; only the eval key; no key in the artefact |
 | E11 | The fast-tier sweep | Sonnet 5.5 `medium` and `low` cells identical except effort; Haiku 5.5 on the same scenarios; the owner's choice recorded (D2) |
+| E12 | The preflight, with a stub provider and a test price table: a run whose computed maximum exceeds US$175 / exceeds the campaign remainder / equals the smaller limit | Refused before the protected job starts and before any provider call / refused likewise / accepted (§12.4 rules 4 and 2) |
+| E13 | A stub-provider run whose actual spend plus open reservations would cross the run limit, and another that would cross the campaign remainder; a call with unknown usage | Stops before that attempt, finishing no further scenario; the unknown call counted at its per-call maximum; the report and ledger row carry per-call usage and the estimated cost; no row in any household `kev_usage` or `kev_budget_reservation`, and household budget state never read (§12.4 rules 5, 7 and 8) |
 
 ---
 
 ## 16. Documentation
 
-- **Package 0:** this contract and ADR 0012; the ROADMAP M8 status cell and the dated note on "Not yet" for the one retention cleanup (O6); the status sentence in `CLAUDE.md` (M7 technically accepted; M8 Package 0 proposed with the owner's decisions recorded); dated annotations in KEV-AGENT-MODEL (§3, §4, §5, §6, §7, §10), SYSTEM-ARCHITECTURE (§2.3, §2.4, §2.6, §3.1, §5.3, §5.4, §5.7, §5.8), FAMILY-DATA-MODEL (Conversation/Message retention; KevUsage's cap; the proposed reservation table) and KEV.md §7 (the model's window); DEPLOY.md §D's restore note and §E items 23–31.
+- **Package 0:** this contract and ADR 0012; the ROADMAP M8 status cell and the dated note on "Not yet" for the one retention cleanup (O6); the status sentences in `CLAUDE.md` (M7 technically accepted; M8 Package 0 approved by the owner, 2026-10-13; which DEPLOY.md §E items precede the real-data gate and which follow it); dated annotations in KEV-AGENT-MODEL (§3, §4, §5, §6, §7, §10), SYSTEM-ARCHITECTURE (§2.3, §2.4, §2.6, §3.1, §5.3, §5.4, §5.7, §5.8), FAMILY-DATA-MODEL (Conversation/Message retention; KevUsage's cap; the proposed reservation table) and KEV.md §7 (the model's window); DEPLOY.md §D's restore note, §E items 23–31 and §E's introduction (items before and after the gate); ADR 0006 §2's dated clarification of the same; the dated NZ$50 annotations (ADR 0001 D4, V0.1-SCOPE D4, ADR 0005 §15, FAMILY-DATA-MODEL, SYSTEM-ARCHITECTURE §3.1).
 - **Package 1a:** FAMILY-DATA-MODEL's `kev_budget_reservation` and `kev_usage.attempt_id`, as built.
 - **Each package:** ADR 0012's "Implementation" section and this contract's status line.
 - **Package 1b:** FAMILY-DATA-MODEL's Conversation/Message (content v2, the bookkeeping path) and KevUsage (the cap and its conversion); LOCAL-DEV's lines for `HOME_KEV`, `HOME_TEST_KEV`, `HOME_KEV_MONTHLY_CAP_NZD` and the key; `.env.example` (names only); the verification gates' results; CLAUDE.md's import line gains `kev → lib`, matching ESLint.
 - **Package 3:** LOCAL-DEV's line for `CRON_SECRET` and the retention route; `vercel.json`'s one `crons` entry.
 - **Package 2:** SYSTEM-ARCHITECTURE's repository tree notes `src/domain/agenda/`.
 - **Package 4:** KEV.md, TODAY.md and BRAND.md annotated (the superseded wording in §8.6; the M8 entry points; Kev's view); ADR 0006 §11's capture-bar line amended to "until M9"; CLAUDE.md's "a user's message is always captured even if Kev fails" annotated as "stored" for M8, with M9 restoring capture (D6).
-- **Package 5:** LOCAL-DEV's section on running live evals.
-- **Package 6:** `docs/m8/M8-ACCEPTANCE.md`; DEPLOY.md's environment rows for `HOME_KEV`, `HOME_KEV_PROVIDER_KEY`, `HOME_KEV_MONTHLY_CAP_NZD` and `CRON_SECRET`; the ROADMAP M8 row's narrowings; V0.1-SCOPE's quality-bar and D4 cap annotations; ADR 0001 D4's cap annotated.
+- **Package 5:** LOCAL-DEV's section on running live evals; the campaign ledger, `docs/m8/M8-EVAL-LEDGER.md` (§12.4).
+- **Package 6:** `docs/m8/M8-ACCEPTANCE.md`; DEPLOY.md's environment rows for `HOME_KEV`, `HOME_KEV_PROVIDER_KEY`, `HOME_KEV_MONTHLY_CAP_NZD` and `CRON_SECRET`; the ROADMAP M8 row's narrowings; V0.1-SCOPE's quality-bar annotation (the D4 cap annotations were made in Package 0).
 
 ---
 
@@ -1661,9 +1679,9 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 | 9 | **The provider boundary.** One file imports the SDK; every request goes through HOME's fetch to one host; the key is never logged, stored or sent to the browser. | N1–N5, N14; S12–S14 |
 | 10 | **Conversation, memory and retention.** One private conversation per adult; the model's window per §7.2; expired messages hidden at read and deleted daily and on use; Clear works as specified; nothing new is remembered. | C3–C23 |
 | 11 | **Accessibility and no-JS.** The axe baseline at four viewports; keyboard; live regions; the whole turn works without JavaScript. | U1, U8, U12 |
-| 12 | **Evaluated on both tiers.** Every §12.3 threshold met on deep and on the chosen fast tier, from recorded live runs, with the hard gates and measured targets kept apart (§12.3). | E1–E11; Package 5's summaries |
+| 12 | **Evaluated on both tiers.** Every §12.3 threshold met on deep and on the chosen fast tier, from recorded live runs, with the hard gates and measured targets kept apart (§12.3). | E1–E13; Package 5's summaries and the campaign ledger, within the evaluation allocation (§12.4) |
 | 13 | **Scope.** Nothing in §1.4: no write, proposal, memory, Kev background run, notification, phrasing on Today, specialist agent or second provider. One new runtime dependency (`@anthropic-ai/sdk`), justified; one migration (Package 1a); one scheduled job (the retention cleanup). | Review checklist; `package.json` diff; migration list; `vercel.json` |
-| 14 | **Production gate.** `HOME_REAL_DATA` stays closed; Kev is off in Production and refuses to run there while it is closed; no key is set in Production; earlier operational items are not marked complete. | S10; DEPLOY.md §E unchanged except items 23–31 |
+| 14 | **Production gate.** `HOME_REAL_DATA` stays closed; Kev is off in Production and refuses to run there while it is closed; no key is set in Production; earlier operational items are not marked complete. | S10; DEPLOY.md §E unchanged except items 23–31 and its introduction's before-and-after-the-gate wording (Package 0) |
 | 15 | **Family usefulness (synthetic).** On the scenarios at phone width, the owner confirms from screenshots and 30 transcripts per tier that answers read as facts, that Kev's view is clearly marked, that declines are honest, and that nothing reads as a claim about anyone's time (design tests 5, 7). | Screenshots; transcripts; owner review in Packages 4–6 |
 | 16 | **Handover.** Each package had its stated review; every Blocker and Important finding was fixed before merge; carry-forwards are recorded. | Package reviews; M8-ACCEPTANCE |
 
@@ -1687,14 +1705,14 @@ DEPLOY.md §E items 23–31 (§14), added in Package 0 and completed after Packa
 | Provider billing differs from HOME's accounting | Stated as not absolutely guaranteeable (§13.6); conservative pricing of unknown calls; G2's price check; the fixed conservative exchange rate; the provider spend limit (G12) |
 | Latency from `syd1` to US inference feels slow | One call for today's questions; parallel tools; measured in Package 5 against §12.3; `low` effort if it holds quality; segment streaming as a later option (D17) |
 | Provider retention longer than assumed, or flagged retention | Zero data retention requested; only written confirmation counts; no automatic acceptance of standard retention (§5.5); minimisation; the privacy note; items 23–24 record the evidence and the decision |
-| ZDR is not granted to a household account | Synthetic development continues; real-data access waits for the owner's separate decision at item 24 |
+| ZDR is not granted to a household account | Synthetic development continues; real-data access waits for the owner's separate decision at item 24, which is required in any case |
 | A restore brings back cleared or expired messages | Read-time filtering; the next cleanup; DEPLOY.md §D tells the owner to ask both adults to repeat any Clear made after the restore point |
 | The cleanup job grows into background Kev | It is not Kev: no model, no reads beyond `message`, no notifications; a static test (C22); "Not yet" amended only for this job |
 | The SDK bypasses HOME's network policy | HOME's fetch passed to the SDK, proved by N4; Package 1 stops if it cannot be |
 | The key leaks | Env only, server-only, redaction, gitleaks, separate keys per environment, a Console spend limit if offered |
 | Kev's bookkeeping becomes a general write path | Five named functions; actor and owner checks; unreachable from tools by a static test; the privacy suite's exact list |
 | The capture promise weakens before M9 | The capture bar unchanged; the person's words stored first; Keep in To sort; CLAUDE.md annotated, not silently changed |
-| Live evals become a flaky gate or a cost sink | Not a required check; owner-approved runs; per-run budget; thresholds over repeated runs |
+| Live evals become a flaky gate or a cost sink | Not a required check; the owner's approval for every run; the one-time US$200 allocation, at most US$175 a run, each run's maximum computed before it starts and the run stopped at either limit; a campaign ledger; a further allocation needed after Package 5 (§12.4); thresholds over repeated runs |
 | Scope creep towards memory, autonomy or agents | §1.4; the registry's single class; Appendix A's "not yet" list; every addition an ADR decision |
 
 ---
@@ -1714,16 +1732,17 @@ DEPLOY.md §E items 23–31 (§14), added in Package 0 and completed after Packa
 
 ### 19.2 Decisions for the owner
 
-Each decision is proposed in ADR 0012 at the section named. **Recommended** options are marked. The owner decided O1–O6 on **2026-10-13**; they are recorded below in the D-sections they settle, and in ADR 0012 §39:
+Each decision is recorded in ADR 0012 at the section named. **The owner approved D1–D22 as written here on 2026-10-13**, with O1–O6 and the evaluation allocation (O7). Each D-section keeps its option table as the record of what was considered; the option marked in bold is the one approved. The owner decisions are recorded below in the D-sections they settle, and in ADR 0012 §39–§41:
 
 | Owner decision (2026-10-13) | Settles | What was decided |
 |---|---|---|
-| **O1** Provider privacy | D3 | Request ZDR; only written confirmation counts; no automatic acceptance of standard retention for real data; a separate, informed owner decision otherwise (DEPLOY.md §E item 24); US inference enforced in the workspace and checked on every response |
+| **O1** Provider privacy | D3 | Request ZDR; only written confirmation counts; no automatic acceptance of standard retention for real data; a separate, informed owner decision (DEPLOY.md §E item 24) before any real data reaches the provider, required whatever ZDR's outcome; US inference enforced in the workspace and checked on every response |
 | **O2** Budget | D19 | NZ$100 a household month for the initial trial, subject to verified pricing; a validated setting, `HOME_KEV_MONTHLY_CAP_NZD`, no value committed |
 | **O3** Conversation | D13 | A rolling 12 hours, at most 10 exchanges and 6,000 context tokens; no model-written summaries; limits configurable and evaluated in Package 5; earlier answers replayed as validated text and citation ids |
 | **O4** Deep re-ask ("Take a closer look") | D2 | Deferred to Package 5's evaluation; decided then |
 | **O5** Fast model | D2 | Sonnet 5.5 at `medium` to start; Haiku 5.5 evaluated before any substitution; Opus 5.5 stays deep; ids and capabilities verified in Package 1 (G1) |
-| **O6** Retention | D13 | Minimal scheduled deletion of expired conversation messages, once a day; 90-day retention kept; no agent background monitoring; ROADMAP "Not yet" amended for this one job only |
+| **O6** Retention | D13 | Minimal scheduled deletion of expired conversation messages, once a day; 90-day retention kept; no agent background monitoring; ROADMAP "Not yet" amended for this one job only; the scheduling mechanism subject to G18 |
+| **O7** Evaluation allocation | D18 | A one-time US$200 for Package 5's live-model evaluations, at most US$175 a run, with the owner's approval for every run, each run's maximum computed before it starts, no automatic spending beyond the allocation, a campaign ledger, and evaluation spend kept apart from the household's (§12.4) |
 
 The same day the owner approved the review's other targeted amendments (prices and the 1.1×, timing, the append-only request, Clear, the privacy evidence, the evaluation gate types, attempt ids, the `propose` class, rate limits from audit rows, short transactions, refusal rates, validator-triggered escalation, `max_tokens`) and required the budget reservation mechanism (§13.6), the verification gates (§5.7) and the retention design (§7.2). They are reflected in the options below.
 
@@ -1731,28 +1750,28 @@ The same day the owner approved the review's other targeted amendments (prices a
 
 | D | Subject | Status | Decision |
 |---|---|---|---|
-| D1 | Architecture | Recommended | B: one model per turn, a HOME-owned bounded tool loop |
-| D2 | Provider and tier models | Decided by the owner, 2026-10-13 (O5; O4 deferred to Package 5) | Anthropic first party; deep Opus 5.5 `medium`; fast Sonnet 5.5 `medium` to start; Haiku 5.5 evaluated before any substitution; ids verified at G1 |
-| D3 | Provider data handling | Decided by the owner, 2026-10-13 (O1) | Request ZDR; real data only with written ZDR or a separate owner decision; US inference enforced |
-| D4 | Kev in Production | Recommended, amended 2026-10-13 | A: off until the gate is open and §E items 23–28 are recorded; switched on at item 29 |
-| D5 | Kev's bookkeeping | Recommended, amended 2026-10-13 | A: a named path; six functions as the adult and one system cleanup function |
-| D6 | The person's words before the model | Recommended | A: stored as a message first; Keep in To sort |
-| D7 | Sensitive context | Recommended | A: never requested or received |
-| D8 | Availability and tool names | Recommended | A: M7's language; `get_gaps` |
-| D9 | Recording Kev's reads | Recommended | A: a per-turn trace, no audit row per read |
-| D10 | `search` | Recommended | A: titles only |
-| D11 | Context assembly | Recommended | A: a small bundle |
-| D12 | Memory | Recommended, amended 2026-10-13 | A: nothing new; the conversation window only |
-| D13 | Conversations and retention | Decided by the owner, 2026-10-13 (O3, O6) | 12 hours, 10 exchanges, 6,000 tokens; 90 days per message; the daily cleanup; Clear as specified |
-| D14 | Proactivity | Recommended | A: direct questions only |
-| D15 | Phrasing of Today's insights | Recommended | A: deferred |
-| D16 | Entry points | Recommended | A: capture bar unchanged; Ask Kev |
-| D17 | Streaming and timing | Recommended, amended 2026-10-13 | A: progress streams; `maxDuration` 90; the 55 s deadline rules |
-| D18 | Evaluation | Recommended, amended 2026-10-13 | A: four layers; guarantees separate from measured targets; US$50 a run |
-| D19 | Spend cap and limits | Decided by the owner, 2026-10-13 (O2) | NZ$100; a reservation per attempt; deep off at 80%, paused at 100% |
-| D20 | Packages | Recommended, amended 2026-10-13 | A: 0–6, with Package 1 as 1a (migration) and 1b |
-| D21 | What M9 executes | Recommended | A: internal executor only |
-| D22 | Adults only | Recommended | A: the two allowlisted adults |
+| D1 | Architecture | Approved — owner decision (2026-10-13) | B: one model per turn, a HOME-owned bounded tool loop |
+| D2 | Provider and tier models | Approved — owner decision (2026-10-13; O5, O4 deferred to Package 5) | Anthropic first party; deep Opus 5.5 `medium`; fast Sonnet 5.5 `medium` to start; Haiku 5.5 evaluated before any substitution; ids verified at G1 |
+| D3 | Provider data handling | Approved — owner decision (2026-10-13; O1) | Request ZDR; real data only after the owner's separate decision at item 24, whatever ZDR's outcome; standard retention never accepted by default; US inference enforced |
+| D4 | Kev in Production | Approved — owner decision (2026-10-13) | A: off until the gate is open and §E items 23–28, item 24's decision included, are recorded; switched on at item 29 |
+| D5 | Kev's bookkeeping | Approved — owner decision (2026-10-13) | A: a named path; six functions as the adult and one system cleanup function |
+| D6 | The person's words before the model | Approved — owner decision (2026-10-13) | A: stored as a message first; Keep in To sort |
+| D7 | Sensitive context | Approved — owner decision (2026-10-13) | A: never requested or received |
+| D8 | Availability and tool names | Approved — owner decision (2026-10-13) | A: M7's language; `get_gaps` |
+| D9 | Recording Kev's reads | Approved — owner decision (2026-10-13) | A: a per-turn trace, no audit row per read |
+| D10 | `search` | Approved — owner decision (2026-10-13) | A: titles only |
+| D11 | Context assembly | Approved — owner decision (2026-10-13) | A: a small bundle |
+| D12 | Memory | Approved — owner decision (2026-10-13) | A: nothing new; the conversation window only |
+| D13 | Conversations and retention | Approved — owner decision (2026-10-13; O3, O6) | 12 hours, 10 exchanges, 6,000 tokens; 90 days per message; the daily cleanup (its schedule subject to G18); Clear as specified |
+| D14 | Proactivity | Approved — owner decision (2026-10-13) | A: direct questions only |
+| D15 | Phrasing of Today's insights | Approved — owner decision (2026-10-13) | A: deferred |
+| D16 | Entry points | Approved — owner decision (2026-10-13) | A: capture bar unchanged; Ask Kev |
+| D17 | Streaming and timing | Approved — owner decision (2026-10-13) | A: progress streams; `maxDuration` 90; the 55 s deadline rules |
+| D18 | Evaluation | Approved — owner decision (2026-10-13; O7) | A: four layers; guarantees separate from measured targets; live runs within the US$200 evaluation allocation, at most US$175 a run |
+| D19 | Spend cap and limits | Approved — owner decision (2026-10-13; O2) | NZ$100; a reservation per attempt; deep off at 80%, paused at 100% |
+| D20 | Packages | Approved — owner decision (2026-10-13) | A: 0–6, with Package 1 as 1a (migration) and 1b |
+| D21 | What M9 executes | Approved — owner decision (2026-10-13) | A: internal executor only |
+| D22 | Adults only | Approved — owner decision (2026-10-13) | A: the two allowlisted adults |
 
 #### D1 — Architecture: how a turn reasons (ADR 0012 §10)
 
@@ -1763,7 +1782,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | C. An orchestrator with specialist agents | Several calls and contexts per question; harder to test and bound; nothing in M8 needs it |
 | D. B, with the SDK's Tool Runner or a hosted agent service running the loop | Less code; but HOME no longer counts, binds, traces and validates every step itself |
 
-**Recommendation:** B. C's seams are kept (§4.5).
+**Approved — owner decision (2026-10-13):** B. C's seams are kept (§4.5).
 
 #### D2 — Provider and tier models (ADR 0012 §13)
 
@@ -1774,7 +1793,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | C. Fix fast as Haiku 5.5 now | About a twentieth of Sonnet's fast cost; unproven on HOME's scenarios |
 | D. Another provider, or Claude through Bedrock | Not the approved stack; a second SDK or new evals; kept as contingency (§5.6) |
 
-**Decided by the owner, 2026-10-13 (O5):** A. Sonnet 5.5 at `medium` is the initial preference; Haiku 5.5 is evaluated before any substitution; Opus 5.5 remains the deep tier; model ids and capabilities are verified against current documentation and the Models API in Package 1 (G1) before code depends on them. Escalation is model-initiated (`escalate`) or code-initiated (the validator failing twice on fast), within the time and 80% rules (§4.2). Not Fable 5.1 (30-day retention requirement; cost).
+**Approved — owner decision (2026-10-13; O5):** A. Sonnet 5.5 at `medium` is the initial preference; Haiku 5.5 is evaluated before any substitution; Opus 5.5 remains the deep tier; model ids and capabilities are verified against current documentation and the Models API in Package 1 (G1) before code depends on them. Escalation is model-initiated (`escalate`) or code-initiated (the validator failing twice on fast), within the time and 80% rules (§4.2). Not Fable 5.1 (30-day retention requirement; cost).
 
 **Deferred (O4):** a "Take a closer look" deep re-ask under an answer is not built; the owner decides it with Package 5's escalation-recall evidence (it would be considered if planning scenarios escalate below 70%, hidden at ≥ 80% of the cap, and counted as a normal turn).
 
@@ -1782,22 +1801,22 @@ The same day the owner approved the review's other targeted amendments (prices a
 
 | Option | Consequence |
 |---|---|
-| **A. Request zero data retention; Kev runs on real data only with written ZDR confirmation, or after the owner's separate, informed decision at §E item 24 among: accept standard retention with recorded rationale; narrow Kev's data scope; AU-hosted Claude through Bedrock or Vertex; delay. `us` inference enforced in the workspace and checked on every response (decided)** | No privacy trade-off is pre-decided; synthetic development continues meanwhile; one known inference jurisdiction at about 10% more cost |
+| **A. Request zero data retention; Kev runs on real data only after the owner's separate, informed decision at §E item 24, whatever ZDR's outcome: with written ZDR, to proceed under it or not; without it, among: accept standard retention with recorded rationale; narrow Kev's data scope; AU-hosted Claude through Bedrock or Vertex; delay. `us` inference enforced in the workspace and checked on every response (decided)** | No privacy trade-off is pre-decided; synthetic development continues meanwhile; one known inference jurisdiction at about 10% more cost |
 | B. As A, with inference `global` (default) | Standard price; inference anywhere the provider runs |
 | C. Accept the default retention without asking | Up to 30 days (or as the Console says), up to 2 years if flagged, classification scores up to 7 years |
 | D. Keep Kev off in Production until zero data retention is granted | One of A's alternatives, chosen in advance |
 
-**Decided by the owner, 2026-10-13 (O1):** A. A ZDR request is not evidence; only written confirmation from Anthropic (contract or account representative) counts. If ZDR is unavailable or unconfirmed, standard retention is **not** accepted automatically: real-data model access needs the separate, informed decision at item 24, with no alternative pre-chosen. The evidence list is §5.5's.
+**Approved — owner decision (2026-10-13; O1):** A. A ZDR request is not evidence; only written confirmation from Anthropic (contract or account representative) counts. Real-data model access always needs the separate, informed decision at item 24, whether or not ZDR is confirmed in writing; ZDR confirmation, the Package 1 gates and the real-data gate never stand in for it. If ZDR is unavailable or unconfirmed, standard retention is **not** accepted automatically, and no alternative is pre-chosen. The evidence list is §5.5's.
 
 #### D4 — Kev in Production (ADR 0012 §37)
 
 | Option | Consequence |
 |---|---|
-| **A. Off in Production until the gate is open and §E items 23–28 are recorded (item 24 only if ZDR is not confirmed in writing), then switched on at item 29; code refuses Kev in Production while the gate is closed; Preview runs Kev on synthetic data after Package 5 (recommended, amended 2026-10-13)** | No real data reaches the provider before the household has chosen; the same gate as every other real-data step |
+| **A. Off in Production until the gate is open and §E items 23–28 are recorded (item 24's decision always among them, whether or not ZDR is confirmed in writing), then switched on at item 29; code refuses Kev in Production while the gate is closed; Preview runs Kev on synthetic data after Package 5 (recommended, amended 2026-10-13)** | No real data reaches the provider before the household has chosen; the same gate as every other real-data step |
 | B. Turn Kev on in Production as soon as it is built | Nothing to answer while the gate is closed; a key in Production early for no benefit |
 | C. Preview only until the M10 trial | Delays real use; the trial would be Kev's first real test |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D5 — Kev's bookkeeping (ADR 0012 §25)
 
@@ -1808,7 +1827,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | C. A system actor | The system actor can never come from a request; would need a new exception of its own |
 | D. Let the existing services accept `via: 'kev'` | The silent relaxation ADR 0005 §39 forbids |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D6 — The person's words, before the model (ADR 0012 §24)
 
@@ -1818,7 +1837,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Every message captured automatically | To sort fills with questions; pre-empts M9's triage |
 | C. Stored with the answer, after the turn | A failure loses the words; against CLAUDE.md |
 
-**Recommendation:** A. CLAUDE.md's "always captured even if Kev fails" is read as "always stored" in M8, annotated in Package 4.
+**Approved — owner decision (2026-10-13):** A. CLAUDE.md's "always captured even if Kev fails" is read as "always stored" in M8, annotated in Package 4.
 
 #### D7 — Sensitive context (ADR 0012 §26)
 
@@ -1827,7 +1846,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | **A. Never requested or received by Kev; KEV-AGENT-MODEL's `include_sensitive` removed (recommended)** | Matches ADR 0005 §37, the context service and its static guard |
 | B. As KEV-AGENT-MODEL §6 says: on explicit request, audited | Reverses ADR 0005 §37; sensitive records would leave HOME |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D8 — Availability, recommendations and tool names (ADR 0012 §7)
 
@@ -1837,7 +1856,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Kev may name "the best" window, labelled as Kev's view | A judgement the screens forbid; a gap may hide a private commitment; V0.1's "recommendation" read literally |
 | C. Kev may say "free" for the reader's own time only | False whenever the reader's calendar is incomplete; invites over-reading |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D9 — Recording Kev's reads (ADR 0012 §18)
 
@@ -1847,7 +1866,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. An audit row per tool call | Two to eight rows per question in Activity, duplicating the trace |
 | C. No record of reads | Nothing to show for "What's this based on?" |
 
-**Recommendation:** A. Reads are not writes (CLAUDE.md rule 8); every bookkeeping write is still audited.
+**Approved — owner decision (2026-10-13):** A. Reads are not writes (CLAUDE.md rule 8); every bookkeeping write is still audited.
 
 #### D10 — `search` (ADR 0012 §19)
 
@@ -1857,7 +1876,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Postgres full-text search over titles, notes, context and captures | A migration and index; more untrusted text to the model; captures are M9's |
 | C. Defer to M9 | Kev finds things only by date range |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D11 — Context assembly (ADR 0012 §21)
 
@@ -1867,7 +1886,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. KEV-AGENT-MODEL §4 as written: seven days, conflicts, projects, context, home location | More sent every turn; the home location contradicts M7's privacy rule |
 | C. Nothing preloaded | Every question costs a tool round |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D12 — Memory (ADR 0012 §22)
 
@@ -1877,7 +1896,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Saved preferences from conversation | Automatic memory; "Not yet" |
 | C. Conversation summaries across days | A model-written record of the family |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D13 — Conversations: privacy, retention, deletion, purge (ADR 0012 §23)
 
@@ -1887,7 +1906,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. As A, with purge still deferred (ADR 0006 §8) | M8's first rows accumulate with no limit |
 | **C. One private conversation per adult; the model's window a rolling 12 hours, at most 10 exchanges and 6,000 tokens, with earlier answers as validated text and citation ids; each message expires 90 days after `created_at`, hidden at every read, deleted by a minimal daily cleanup and on the adult's next turn; Clear as §7.2 specifies; export as now (decided)** | Follow-ups survive midnight; expiry is exact; one narrow scheduled job, approved as an exception to "Not yet" |
 
-**Decided by the owner, 2026-10-13 (O3, O6):** C. The window's limits are configurable (code constants in `src/kev/config.ts`, or validated settings) and evaluated in Package 5; there are no model-written permanent summaries. The daily cleanup deletes expired Kev messages only: it calls no model, reads no family record or table but `message`, and sends no notification. There is no agent background monitoring. Clear's deletions and what it keeps are §7.2's.
+**Approved — owner decision (2026-10-13; O3, O6):** C. The window's limits are configurable (code constants in `src/kev/config.ts`, or validated settings) and evaluated in Package 5; there are no model-written permanent summaries. The daily cleanup deletes expired Kev messages only: it calls no model, reads no family record or table but `message`, and sends no notification. Its scheduling mechanism is subject to G18 (§5.7): until G18 passes, or if it fails, expiry stays exact through read-time filtering and purge on use, and the owner decides the alternative scheduler. There is no agent background monitoring. Clear's deletions and what it keeps are §7.2's.
 
 #### D14 — Proactivity (ADR 0012 §30)
 
@@ -1897,7 +1916,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. A, plus Kev commenting when a page opens | A model call per view; Today changes because of Kev |
 | C. A, plus background monitoring | "Not yet" |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D15 — Kev phrasing of Today's insights (ADR 0012 §31)
 
@@ -1907,7 +1926,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Build it with a cache table and a quiet fade-in | A persistent insight store and a migration; Today visibly changes |
 | C. Phrase on every view, uncached | Screens wait for the model |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D16 — Entry points and the capture bar (ADR 0012 §32)
 
@@ -1917,7 +1936,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. The bar becomes "Ask Kev…" now; telling HOME through Keep in To sort | An extra tap for every capture until M9 |
 | C. The bar becomes "Ask or tell Kev…" with every message captured | To sort fills with questions; pre-empts M9 |
 
-**Recommendation:** A. ADR 0006 §11's "until Kev arrives in M8" becomes "until M9".
+**Approved — owner decision (2026-10-13):** A. ADR 0006 §11's "until Kev arrives in M8" becomes "until M9".
 
 #### D17 — Streaming and no-JS (ADR 0012 §33)
 
@@ -1927,17 +1946,19 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Stream tokens, validate after | Unchecked text shown, then withdrawn on failure |
 | C. Stream validated segments (say first) | Earlier first words; more complex; a regeneration would replace text already read |
 
-**Recommendation:** A; C reconsidered with Package 5's latency.
+**Approved — owner decision (2026-10-13):** A; C reconsidered with Package 5's latency.
 
 #### D18 — Evaluation: layers, budget, thresholds (ADR 0012 §34)
 
 | Option | Consequence |
 |---|---|
-| **A. Four layers (§12.1); deterministic security guarantees (100%, block merge) kept apart from measured model behaviour (targets with samples and intervals); live runs by a manual, owner-approved workflow with an eval-only key, US$50 per run and about US$100 a month; §12.3's gates (recommended, amended 2026-10-13)** | CI never depends on a model; real-model evidence before every Kev change; no claim that finite tests prove injection resistance |
+| **A. Four layers (§12.1); deterministic security guarantees (100%, block merge) kept apart from measured model behaviour (targets with samples and intervals); live runs by a manual, owner-approved workflow with an eval-only key, within the owner's one-time US$200 evaluation allocation for Package 5, at most US$175 a run (O7, §12.4); §12.3's gates (recommended, amended 2026-10-13)** | CI never depends on a model; real-model evidence before every Kev change; no claim that finite tests prove injection resistance |
 | B. Live evals as a required check on every PR | CI depends on a provider and a secret; cost on every PR |
 | C. Live evals at acceptance only | Prompt and tool changes merge without real-model evidence; against CLAUDE.md |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
+
+**The evaluation budget (O7, 2026-10-13)** is §12.4's allocation: US$200 once, for Package 5's campaign, at most US$175 a run, kept apart from the household cap; after Package 5 any live run needs a further owner allocation.
 
 #### D19 — Spend cap and limits (ADR 0012 §35)
 
@@ -1947,7 +1968,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. As C, without the 80% step | Full service until a hard stop |
 | **C. NZ$100 a month for the household for the initial trial, subject to verified pricing, from the validated setting `HOME_KEV_MONTHLY_CAP_NZD`, at a fixed NZ$1.80 per US$1; deep off at 80%, Kev paused at 100%; a reservation of each attempt's maximum exposure under a lock (§13.6); §13.4's per-turn and per-adult limits (decided)** | Typical use completes the month; HOME's accounting can never pass the cap under concurrency; provider billing exposure stated honestly |
 
-**Decided by the owner, 2026-10-13 (O2):** C. Prices were verified on the pricing page the same day (§5.3). The cap is a validated setting, never a committed value; the owner revisits it after the first real month. The reservation mechanism (§13.6) makes the cap hard in HOME's accounting; it is delivered migration-first (Package 1a).
+**Approved — owner decision (2026-10-13; O2):** C. Prices were verified on the pricing page the same day (§5.3). The cap is a validated setting, never a committed value; the owner revisits it after the first real month. The reservation mechanism (§13.6) makes the cap hard in HOME's accounting; it is delivered migration-first (Package 1a).
 
 #### D20 — The package plan (ADR 0012 §36)
 
@@ -1957,7 +1978,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. Merge Packages 2 and 3 | One fewer review; a larger high-risk package |
 | C. Evaluation before the screen (5 before 4) | Live evidence earlier; the owner sees Kev later |
 
-**Recommendation:** A, with C allowed at Package 3's merge.
+**Approved — owner decision (2026-10-13):** A, with C allowed at Package 3's merge.
 
 #### D21 — What M9 executes (ADR 0012 §5)
 
@@ -1967,7 +1988,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | B. M9 adds external execution (calendar writes, messages) with approval | Revisits "Not yet" and V0.5; new integrations, write-capable providers, a new injection review |
 | C. Leave it undefined | M9's planning starts from an ambiguity |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 #### D22 — Adults only (ADR 0012 §29)
 
@@ -1976,7 +1997,7 @@ The same day the owner approved the review's other targeted amendments (prices a
 | **A. Kev for the two allowlisted adults only; a child with a login that reaches Kev needs its own decision first (recommended)** | Children are subjects of records, never users (ROADMAP "Not yet"); the provider's minors requirements do not arise |
 | B. Allow a child's account | The provider's requirements for minors (disclosure, safeguards, possible audit: verified) and "Not yet" |
 
-**Recommendation:** A.
+**Approved — owner decision (2026-10-13):** A.
 
 ### 19.3 Considered and not proposed
 
