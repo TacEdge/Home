@@ -25,7 +25,7 @@ The roadmap defines M2 as the knowledge core: schema, domain services, sensitivi
 12. **P-4:** a 29 February birthday falls on 28 February in common years.
 13. **P-5:** context category `other` uses the 12-month staleness period.
 14. **P-6:** context created in M2 starts `active`; the pending state lives in the Proposal; `proposed` is reserved.
-15. **`kev_usage` stores the provider's cost in micro-US-dollars.** M2 introduces no NZD conversion; conversion for the NZ$ spend cap belongs to M8.
+15. **`kev_usage` stores the provider's cost in micro-US-dollars.** M2 introduces no NZD conversion; conversion for the NZ$ spend cap belongs to M8. [*The cap (ADR 0001 D4's NZ$50 a month): Superseded for the M8 trial by ADR 0012 (owner decision O2, 2026-10-13): NZ$100 per household month.*]
 
 ### Amendment, 2026-10-02: migration-first deployment
 
