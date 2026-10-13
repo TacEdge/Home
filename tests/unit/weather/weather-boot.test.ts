@@ -4,6 +4,7 @@ import {
   CHRISTCHURCH,
   LOCATION_LEAKS,
   WEATHER_VARIABLES,
+  locationLeaksIn,
   weatherEnv,
 } from '../../fixtures/weather';
 
@@ -47,7 +48,6 @@ describe('[home] weather location: …', () => {
       `[home] weather location: ${status}`,
     ]);
     const all = lines.join('\n');
-    for (const leak of [...LOCATION_LEAKS, '37', '-43.53', '172.64'])
-      expect(all).not.toContain(leak);
+    expect(locationLeaksIn(all, [...LOCATION_LEAKS, '37', '-43.53', '172.64'])).toEqual([]);
   });
 });

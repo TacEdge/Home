@@ -559,6 +559,8 @@ describe('O23 and P2: Dismiss and Not useful on openings, per adult, audited wit
 });
 
 describe('P3: the privacy invariant for openings (contract §3.5, §8.2)', () => {
+  /** Sam's private waiting task, from the P3 scene (its records stay for what follows). */
+  let samPrivateTask = '';
   it('Sam’s private event, all-day event, waiting task (with needs and an estimate) and stale calendar leave Alex’s openings, keys, order, facts and qualification byte-identical; Sam’s change', async () => {
     const before = { alex: await forward(h.alex), sam: await forward(h.sam) };
     // Not vacuous: Alex and Sam both have Saturday's and Sunday's openings.
@@ -631,11 +633,46 @@ describe('P3: the privacy invariant for openings (contract §3.5, §8.2)', () =>
     expect(sam.map((i) => i.key)).toEqual([
       `open_window:household:${SAT}:1300-1930:task:${privateTask.id}`,
     ]);
+    samPrivateTask = privateTask.id;
     expect(sam[0]!.opening!.others.map((t) => t.id)).toEqual([id.fence]);
     expect(sam[0]!.text).toBe(
       'Private outdoor job is recorded as about two hours, in dry weather. Nothing is recorded for the household on Saturday, 13:00–19:30, as far as HOME knows, and the forecast for Saturday as of 06:55 looks dry.',
     );
     expect(sam[0]!.opening!.coverage.calendars.map((c) => c.id)).toContain(staleCalendar);
+  });
+
+  it('I-2: a foreign key, derivable only from Sam’s private task, is refused for Alex on Today and Forward Week, with nothing written; Sam’s own response to it is accepted', async () => {
+    expect(samPrivateTask, 'the P3 scene runs first').not.toBe('');
+    const samKey = `open_window:household:${SAT}:1300-1930:task:${samPrivateTask}`;
+    const SAT_MORNING = at(SAT, '07:30');
+    const anyRows = async () =>
+      admin.db.select().from(insightResponse).where(eq(insightResponse.insightKey, samKey));
+    const audits = await auditCount();
+    // Forward Week on Wednesday, then Today on Saturday morning: the key is Sam's on both.
+    expect(openKeys(await forward(h.sam))).toContain(samKey);
+    expect(openKeys(await forward(h.alex))).not.toContain(samKey);
+    for (const response of ['dismissed', 'not_useful'] as const)
+      expect(await outcome(respond(h.alex, samKey, response, 'forward', NOW))).toBe('not_eligible');
+    await scene(SAT_MORNING, at(SAT, '06:55'));
+    expect(openKeys(await today(h.sam, SAT_MORNING))).toContain(samKey);
+    expect(openKeys(await today(h.alex, SAT_MORNING))).not.toContain(samKey);
+    for (const response of ['dismissed', 'not_useful'] as const)
+      expect(await outcome(respond(h.alex, samKey, response, 'today', SAT_MORNING))).toBe(
+        'not_eligible',
+      );
+    expect(await anyRows()).toHaveLength(0);
+    expect(await auditCount()).toBe(audits);
+    // The key is real: Sam's own responses to it are accepted, on both surfaces.
+    try {
+      expect(await outcome(respond(h.sam, samKey, 'not_useful', 'today', SAT_MORNING))).toBe('ok');
+      await scene(NOW, at('2026-10-14', '06:55'));
+      expect(await outcome(respond(h.sam, samKey, 'dismissed', 'forward', NOW))).toBe('ok');
+      const rows = await anyRows();
+      expect(rows.map((r) => [r.userId, r.response])).toEqual([[h.sam.userId, 'dismissed']]);
+      expect(await auditCount()).toBe(audits + 2);
+    } finally {
+      await admin.db.delete(insightResponse).where(eq(insightResponse.insightKey, samKey));
+    }
   });
 });
 

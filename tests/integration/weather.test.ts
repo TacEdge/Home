@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
+import { Pool, type PoolClient } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '@/db/schema';
 import { NotPermittedError } from '@/domain/common/errors';
@@ -19,12 +20,14 @@ import type { UserActor } from '@/trust/actor';
 import {
   CHRISTCHURCH,
   FINGERPRINT_VECTORS,
-  LOCATION_LEAKS,
   TEST_WEATHER_KEY_ROTATED,
   WEATHER_VARIABLES,
   WELLINGTON_UNROUNDED,
+  locationLeaksIn,
   weatherEnv,
 } from '../fixtures/weather';
+import { assertTestDatabase } from '../db-guard';
+import { TEST_APP_DATABASE_URL } from '../env';
 import { adminDb, testDb } from './db';
 import { ensureFixtureUsers, type Household } from './fixtures';
 
@@ -156,9 +159,12 @@ const refresh = (p = fake(), now = T0, actor: UserActor = h.sam, d: { db: typeof
   refreshForecast(actor, p, { now }, d);
 const read = (now = T0, actor: UserActor = h.sam) => readForecast(actor, { now }, deps);
 
-/** Asserts nothing location-bearing in a text. */
+/**
+ * Asserts nothing location-bearing in a text: a coordinate only as a
+ * standalone number, so a timestamp's or a uuid's digits never trip it (Q8).
+ */
 const clean = (label: string, text: string) => {
-  for (const leak of LOCATION_LEAKS) expect(text, `${label}: ${leak}`).not.toContain(leak);
+  expect(locationLeaksIn(text), label).toEqual([]);
 };
 
 describe('a successful refresh, and reading it', () => {
@@ -323,6 +329,78 @@ describe('W9: single flight', () => {
     expect(n.rows[0]?.n).toBe(1);
     expect(await advisoryLocks()).toBe(0);
   });
+});
+
+describe('W9, §5.1: the timeouts take effect inside the refresh’s own transaction', () => {
+  it('during the fetch, on the connection holding the lock: statement_timeout 5s cancels a statement after about 5 s; idle_in_transaction_session_timeout 25s; both gone after commit', async () => {
+    // One connection only, so the read outside, the transaction and the
+    // checks after commit all run on the same backend. The provider runs
+    // inside the transaction (before any write), on that idle connection.
+    const single = new Pool({
+      connectionString: assertTestDatabase(TEST_APP_DATABASE_URL),
+      max: 1,
+    });
+    single.on('connect', (c) => void c.on('error', () => undefined));
+    let client: PoolClient | null = null;
+    single.on('acquire', (c) => void (client = c));
+    const singleDb = drizzle(single, { schema, casing: 'snake_case' });
+    const show = async (c: { query: PoolClient['query'] }) => {
+      const r = await c.query<{ s: string; i: string; pid: number }>(
+        `select current_setting('statement_timeout') as s,
+                current_setting('idle_in_transaction_session_timeout') as i,
+                pg_backend_pid() as pid`,
+      );
+      return r.rows[0]!;
+    };
+    try {
+      const baseline = await show(single);
+      expect(baseline.s).not.toBe('5s');
+      expect(baseline.i).not.toBe('25s');
+      const inner = fake();
+      const seen: Record<string, unknown> = {};
+      const probing = {
+        kind: 'open_meteo' as const,
+        async fetchForecast(point: Parameters<typeof inner.fetchForecast>[0]) {
+          const c = client!;
+          const during = await show(c);
+          // This connection is the refresh's: it holds the advisory lock, in a transaction.
+          const own = await c.query<{ locks: number; tx: boolean }>(
+            `select (select count(*)::int from pg_locks where pid = pg_backend_pid() and locktype = 'advisory' and granted) as locks,
+                    now() <> statement_timestamp() as tx`,
+          );
+          // A slow statement on it is cancelled by the 5 s timeout (a savepoint
+          // keeps the refresh's transaction usable afterwards).
+          await c.query('savepoint q1');
+          const t = performance.now();
+          const cancelled = await c
+            .query('select pg_sleep(8)')
+            .then(() => null)
+            .catch((e: { code?: string }) => e.code ?? 'unknown');
+          const elapsed = performance.now() - t;
+          await c.query('rollback to savepoint q1');
+          Object.assign(seen, { during, own: own.rows[0], cancelled, elapsed });
+          return inner.fetchForecast(point);
+        },
+      };
+      expect(
+        await refreshForecast(h.sam, probing, { now: T0 }, { db: singleDb as typeof db }),
+      ).toEqual({ status: 'ok', changed: true });
+      expect(seen.during).toEqual({ s: '5s', i: '25s', pid: baseline.pid });
+      expect(seen.own).toEqual({ locks: 1, tx: true });
+      // 57014: query_canceled ("canceling statement due to statement timeout").
+      expect(seen.cancelled).toBe('57014');
+      expect(seen.elapsed as number).toBeGreaterThan(4_900);
+      // Cut off by the timeout, well before the 8 s sleep would finish (the
+      // margin allows for a loaded CI runner).
+      expect(seen.elapsed as number).toBeLessThan(7_500);
+      expect(inner.calls).toBe(1);
+      // SET LOCAL: after commit the same backend is back to its own settings.
+      expect(await show(single)).toEqual(baseline);
+      expect(await audits()).toHaveLength(1);
+    } finally {
+      await single.end();
+    }
+  }, 30_000);
 });
 
 describe('W4, W10, W18: failures keep the last good forecast and carry codes only', () => {
@@ -732,6 +810,11 @@ describe('performance (recorded in the PR)', () => {
       'insert into',
       'commit',
     ]);
+    // And the values themselves (contract §5.1).
+    expect(refreshStatements[2]).toMatch(/^set local statement_timeout = '5s'$/i);
+    expect(refreshStatements[3]).toMatch(
+      /^set local idle_in_transaction_session_timeout = '25s'$/i,
+    );
     while (spies.length) spies.pop()!.mockRestore();
     console.info(
       `[perf] read: ${queries.length / N} query, ${perRead.toFixed(2)} ms avg over ${N}; refresh: ${refreshStatements.length} statements (BEGIN and COMMIT included); stored hours ${bytes} bytes; provider body ${payload} bytes; cap ${512 * 1024}`,

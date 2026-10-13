@@ -10,7 +10,7 @@ import {
 } from '@/integrations/weather/open-meteo';
 import { weatherConfig } from '@/lib/env';
 import { testEnv } from '../../env';
-import { LOCATION_LEAKS, WELLINGTON_UNROUNDED, weatherEnv } from '../../fixtures/weather';
+import { WELLINGTON_UNROUNDED, locationLeaksIn, weatherEnv } from '../../fixtures/weather';
 
 // The Open-Meteo adapter's contract (M7 contract §5.1, §8.1, §8.6 W1–W4,
 // W10; ADR 0011 §12): the exact request, the normalisation of
@@ -235,7 +235,7 @@ describe('W10: every failure is one closed code, and nothing raw escapes', () =>
       expect(e.message).toBe(code);
       expect(e.cause).toBeUndefined();
       const all = `${e.message} ${JSON.stringify(e)} ${e.stack} ${String(e)}`;
-      for (const leak of LOCATION_LEAKS) expect(all, leak).not.toContain(leak);
+      expect(locationLeaksIn(all)).toEqual([]);
     },
   );
 
