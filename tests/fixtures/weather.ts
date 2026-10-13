@@ -60,6 +60,28 @@ export const LOCATION_LEAKS = [
   'home-weather-location:v1',
 ] as const;
 
+const NUMBER = /^-?\d+(\.\d+)?$/;
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * A number leak as a standalone number: not inside a longer number (no digit
+ * or `.` before it, no digit after it) and not part of a clock time (no
+ * `<digit>:` before it), so `…T23:34:41.295Z`, a uuid or `141.29` never
+ * trips it, while `-41.29`, `41.29,`, `"lat":-41.29`, `"lon":174.78` and
+ * `latitude=-41.29` all do.
+ */
+const standalone = (leak: string) => new RegExp(`(?<![\\d.])(?<!\\d:)${escapeRegExp(leak)}(?!\\d)`);
+
+/**
+ * The leaks a text contains (W4, W10, W18, W23, P5): numeric entries
+ * (coordinates, an elevation) as standalone numbers only; every other entry
+ * (the URL, parameter names, keys, the canonical prefix) as a substring.
+ */
+export function locationLeaksIn(text: string, leaks: readonly string[] = LOCATION_LEAKS): string[] {
+  return leaks.filter((leak) =>
+    NUMBER.test(leak) ? standalone(leak).test(text) : text.includes(leak),
+  );
+}
+
 /** The weather variables for a configured synthetic location. */
 export const weatherEnv = (
   point: { lat: string; lon: string } = WELLINGTON,

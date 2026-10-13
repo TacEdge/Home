@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotPermittedError } from '@/domain/common/errors';
 import { WeatherUnexpectedError } from '@/domain/weather/service';
-import { LOCATION_LEAKS } from '../../fixtures/weather';
+import { locationLeaksIn } from '../../fixtures/weather';
 
 // POST /weather/refresh (M7 contract §5.1, §8.1, §8.6 W13, W23, P8) and its
 // client (built in Package 1b, placed on screens in Package 4).
@@ -123,7 +123,7 @@ describe('answers: only { changed }', () => {
     expect(r.status).toBe(500);
     const text = await r.text();
     expect(JSON.parse(text)).toEqual({ changed: false });
-    for (const leak of LOCATION_LEAKS) expect(text).not.toContain(leak);
+    expect(locationLeaksIn(text)).toEqual([]);
   });
   it('any other thrown error is the same generic failure, never its message', async () => {
     state.outcome = new Error('https://api.open-meteo.com/v1/forecast?latitude=-41.29');

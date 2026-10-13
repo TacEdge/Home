@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
 import { sql } from 'drizzle-orm';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -339,6 +342,54 @@ describe('Today: the weather sentence, its credit and its Why (W15, W19, §4.1, 
   });
 });
 
+describe('X6: first run (no live calendar) with a fresh forecast', () => {
+  it('Today is in its first-run state and still says the weather, with one credit link and no opening; Forward Week has its phrases and credit line and no openings', async () => {
+    const phrases = (html: string) =>
+      [...html.matchAll(/data-testid="day-phrase"[^>]*>([^<]+)</g)].map((m) => m[1]);
+    const noOpenings = (html: string) =>
+      expect(rows(html).filter((r) => r.startsWith('open_window'))).toEqual([]);
+    // Not vacuous: with the calendar live, Alex's Forward Week lists openings.
+    expect(rows((await renderForward(h.alex)).html)).toContain('open_window.task');
+    const archived = (
+      await admin.db.execute<{ id: string }>(
+        sql`update calendar_source set archived_at = now() where archived_at is null returning id`,
+      )
+    ).rows.map((r) => r.id);
+    expect(archived).toContain(id.calendar);
+    try {
+      // No live calendar: coverage unknown, so no opening anywhere (contract §4.4).
+      let f = await renderForward(h.alex);
+      expect(phrases(f.html)).toHaveLength(7);
+      expect(words(f.html)).toContain('Forecast as of 06:55 · Open-Meteo');
+      expect(visibleCreditLinks(f.html)).toBe(1);
+      noOpenings(f.html);
+      // Today's first run is no live calendar and nothing recorded.
+      await admin.db.execute(
+        sql`update event set archived_at = now() where title in ('Football WS', 'Swimming WS')`,
+      );
+      const { html, c } = await renderToday(h.alex);
+      expect(c.props.model.state).toBe('first_run');
+      expect(words(html)).toContain('HOME is quiet because it doesn’t know your calendars yet.');
+      expect(words(html)).toContain('Looks dry until midday, then showers possible.');
+      expect(html).toContain('data-testid="weather-sentence"');
+      expect(visibleCreditLinks(html)).toBe(1);
+      noOpenings(html);
+      f = await renderForward(h.alex);
+      expect(phrases(f.html)).toHaveLength(7);
+      expect(visibleCreditLinks(f.html)).toBe(1);
+      noOpenings(f.html);
+    } finally {
+      await admin.db.execute(
+        sql`update event set archived_at = null where title in ('Football WS', 'Swimming WS')`,
+      );
+      for (const calendar of archived)
+        await admin.db.execute(
+          sql`update calendar_source set archived_at = null where id = ${calendar}::uuid`,
+        );
+    }
+  });
+});
+
 describe('Forward Week: day phrases, the credit line and its Why, openings (W14, W19, §4.2)', () => {
   it('a phrase on each of the seven days, the credit line beside Coming up with its own Why, and the openings as the contract words them', async () => {
     for (const actor of [h.sam, h.alex]) {
@@ -519,22 +570,46 @@ describe('every rendered string avoids the forbidden lists (O26, §5.8)', () => 
 });
 
 describe('X1, X9: rendering never reaches the network and is byte-identical for a fixed now and forecast', () => {
-  it('Today and Forward Week render twice to the same bytes, and nothing is fetched while rendering', async () => {
-    const fetched = vi.fn(() => {
+  it('Today and Forward Week render twice to the same bytes, and nothing is fetched while rendering, even with a refresh due: no fetch, no node:https or node:http request or get', async () => {
+    // An older forecast whose last attempt was ten hours ago: a refresh is due,
+    // so a page that refreshed while rendering would reach the provider here.
+    await writeForecast(at('2026-10-13', '21:00'));
+    const network = () => {
       throw new Error('the network was reached while rendering');
-    });
+    };
+    const fetched = vi.fn(network);
     vi.stubGlobal('fetch', fetched);
+    // safe-fetch (the provider's only transport) calls node:https / node:http
+    // `request`; `get` too, for completeness. Named imports follow the spies.
+    const spies = [
+      vi.spyOn(https, 'request').mockImplementation(network),
+      vi.spyOn(https, 'get').mockImplementation(network),
+      vi.spyOn(http, 'request').mockImplementation(network),
+      vi.spyOn(http, 'get').mockImplementation(network),
+    ];
+    syncBuiltinESMExports();
+    const untouched = (label: string) => {
+      expect(fetched, label).not.toHaveBeenCalled();
+      for (const spy of spies) expect(spy, label).not.toHaveBeenCalled();
+    };
     try {
       for (const actor of [h.sam, h.alex]) {
-        const t1 = (await renderToday(actor)).html;
+        const t1 = await renderToday(actor);
+        untouched('Today');
         const t2 = (await renderToday(actor)).html;
-        const f1 = (await renderForward(actor)).html;
+        const f1 = await renderForward(actor);
+        untouched('Forward Week');
         const f2 = (await renderForward(actor)).html;
-        expect(t2).toBe(t1);
-        expect(f2).toBe(f1);
+        expect(t1.c.askWeather).toBe(true);
+        expect(f1.c.askWeather).toBe(true);
+        expect(words(t1.html)).toContain('As of yesterday 21:00');
+        expect(t2).toBe(t1.html);
+        expect(f2).toBe(f1.html);
       }
-      expect(fetched).not.toHaveBeenCalled();
+      untouched('after every render');
     } finally {
+      for (const spy of spies) spy.mockRestore();
+      syncBuiltinESMExports();
       vi.unstubAllGlobals();
     }
   });
@@ -638,18 +713,34 @@ describe('X2: one more query, constant in what is recorded', () => {
 });
 
 describe('P1, P3: the other adult’s private records leave this adult’s rendered pages byte for byte', () => {
-  it('Sam’s private event, all-day event, dry-weather task and stale calendar change Sam’s pages and not Alex’s', async () => {
+  it('Sam’s private event, all-day event, dry-weather task, private person on a private event, scheduled task and stale calendar change Sam’s pages and not Alex’s: rendered bytes, models and listings (PI-1, PI-2)', async () => {
     const sat = at(SAT, '07:30');
     await freshAt(sat);
     await writeForecast(at(SAT, '06:55'));
-    const alexBefore = {
-      today: (await renderToday(h.alex, sat)).html,
-      forward: (await renderForward(h.alex, sat)).html,
+    // What Alex is given: the rendered pages and the compositions' models and listings.
+    const alexPages = async () => {
+      const t = await renderToday(h.alex, sat);
+      const f = await renderForward(h.alex, sat);
+      return {
+        today: t.html,
+        forward: f.html,
+        given: {
+          todayModel: t.c.props.model,
+          todayWorth: t.c.props.worth,
+          forwardModel: f.c.props.model,
+          forwardWorth: f.c.props.worth,
+        },
+      };
     };
+    const alexBefore = await alexPages();
+    // Not vacuous: Alex's pages carry Saturday's opening and the weekend.
+    expect(rows(alexBefore.today)).toContain('open_window.task');
+    expect(rows(alexBefore.forward).filter((r) => r.startsWith('open_window'))).not.toEqual([]);
     const samBefore = {
       today: (await renderToday(h.sam, sat)).html,
       forward: (await renderForward(h.sam, sat)).html,
     };
+    const secrets: string[] = [];
     let stale = '';
     try {
       stale = await calendarRow(
@@ -691,17 +782,58 @@ describe('P1, P3: the other adult’s private records leave this adult’s rende
         },
         deps,
       );
-      const alexAfter = {
-        today: (await renderToday(h.alex, sat)).html,
-        forward: (await renderForward(h.alex, sat)).html,
-      };
+      // A private person attending a private Saturday event (PI-1).
+      const friend = (
+        await createPerson(
+          h.sam,
+          { name: 'Sam private friend WS', role: 'other', visibility: 'private' },
+          deps,
+        )
+      ).id;
+      const visit = await createEventWithPeople(
+        h.sam,
+        {
+          title: 'Sam private visit WS',
+          kind: 'other',
+          visibility: 'private',
+          time: timed(at(SAT, '15:00'), at(SAT, '16:00')),
+        },
+        [{ personId: friend, role: 'attending' }],
+        deps,
+      );
+      // A private task scheduled on Sunday, assigned to Sam (PI-1).
+      const scheduled = await createTask(
+        h.sam,
+        {
+          title: 'Sam private scheduled WS',
+          visibility: 'private',
+          assigneePersonId: id.sam,
+          scheduled: {
+            startsAt: at(SUN, '10:00').toISOString(),
+            endsAt: at(SUN, '11:00').toISOString(),
+          },
+        },
+        deps,
+      );
+      secrets.push(friend, visit.id, scheduled.id);
+      const alexAfter = await alexPages();
       expect(alexAfter.today).toBe(alexBefore.today);
       expect(alexAfter.forward).toBe(alexBefore.forward);
+      // PI-2: the Today model, the ForwardModel and both listings, deep and as JSON.
+      expect(alexAfter.given).toEqual(alexBefore.given);
+      expect(JSON.stringify(alexAfter.given)).toBe(JSON.stringify(alexBefore.given));
       expect(alexAfter.forward + alexAfter.today).not.toMatch(/Sam private/);
+      for (const secret of secrets) {
+        expect(alexAfter.forward + alexAfter.today, secret).not.toContain(secret);
+        expect(JSON.stringify(alexAfter.given), secret).not.toContain(secret);
+      }
       // And it did change Sam's own (not vacuous).
       const samForward = (await renderForward(h.sam, sat)).html;
       expect(samForward).not.toBe(samBefore.forward);
       expect(words(samForward)).toMatch(/Sam private/);
+      const samToday = (await renderToday(h.sam, sat)).html;
+      expect(samToday).not.toBe(samBefore.today);
+      expect(words(samToday)).toMatch(/Sam private (visit|scheduled)/);
     } finally {
       if (stale) await admin.db.execute(sql`delete from calendar_source where id = ${stale}::uuid`);
       await admin.db.execute(
@@ -709,6 +841,7 @@ describe('P1, P3: the other adult’s private records leave this adult’s rende
       );
       await admin.db.execute(sql`delete from event where title like 'Sam private % WS'`);
       await admin.db.execute(sql`delete from task where title like 'Sam private % WS'`);
+      await admin.db.execute(sql`delete from person where name like 'Sam private % WS'`);
     }
   });
 
