@@ -181,9 +181,14 @@ export type KevContentV2 = z.output<typeof kevContentV2>;
 // ---------------------------------------------------------------------------
 // The bookkeeping path's inputs.
 
+/** The person's words, stored verbatim (D6): never trimmed or rewritten; never blank. */
 export const recordUserMessageInput = z
   .object({
-    text: z.string().trim().min(1).max(INPUT_TEXT_MAX_CHARS),
+    text: z
+      .string()
+      .min(1)
+      .max(INPUT_TEXT_MAX_CHARS)
+      .refine((t) => t.trim().length > 0, 'must not be blank'),
     focus: z.literal('today').optional(),
   })
   .strict();

@@ -3500,6 +3500,12 @@ describe('0009: kev_budget_reservation constraints, indexes, triggers and grants
 
 describe('0009: kev_budget_reservation behaviour (each case rolled back)', () => {
   const U = 'u-0009';
+  /**
+   * This suite's own rows (every attempt id here has this prefix). From
+   * Package 1b other suites leave reservations behind (rows are never
+   * removed), so counts and listings name only these.
+   */
+  const OURS = "attempt_id::text like '00000000-0000-4000-8000-%'";
   const A1 = '00000000-0000-4000-8000-000000000901';
   const A2 = '00000000-0000-4000-8000-000000000902';
   type Row = {
@@ -3606,7 +3612,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
       const r = await tx.execute(sql`
         select id is not null as has_id, status, created_at = now() as created_now,
                settled_usd_micros, closed_at, reserved_usd_micros::text as reserved, period::text as period
-        from kev_budget_reservation`);
+        from kev_budget_reservation where ${sql.raw(OURS)}`);
       expect(r.rows).toEqual([
         {
           has_id: true,
@@ -3767,7 +3773,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
         // Naming open explicitly is still an open reservation.
         await accepted(tx, reserve({ attempt: attempt(), status: 'open' }));
         const r = await tx.execute(
-          sql`select status, count(*)::int as n from kev_budget_reservation group by 1`,
+          sql`select status, count(*)::int as n from kev_budget_reservation where ${sql.raw(OURS)} group by 1`,
         );
         expect(r.rows).toEqual([{ status: 'open', n: 1 }]);
       }),
@@ -3794,7 +3800,7 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
         const r = await tx.execute(sql`
         select count(*)::int as n, count(*) filter (where created_at = now())::int as now_n,
                count(*) filter (where created_at = now() - interval '1 hour')::int as back_n
-        from kev_budget_reservation`);
+        from kev_budget_reservation where ${sql.raw(OURS)}`);
         expect(r.rows).toEqual([{ n: 3, now_n: 2, back_n: 1 }]);
       }),
   );
@@ -3852,7 +3858,9 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
         '23505',
       );
       await accepted(tx, reserve({ attempt: A2 }));
-      const r = await tx.execute(sql`select count(*)::int as n from kev_budget_reservation`);
+      const r = await tx.execute(
+        sql`select count(*)::int as n from kev_budget_reservation where ${sql.raw(OURS)}`,
+      );
       expect(r.rows[0]?.n).toBe(2);
     }));
 
@@ -3944,7 +3952,9 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
         sql`update kev_budget_reservation set ${set}, status = 'settled', settled_usd_micros = 5, closed_at = now() where attempt_id = ${A1}`,
         KEPT,
       );
-      const r = await tx.execute(sql`select status from kev_budget_reservation`);
+      const r = await tx.execute(
+        sql`select status from kev_budget_reservation where ${sql.raw(OURS)}`,
+      );
       expect(r.rows).toEqual([{ status: 'open' }]);
     }),
   );
@@ -4016,7 +4026,9 @@ describe('0009: kev_budget_reservation behaviour (each case rolled back)', () =>
         sql`update kev_budget_reservation set reserved_usd_micros = 1 where attempt_id = ${A1}`,
         KEPT,
       );
-      const r = await tx.execute(sql`select count(*)::int as n from kev_budget_reservation`);
+      const r = await tx.execute(
+        sql`select count(*)::int as n from kev_budget_reservation where ${sql.raw(OURS)}`,
+      );
       expect(r.rows[0]?.n).toBe(2);
     }));
 

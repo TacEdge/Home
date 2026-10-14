@@ -238,8 +238,10 @@ describe('recordUserMessage: stored first, one turn at a time, rate-limited from
     const sam = await adult('store');
     const r = await recordUserMessage(sam, { text: '  What’s on today?  ', focus: 'today' }, deps);
     if (!r.ok) throw new Error(r.code);
-    expect(r.message.content).toEqual({ v: 2, text: 'What’s on today?', focus: 'today' });
+    // Verbatim: not trimmed or rewritten; a blank message is refused.
+    expect(r.message.content).toEqual({ v: 2, text: '  What’s on today?  ', focus: 'today' });
     expect(r.message).toMatchObject({ role: 'user', tier: null, model: null, channel: 'web' });
+    await expect(recordUserMessage(sam, { text: '   ' }, deps)).rejects.toThrow();
     await recordKevMessage(sam, { content: kevAnswer(uuid()), tier: 'fast', model: 'm' }, deps);
     const again = await recordUserMessage(sam, { text: 'And tomorrow?' }, deps);
     if (!again.ok) throw new Error(again.code);
