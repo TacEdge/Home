@@ -8,6 +8,7 @@ import * as context from '@/domain/context/service';
 import * as conversations from '@/domain/conversations/service';
 import * as events from '@/domain/events/service';
 import * as insights from '@/domain/insights/service';
+import * as kevBookkeeping from '@/domain/kev-bookkeeping/service';
 import * as kevUsage from '@/domain/kev-usage/service';
 import * as notes from '@/domain/notes/service';
 import * as people from '@/domain/people/service';
@@ -37,7 +38,10 @@ import { clearDomainRows } from './fixtures';
 //   - Activity (listAudit) shows no row about a record the actor cannot see;
 //   - no audit row anywhere carries user-written content;
 //   - Kev and the system cannot write anywhere in the M2 domain, beyond the
-//     two approved Kev writes (capture verbatim, propose).
+//     two approved Kev writes (capture verbatim, propose) and, from M8
+//     Package 1b, Kev's bookkeeping path: its six functions acting as the
+//     adult via Kev, and the system's daily retention cleanup (M8 contract
+//     §9.7, matrix row S4).
 
 const { db, close } = testDb();
 const admin = adminDb();
@@ -409,12 +413,38 @@ describe('audit metadata carries no user-written content', () => {
 // completeness check fails if a new one is added without being listed here.
 
 type Call = (a: UserActor) => Promise<unknown>;
-const KEV_MAY = new Set(['captures.captureVerbatim', 'proposals.createProposal']);
+// Kev's approved writes (M8 contract §9.7, S4): capture and propose (M2),
+// and the six bookkeeping functions that act as the adult. Exactly these.
+const KEV_MAY = new Set([
+  'captures.captureVerbatim',
+  'proposals.createProposal',
+  'kevBookkeeping.recordUserMessage',
+  'kevBookkeeping.recordKevMessage',
+  'kevBookkeeping.reserveAttempt',
+  'kevBookkeeping.settleAttempt',
+  'kevBookkeeping.purgeExpired',
+  'kevBookkeeping.clearConversation',
+]);
+/** The audit events the bookkeeping path may write (structural, the adult's own). */
+const BOOKKEEPING_EVENTS = new Set([
+  'conversation.start',
+  'message.add',
+  'kev_budget.reserve',
+  'kev_usage.record',
+  'kev_budget.late_settle',
+  'conversation.purge',
+  'conversation.clear',
+]);
+// The system's one write: the daily retention cleanup, which only deletes
+// expired messages and so does not depend on the real-data gate.
+const SYSTEM_MAY = new Set(['kevBookkeeping.purgeExpiredMessages']);
+const UNGATED = new Set(['kevBookkeeping.purgeExpiredMessages']);
 const READS = /^(get|list|respondedKeys|monthToDate|stalenessOf)/;
 const INTERNAL = new Set([
   'captures.lockForProposal',
   'captures.settleCapture',
   'calendars.assertPerson', // the calendar services' own actor check, not a write
+  'kevBookkeeping.isLiveReservation', // a check of a minted value, not a write
 ]);
 const MODULES = {
   people,
@@ -431,6 +461,8 @@ const MODULES = {
   // M4 Package 4b: connecting, changing, disconnecting and refreshing calendars.
   calendars,
   calendarSync,
+  // M8 Package 1b: Kev's bookkeeping path.
+  kevBookkeeping,
 };
 
 /** A synthetic secret address: the gate, Kev and system refusals come before it is read. */
@@ -576,6 +608,59 @@ function writeCalls(own: Adult): Record<string, Call> {
     'calendarSync.refreshCalendar': (a) => calendarSync.refreshCalendar(a, id, NO_PROVIDER, {}, d),
     'calendarSync.refreshStaleCalendars': (a) =>
       calendarSync.refreshStaleCalendars(a, NO_PROVIDER, {}, d),
+    // M8 Package 1b, in this order: the person's message last, so that it
+    // does not leave a turn in flight for Clear.
+    'kevBookkeeping.reserveAttempt': (a) =>
+      kevBookkeeping.reserveAttempt(
+        a,
+        {
+          attemptId: crypto.randomUUID(),
+          tier: 'fast',
+          reservedUsdMicros: 1n,
+          capUsdMicros: 10n ** 15n,
+        },
+        d,
+      ),
+    // Via Kev, settle an attempt it reserved; anyone else, any attempt.
+    'kevBookkeeping.settleAttempt': (a) => {
+      const attemptId = crypto.randomUUID();
+      const settle = () =>
+        kevBookkeeping.settleAttempt(a, { attemptId, conversationId: null, calls: [] }, d);
+      return a.via === 'kev'
+        ? kevBookkeeping
+            .reserveAttempt(
+              a,
+              { attemptId, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 15n },
+              d,
+            )
+            .then(settle)
+        : settle();
+    },
+    'kevBookkeeping.recordKevMessage': (a) =>
+      kevBookkeeping.recordKevMessage(
+        a,
+        {
+          content: {
+            v: 2,
+            outcome: 'answer',
+            say: 'x',
+            blocks: [],
+            cites: [],
+            limits: [],
+            trace: [],
+            calls: [],
+            escalated: false,
+          },
+          tier: 'fast',
+          model: 'm',
+        },
+        d,
+      ),
+    'kevBookkeeping.purgeExpired': (a) => kevBookkeeping.purgeExpired(a, d),
+    'kevBookkeeping.clearConversation': (a) => kevBookkeeping.clearConversation(a, d),
+    'kevBookkeeping.recordUserMessage': (a) =>
+      kevBookkeeping.recordUserMessage(a, { text: 'x' }, d),
+    'kevBookkeeping.purgeExpiredMessages': (a) => kevBookkeeping.purgeExpiredMessages(a, d),
   };
 }
 
@@ -591,29 +676,64 @@ describe('Kev and the system cannot write anywhere in the M2 domain', () => {
   });
 
   it.each(ADULTS)(
-    '%s via Kev: refused (kev_cannot_write) everywhere but capture and propose',
+    '%s via Kev: refused (kev_cannot_write) everywhere but capture, propose and the bookkeeping path',
     async (a) => {
-      const before = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-      let allowedWrites = 0;
+      const newRows = async (since: string) =>
+        (
+          await admin.db.execute<{
+            event: string;
+            actor_via: string;
+            visible_to_user_id: string | null;
+          }>(
+            sql`select event, actor_via, visible_to_user_id from audit_log where at > ${since}::timestamptz order by at`,
+          )
+        ).rows;
+      const clock = async () =>
+        String(
+          (await admin.db.execute<{ t: string }>(sql`select clock_timestamp()::text as t`)).rows[0]
+            ?.t,
+        );
       for (const [name, call] of Object.entries(writeCalls(a))) {
+        const since = await clock();
         const r = await outcome(call(actor(a, 'kev')));
-        if (KEV_MAY.has(name)) {
+        const rows = await newRows(since);
+        if (!KEV_MAY.has(name)) {
+          expect(r, name).toBe('kev_cannot_write');
+          expect(rows, name).toEqual([]);
+        } else if (name.startsWith('kevBookkeeping.')) {
           expect(r, name).toBe('resolved');
-          allowedWrites += 1;
-        } else expect(r, name).toBe('kev_cannot_write');
+          // Only its own structural rows, as the adult via Kev, private to them.
+          for (const row of rows) {
+            expect(BOOKKEEPING_EVENTS.has(row.event), `${name}: ${row.event}`).toBe(true);
+            expect(row).toMatchObject({
+              actor_via: 'kev',
+              visible_to_user_id: seed.actors[a].userId,
+            });
+          }
+        } else {
+          // Capture and propose: exactly one row each, as in M2.
+          expect(r, name).toBe('resolved');
+          expect(rows, name).toHaveLength(1);
+        }
       }
-      const after = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-      // Only the two approved Kev writes reached the log (a capture; a proposal).
-      expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(allowedWrites);
     },
   );
 
-  it('the system actor: refused (not_a_user) everywhere, including capture and propose', async () => {
+  it('the system actor: refused (not_a_user) everywhere, including capture and propose; only the retention cleanup runs', async () => {
     const before = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
     for (const [name, call] of Object.entries(writeCalls('sam')))
-      expect(await outcome(call(sys)), name).toBe('not_a_user');
+      expect(await outcome(call(sys)), name).toBe(SYSTEM_MAY.has(name) ? 'resolved' : 'not_a_user');
     const after = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    // The cleanup's one structural system row.
+    expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(SYSTEM_MAY.size);
+  });
+
+  it('S4: a person (via the UI) cannot use the bookkeeping path, nor the cleanup', async () => {
+    for (const [name, call] of Object.entries(writeCalls('sam')))
+      if (name.startsWith('kevBookkeeping.'))
+        expect(await outcome(call(actor('sam'))), name).toBe(
+          SYSTEM_MAY.has(name) ? 'system_only' : 'kev_bookkeeping_only',
+        );
   });
 });
 
@@ -650,7 +770,8 @@ describe('the real-data gate in Production', () => {
       try {
         for (const a of ADULTS)
           for (const [name, call] of Object.entries(writeCalls(a)))
-            expect(await outcome(call(actor(a))), name).toBe('real_data_closed');
+            if (!UNGATED.has(name))
+              expect(await outcome(call(actor(a))), name).toBe('real_data_closed');
         // The no-op context update is a write request too.
         expect(
           await outcome(context.updateContext(actor('sam'), seed.canaries.sam.context, {}, deps)),

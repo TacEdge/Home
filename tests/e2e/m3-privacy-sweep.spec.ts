@@ -414,7 +414,7 @@ for (const adult of ['sam', 'alex'] as const) {
       const check = spawnSync('node', ['scripts/check-export.mts', file], { encoding: 'utf8' });
       expect(check.status, check.stderr).toBe(0);
       expect(check.stdout).toContain(
-        `check-export: valid home-export v2, sensitive included: ${includeSensitive}`,
+        `check-export: valid home-export v3, sensitive included: ${includeSensitive}`,
       );
 
       const data = JSON.parse(text) as {

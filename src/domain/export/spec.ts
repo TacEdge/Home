@@ -11,7 +11,9 @@ import { z } from 'zod';
 export const EXPORT_FORMAT = 'home-export';
 // Version 2 (M4 Package 4b): adds `calendars` and the events' occurrence
 // fields (`recurrenceParentId`, `recurrenceOriginal`). Version 1 was M3's.
-export const EXPORT_VERSION = 2;
+// Version 3 (M8 Package 1b): adds `kevUsage.attemptId`, and messages may
+// carry content v2 (contract §7.6) beside v1.
+export const EXPORT_VERSION = 3;
 
 /** Record types in export order; each names its table and how it sorts. */
 export const EXPORT_TYPES = {
@@ -230,6 +232,7 @@ export const EXPORTED_COLUMNS: Record<ExportType, readonly string[]> = {
     'cacheWriteTokens',
     'costUsdMicros',
     'escalated',
+    'attemptId',
   ],
   activity: [
     'id',

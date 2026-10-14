@@ -16,10 +16,9 @@ import * as schema from '@/db/schema';
 // such a migration.
 // Migration 0007's occurrence-override columns were defined by M4 Package 4b
 // once 0007 had run in Production and Preview.
-// `kev_usage.attempt_id` (migration 0009, M8 Package 1a): recordUsage inserts
-// and returns every defined kev_usage column, and listOwnUsage selects them
-// all, so the column is defined by Package 1b, after 0009 has run.
-const DEFERRED: Record<string, string[]> = { kev_usage: ['attempt_id'] };
+// `kev_usage.attempt_id` (migration 0009, M8 Package 1a) was defined by M8
+// Package 1b once 0009 had run in Production and Preview.
+const DEFERRED: Record<string, string[]> = {};
 
 const dir = 'src/db/migrations';
 const journal = JSON.parse(readFileSync(join(dir, 'meta/_journal.json'), 'utf8')) as {

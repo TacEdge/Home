@@ -37,14 +37,26 @@ describe('kev_budget_reservation has no privacy surface', () => {
     ]);
   });
 
-  it('migration-first: nothing outside src/db uses the table or kev_usage.attempt_id yet (Package 1a)', () => {
-    const files = sources('src').filter(
-      (f) => !f.startsWith(join('src', 'db')) && f !== join('src/domain/export/spec.ts'),
-    );
-    for (const f of files) {
-      const text = readFileSync(f, 'utf8');
-      expect(text, f).not.toMatch(RESERVATION);
-      expect(text, f).not.toMatch(/attempt_id|attemptId/);
-    }
+  it('only the bookkeeping path uses the table (and Activity registers it as owner-only)', () => {
+    const allowed = [
+      join('src', 'db'),
+      join('src', 'domain', 'kev-bookkeeping'),
+      join('src/domain/export/spec.ts'),
+      join('src/trust/audit-subjects.ts'),
+    ];
+    const files = sources('src').filter((f) => !allowed.some((a) => f.startsWith(a)));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(RESERVATION);
+  });
+
+  it('kev_usage.attempt_id is written only by the bookkeeping path, and exported', () => {
+    const allowed = [
+      join('src', 'db'),
+      join('src', 'domain', 'kev-bookkeeping'),
+      join('src', 'kev'),
+      join('src/domain/export/spec.ts'),
+    ];
+    const files = sources('src').filter((f) => !allowed.some((a) => f.startsWith(a)));
+    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(/attempt_id|attemptId/);
   });
 });
