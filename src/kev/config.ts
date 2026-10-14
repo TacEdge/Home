@@ -1,8 +1,12 @@
 import 'server-only';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 import {
+  DEEP_WITHDRAWN_AT_PERCENT,
+  DEFAULT_MONTHLY_CAP_NZD,
   INPUT_TEXT_MAX_CHARS,
+  NZD_PER_USD,
   RESERVATION_STALE_SECONDS,
+  TURN_CEILING_USD_MICROS,
   TURN_IN_FLIGHT_SECONDS,
   TURNS_PER_DAY,
   TURNS_PER_MINUTE,
@@ -10,7 +14,7 @@ import {
 
 // Kev's configuration (M8 contract §5.3, §13.4, §13.6; ADR 0012 §13, §35).
 // Code asks for a tier, never a model: this file is the only place a model id
-// appears (tests/unit/kev-config.test.ts, matrix row N10), and every limit a
+// appears (tests/unit/kev-money.test.ts, matrix row N10), and every limit a
 // turn is held to lives here. A model change is a change here plus a live
 // evaluation on both tiers and the owner's approval (CLAUDE.md, Kev
 // specifics). Money is integers only: prices are nano-US-dollars per token
@@ -112,11 +116,11 @@ export const GEO_MULTIPLIER = Object.freeze({ num: 11n, den: 10n });
 
 /**
  * The fixed, deliberately conservative exchange rate: NZ$1.80 per US$1
- * (contract §13.1), as an exact fraction. Reviewed by the owner each quarter.
+ * (contract §13.1), as an exact fraction, reviewed by the owner each
+ * quarter; and the NZ$100 default cap (O2). Defined by the bookkeeping path,
+ * which derives the cap itself (ADR 0012 §43), and re-exported here.
  */
-export const NZD_PER_USD = Object.freeze({ num: 9n, den: 5n });
-/** The household's monthly cap when HOME_KEV_MONTHLY_CAP_NZD is unset (O2). */
-export const DEFAULT_MONTHLY_CAP_NZD = 100;
+export { DEFAULT_MONTHLY_CAP_NZD, NZD_PER_USD };
 /** The highest cap the setting accepts (contract §13.4). */
 export const MAX_MONTHLY_CAP_NZD = 300;
 
@@ -141,13 +145,13 @@ export const LIMITS = Object.freeze({
   /** No byte for this long ends the call (`timeout`). */
   idleMs: 15_000,
   /** The turn's cost ceiling, US$1.50; it bounds the deep attempt's reservation (§13.6). */
-  turnCeilingUsdMicros: 1_500_000n,
+  turnCeilingUsdMicros: TURN_CEILING_USD_MICROS,
   /** At this share of the cap, deep is withdrawn (D19). Percent. */
-  deepWithdrawnAtPercent: 80,
+  deepWithdrawnAtPercent: DEEP_WITHDRAWN_AT_PERCENT,
   /**
    * An `open` reservation older than this is marked `unreconciled` and counted
    * in full: the route's `maxDuration` plus 30 seconds. Enforced in SQL by the
-   * bookkeeping path, which defines it; tests/unit/kev-config.test.ts holds
+   * bookkeeping path, which defines it; tests/unit/kev-money.test.ts holds
    * the two equal.
    */
   reservationStaleSeconds: RESERVATION_STALE_SECONDS,

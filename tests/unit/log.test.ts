@@ -263,3 +263,32 @@ describe('the event (the logger’s message argument) is scrubbed too (M4 Packag
     ]);
   });
 });
+
+describe('the model provider’s key is scrubbed by its shape (M8 contract §9.5, S12)', () => {
+  // Synthetic, deliberately short and low-entropy: never a real-looking key.
+  const SYNTHETIC = 'sk-ant-test0000not0a0key';
+
+  it('under a generic field name, in free text, in an error and in the event itself', () => {
+    const lines: string[] = [];
+    const logger = createLogger({ sink: (l) => lines.push(l) });
+    logger.error(`kev_call ${SYNTHETIC}`, {
+      code: 'auth',
+      detail: `bad key ${SYNTHETIC} here`,
+      nested: [{ value: SYNTHETIC }],
+      error: new Error(`refused ${SYNTHETIC}`),
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain(SYNTHETIC);
+    expect(lines[0]).not.toContain('sk-ant-test');
+    expect(lines[0]).toContain('[provider-key]');
+    expect(JSON.parse(lines[0]!).detail).toBe('bad key [provider-key] here');
+    expect(sanitiseMessage(`x ${SYNTHETIC}`)).not.toContain(SYNTHETIC);
+  });
+
+  it('leaves a short look-alike and ordinary words alone', () => {
+    expect(redact({ note: 'sk-ant-abc', code: 'timeout' })).toEqual({
+      note: 'sk-ant-abc',
+      code: 'timeout',
+    });
+  });
+});

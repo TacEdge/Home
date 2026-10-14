@@ -1,5 +1,6 @@
 import 'server-only';
 import { deploymentEnv } from '@/lib/env';
+import { exceedsInputCap, TurnBudget } from '../budget';
 import { TIERS } from '../config';
 import {
   ProviderError,
@@ -19,8 +20,11 @@ import {
 // calls, a stop code, usage, the reported inference geo), a failure with or
 // without partial usage, a refusal, or a stall. It is held to the same
 // budget as the real adapter (every call begins and ends on the attempt's
-// TurnBudget), and is refused anywhere deployed (N3), like the fake weather
-// provider.
+// TurnBudget), charged as the real adapter charges (a failure with partial
+// usage conservatively, I2; usage over the input cap ends the call
+// `too_large` and halts the attempt, I4), and is refused anywhere deployed
+// (N3), like the fake weather provider: the process's own environment is
+// checked whatever `source` says.
 
 export type ScriptStep =
   | {
@@ -60,9 +64,12 @@ function wait(ms: number, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
-/** Refuses anywhere deployed (N3). */
+const deployed = (source: Record<string, string | undefined>) =>
+  Boolean(source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production');
+
+/** Refuses anywhere deployed (N3): `source` and the process's own environment both. */
 export function assertScriptedAllowed(source: Record<string, string | undefined>): void {
-  if (source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production')
+  if (deployed(source) || deployed(deploymentEnv()))
     throw new Error('the scripted Kev provider is for local and CI runs only');
 }
 
@@ -78,18 +85,29 @@ export function createScriptedProvider(
     kind: 'scripted',
     requests,
     async run(request: ProviderRequest, { budget, signal }: RunOptions): Promise<ProviderResult> {
+      if (!(budget instanceof TurnBudget) || !budget.live)
+        throw new Error('a call needs its attempt’s live TurnBudget');
       if (request.tier !== budget.tier) throw new Error('a request runs on its attempt’s tier');
       requests.push(request);
       const model = TIERS[request.tier].model.id;
       const started = Date.now();
       const { ticket, timeoutMs } = budget.beginCall(started);
+      // `stop: 'error'` with usage: the call ended before the provider's final
+      // usage (partial, as the adapter charges it); a refusal's usage is final.
       const fail = (
         code: ProviderErrorCode,
         partial: CallUsage | null,
         stop: 'refusal' | 'error',
       ) => {
         const ms = Date.now() - started;
-        budget.endCall(ticket, { model, usage: partial, ms, stop, errorCode: code });
+        budget.endCall(ticket, {
+          model,
+          usage: partial,
+          ms,
+          stop,
+          errorCode: code,
+          partial: stop === 'error' && partial !== null,
+        });
         return new ProviderError(code, {
           attemptId: budget.attemptId,
           ms,
@@ -113,7 +131,9 @@ export function createScriptedProvider(
       return finish(step);
       function finish(answer: Extract<ScriptStep, { kind: 'answer' }>): ProviderResult {
         const usage = usageOf(answer.usage);
+        // As the adapter: both are found at message_start, which ends the call.
         if (usage.inferenceGeo !== 'us') throw fail('bad_response', usage, 'error');
+        if (exceedsInputCap(usage)) throw fail('too_large', usage, 'error');
         const ms = Date.now() - started;
         const stop = answer.stop ?? (answer.toolUses?.length ? 'tool_use' : 'end_turn');
         budget.endCall(ticket, { model, usage, ms, stop });

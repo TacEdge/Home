@@ -456,8 +456,17 @@ export type KevConfig =
   | { status: 'off' }
   | { status: 'off (gate closed)' }
   | { status: 'no key' }
+  | { status: 'invalid key' }
   | { status: 'scripted' }
   | { status: 'on'; key: string };
+
+/**
+ * A well-formed provider key (ADR 0012 §43, I6): printable ASCII with no
+ * space or control character, 16 to 512 characters. kevConfig() and the
+ * provider's constructors (src/kev/providers) apply it; nothing echoes a
+ * value that fails it.
+ */
+export const PROVIDER_KEY_FORMAT = /^[\x21-\x7e]{16,512}$/;
 
 const deployed = (source: Record<string, string | undefined>) =>
   Boolean(source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production');
@@ -467,7 +476,10 @@ const deployed = (source: Record<string, string | undefined>) =>
  * Production with the real-data gate closed is always `off (gate closed)`,
  * whatever HOME_KEV says (S10). Otherwise `off` unless HOME_KEV is exactly
  * `on`; then the scripted provider where HOME_TEST_KEV allows it (never when
- * deployed), else the key, or `no key` (N2). Never throws.
+ * deployed), else the key, `no key` when it is unset, empty or blank (N2),
+ * or `invalid key` when it is not exactly PROVIDER_KEY_FORMAT (a control
+ * character, a space, a line break, anything outside printable ASCII; never
+ * trimmed or repaired). Never throws, and never echoes the value.
  */
 export function kevConfig(source: Record<string, string | undefined> = process.env): KevConfig {
   if (source.VERCEL_ENV === 'production' && !realDataGateOpen(source))
@@ -476,9 +488,30 @@ export function kevConfig(source: Record<string, string | undefined> = process.e
   if (source.HOME_TEST_KEV === 'scripted') {
     return deployed(source) ? { status: 'off' } : { status: 'scripted' };
   }
-  const key = source.HOME_KEV_PROVIDER_KEY?.trim();
-  if (!key) return { status: 'no key' };
+  const key = source.HOME_KEV_PROVIDER_KEY;
+  if (key === undefined || key.trim() === '') return { status: 'no key' };
+  if (!PROVIDER_KEY_FORMAT.test(key)) return { status: 'invalid key' };
   return { status: 'on', key };
+}
+
+/** HOME_KEV_MONTHLY_CAP_NZD's rule, as the schema above holds it. */
+const CAP_NZD = /^(0|[1-9]\d{0,2})$/;
+
+/**
+ * The household's monthly cap setting as it is now, read on every call
+ * (like kevConfig): whole NZ dollars 0 to 300; `undefined` when unset (the
+ * NZ$100 default applies); `null` when invalid, which parseEnv refuses at
+ * boot and a caller treats as a cap of 0 (fail closed). The bookkeeping
+ * path derives the cap from this alone; no caller passes one.
+ */
+export function kevMonthlyCapNzd(
+  source: Record<string, string | undefined> = process.env,
+): number | undefined | null {
+  const raw = source.HOME_KEV_MONTHLY_CAP_NZD;
+  if (raw === undefined) return undefined;
+  if (!CAP_NZD.test(raw)) return null;
+  const n = Number(raw);
+  return n <= 300 ? n : null;
 }
 
 /**

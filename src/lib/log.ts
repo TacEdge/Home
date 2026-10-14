@@ -97,6 +97,9 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   // so is any coordinate written as a query parameter.
   [/[^\s"'<>]*api\.open-meteo\.com[^\s"'<>]*/gi, '[weather-request]'],
   [/\b(?:latitude|longitude|elevation)=[^\s&"'<>]*/gi, '[weather-request]'],
+  // The model provider's key (M8 contract §9.5, S12; ADR 0012 §43), by its
+  // shape, wherever it appears and whatever the field is called.
+  [/sk-ant-[A-Za-z0-9_-]{10,}/g, '[provider-key]'],
 ];
 
 /** A string with every secret calendar address, sealed credential and fingerprint replaced. */

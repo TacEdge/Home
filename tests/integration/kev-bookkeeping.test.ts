@@ -1064,9 +1064,13 @@ describe('L20, L16: no transaction is held while the model runs; every call is s
         },
         d,
       );
-      expect(s).toEqual({ ok: true, late: false, settledUsdMicros: 27_720n + 2_112n + 133_056n });
+      // The aborted call's reported tokens are kept (900 input), but it ended
+      // without the provider's final usage, so it is charged at the per-call
+      // maximum, never the 2,112 µ$ its partial tokens would price at (I2).
+      expect(budget.calls.map((c) => c.stop)).toEqual(['tool_use', 'partial', 'error']);
+      expect(s).toEqual({ ok: true, late: false, settledUsdMicros: 27_720n + 133_056n + 133_056n });
       expect((await usageRows(attemptId)).map((u) => `${u.cost}:${u.input_tokens}`).sort()).toEqual(
-        ['133056:0', '2112:900', '27720:4100'],
+        ['133056:0', '133056:900', '27720:4100'],
       );
       expect(budget.canCall(Date.now())).toEqual({ ok: false, reason: 'reservation_closed' });
     } finally {

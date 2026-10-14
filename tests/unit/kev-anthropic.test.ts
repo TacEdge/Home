@@ -33,8 +33,10 @@ const {
   buildAnthropicProvider,
   createAnthropicProvider,
   messagesParams,
+  retryAfterMs,
   retryDelayMs,
 } = await import('@/kev/providers/anthropic');
+const { BudgetExhausted } = await import('@/kev/budget');
 const { ProviderError } = await import('@/kev/providers/types');
 const { createLogger } = await import('@/lib/log');
 
@@ -284,9 +286,12 @@ describe('N7: HOME’s one retry', () => {
     const e = await failure(provider().run(request(), { budget: b }));
     expect(e.code).toBe('bad_response');
     expect(stub.seen).toHaveLength(1);
-    // Known partial usage (input from message_start) is kept for settlement (G20).
+    // Known partial usage (input from message_start) is kept as evidence
+    // (G20), but the call ended without the provider's final usage, so it is
+    // charged conservatively, never less than the per-call maximum (I2).
     expect(e.detail.partialUsage).toMatchObject({ inputTokens: 4_100, cacheWriteTokens: 5_000 });
     expect(b.calls[0]?.usage).toMatchObject({ inputTokens: 4_100 });
+    expect(b.calls[0]).toMatchObject({ stop: 'partial', costUsdMicros: 133_056n });
   });
 
   it('an overloaded error inside a begun stream is `overloaded`, not retried', async () => {
@@ -371,6 +376,53 @@ describe('N7: HOME’s one retry', () => {
     expect(stub.seen).toHaveLength(1);
   });
 
+  it('retry-after: whole decimal seconds only; anything else, and retry-after-ms, never retries', () => {
+    const h = (v: Record<string, string>) => new Headers(v);
+    expect(retryAfterMs(undefined)).toBeNull();
+    expect(retryAfterMs(h({}))).toBeNull();
+    expect(retryAfterMs(h({ 'retry-after': '0' }))).toBe(0);
+    expect(retryAfterMs(h({ 'retry-after': '1' }))).toBe(1_000);
+    expect(retryAfterMs(h({ 'retry-after': '2' }))).toBe(2_000);
+    expect(retryAfterMs(h({ 'retry-after': '3' }))).toBe(3_000);
+    for (const v of [
+      'Wed, 21 Oct 2026 07:28:00 GMT',
+      '0x2',
+      '1e0',
+      '02',
+      '-1',
+      '+1',
+      '1.5',
+      '',
+      '2 2',
+      '99999999999999999999',
+    ])
+      expect(retryAfterMs(h({ 'retry-after': v })), JSON.stringify(v)).toBe(
+        Number.POSITIVE_INFINITY,
+      );
+    // HTTP and the Headers class strip surrounding whitespace before HOME sees it.
+    expect(retryAfterMs(h({ 'retry-after': ' 2 ' }))).toBe(2_000);
+    expect(retryAfterMs(h({ 'retry-after-ms': '500' }))).toBeNull();
+    const m = (retryAfterMs: number | null) => ({
+      code: 'rate_limited' as const,
+      retryable: true,
+      notSent: false,
+      retryAfterMs,
+    });
+    expect(retryDelayMs(m(retryAfterMs(h({ 'retry-after': '2' }))), false)).toBe(2_000);
+    for (const v of ['3', '0x2', '1e0', 'Wed, 21 Oct 2026 07:28:00 GMT', '-1', ''])
+      expect(retryDelayMs(m(retryAfterMs(h({ 'retry-after': v }))), false), v).toBeNull();
+  });
+
+  it('a retry-after HOME does not honour (an HTTP-date) means no retry, end to end', async () => {
+    stub.queue.push(
+      status(429, 'rate_limit_error', { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }),
+      okStream(FAST),
+    );
+    const e = await failure(provider().run(request(), { budget: budget() }));
+    expect(e.code).toBe('rate_limited');
+    expect(stub.seen).toHaveLength(1);
+  });
+
   it('retry exhaustion of the budget: no retry when the budget no longer allows a call', async () => {
     stub.queue.push(status(529, 'overloaded_error'));
     // Room for exactly one fast call (133,056 µ$).
@@ -382,7 +434,11 @@ describe('N7: HOME’s one retry', () => {
       reservedUsdMicros: 133_056n,
     });
     liveSet.add(r);
-    const b = TurnBudget.open(r, { deadline: Date.now() + 55_000 });
+    // What a fast attempt may reserve once the turn has settled 1,366,944 µ$.
+    const b = TurnBudget.open(r, {
+      deadline: Date.now() + 55_000,
+      turnSettledUsdMicros: 1_366_944n,
+    });
     const e = await failure(provider().run(request(), { budget: b }));
     expect(e.code).toBe('overloaded');
     expect(e.detail.retried).toBe(false);
@@ -405,6 +461,20 @@ describe('N6, G6: time and abort', () => {
     expect(e.code).toBe('timeout');
     expect(e.detail.partialUsage?.inputTokens).toBe(777);
     expect(b.calls[0]?.usage?.inputTokens).toBe(777);
+    // Aborted after message_start: partial, charged at the per-call maximum (I2).
+    expect(b.calls[0]).toMatchObject({ stop: 'partial', costUsdMicros: 133_056n });
+  });
+
+  it('M-2: a call aborted before it ever entered HOME’s fetch left nothing: not recorded, no cost', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const b = budget();
+    const e = await failure(provider().run(request(), { budget: b, signal: ac.signal }));
+    expect(e.code).toBe('timeout');
+    expect(stub.seen).toHaveLength(0);
+    expect(b.modelCalls).toBe(1); // it still counted as one of the five
+    expect(b.calls).toEqual([]);
+    expect(b.committedUsdMicros).toBe(0n);
   });
 
   it('a fast call ends at its own per-call timeout: min(20 s, time left − 5 s)', async () => {
@@ -573,5 +643,90 @@ describe('S12: secrets never travel', () => {
       for (const s of [KEY, 'header-fragment', 'body-fragment', 'question-fragment'])
         expect(t, s).not.toContain(s);
     expect(e.code).toBe('auth');
+  });
+});
+
+describe('I2: a truncated stream is never charged below the per-call maximum', () => {
+  it('two truncated calls use up the room for two; a third is refused, none “released”', async () => {
+    const truncated = (_req: unknown, res: http.ServerResponse) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(
+        messageStart(FAST, { input_tokens: 900, cache_creation_input_tokens: 0 }) +
+          textBlock(0, 'Half'),
+      );
+    };
+    // Room for exactly two fast per-call maxima (266,112 µ$).
+    const r = Object.freeze({
+      reservationId: crypto.randomUUID(),
+      attemptId: crypto.randomUUID(),
+      userId: 'u',
+      tier: 'fast' as const,
+      reservedUsdMicros: 266_112n,
+    });
+    liveSet.add(r);
+    const b = TurnBudget.open(r, {
+      deadline: Date.now() + 55_000,
+      turnSettledUsdMicros: 1_233_888n,
+    });
+    stub.queue.push(truncated, truncated);
+    for (let i = 0; i < 2; i++)
+      expect((await failure(provider().run(request(), { budget: b }))).code).toBe('bad_response');
+    // Priced as final, each would be 1,980 µ$ (900 input, 1 output).
+    expect(b.calls.map((c) => [c.stop, c.costUsdMicros, c.usage?.inputTokens])).toEqual([
+      ['partial', 133_056n, 900],
+      ['partial', 133_056n, 900],
+    ]);
+    expect(b.canCall(Date.now())).toEqual({ ok: false, reason: 'reservation_exhausted' });
+    await expect(provider().run(request(), { budget: b })).rejects.toBeInstanceOf(BudgetExhausted);
+    expect(stub.seen).toHaveLength(2);
+  });
+});
+
+describe('I4: the provider’s own input count over 32,000 tokens ends the call at message_start', () => {
+  it('too_large, never retried, charged with the reported input in full; the attempt makes no further call', async () => {
+    let wroteRest = false;
+    stub.queue.push((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(messageStart(FAST, { input_tokens: 50_000, cache_creation_input_tokens: 0 }));
+      setTimeout(() => {
+        wroteRest = !res.destroyed && !res.writableEnded && res.socket?.destroyed === false;
+        if (wroteRest) res.end(textBlock(0, 'More.') + messageEnd('end_turn'));
+      }, 200);
+    });
+    const b = budget();
+    const e = await failure(provider().run(request(), { budget: b }));
+    expect(e.code).toBe('too_large');
+    expect(e.detail.retried).toBe(false);
+    expect(stub.seen).toHaveLength(1);
+    // 50,000 × 2,000 n$ + 4,096 × 10,000 n$, × 1.1 = 155,056 µ$ (> the 133,056 maximum).
+    expect(b.calls).toHaveLength(1);
+    expect(b.calls[0]).toMatchObject({
+      stop: 'partial',
+      errorCode: 'too_large',
+      costUsdMicros: 155_056n,
+    });
+    expect(b.calls[0]?.usage?.inputTokens).toBe(50_000);
+    expect(b.halted).toBe('input_limit');
+    expect(b.canCall(Date.now())).toEqual({ ok: false, reason: 'input_limit' });
+    await expect(provider().run(request(), { budget: b })).rejects.toBeInstanceOf(BudgetExhausted);
+    expect(stub.seen).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 250));
+    // The connection was closed at message_start: the rest was never read.
+    expect(wroteRest).toBe(false);
+  });
+
+  it('exactly 32,000 reported input tokens (uncached + cache read + cache write) is within the cap', async () => {
+    stub.queue.push(
+      okStream(FAST, {
+        usage: {
+          input_tokens: 12_000,
+          cache_read_input_tokens: 10_000,
+          cache_creation_input_tokens: 10_000,
+        },
+      }),
+    );
+    const b = budget();
+    expect((await provider().run(request(), { budget: b })).stop).toBe('end_turn');
+    expect(b.halted).toBeNull();
   });
 });

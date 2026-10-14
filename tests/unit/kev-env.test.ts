@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EnvError, kevBootStatus, kevConfig, parseEnv } from '@/lib/env';
+import {
+  EnvError,
+  kevBootStatus,
+  kevConfig,
+  kevMonthlyCapNzd,
+  parseEnv,
+  PROVIDER_KEY_FORMAT,
+} from '@/lib/env';
 import { register } from '@/instrumentation';
 
 // Kev's settings and boot line (M8 contract §1.3, §13.4, §14; matrix rows
@@ -152,6 +159,48 @@ describe('kevConfig and the boot line', () => {
   it('the boot line names a status, never the key', () => {
     expect(kevBootStatus({ status: 'on', key: KEY })).toBe('on');
     expect(kevBootStatus({ status: 'off (gate closed)' })).toBe('off (gate closed)');
+    expect(kevBootStatus({ status: 'invalid key' })).toBe('invalid key');
+  });
+
+  it('I6: a malformed HOME_KEV_PROVIDER_KEY is `invalid key`: never trimmed, repaired or echoed', () => {
+    const bad = [
+      `${KEY}\x01`,
+      `${KEY}\n`,
+      `\n${KEY}`,
+      `${KEY}\r\n`,
+      `${KEY}\0`,
+      `test-only not-a-key`,
+      ` ${KEY}`,
+      `${KEY}\t`,
+      `${KEY}\x7f`,
+      `test-only-nöt-a-key`,
+      `test-only-not-a-key-€`,
+      'short-key',
+      'k'.repeat(513),
+    ];
+    for (const v of bad) {
+      const c = kevConfig({ HOME_KEV: 'on', HOME_KEV_PROVIDER_KEY: v });
+      expect(c, JSON.stringify(v)).toEqual({ status: 'invalid key' });
+      expect(JSON.stringify(c)).not.toContain('test-only');
+    }
+    for (const blank of ['', ' ', '\n', '\r\n', '\t \t'])
+      expect(kevConfig({ HOME_KEV: 'on', HOME_KEV_PROVIDER_KEY: blank })).toEqual({
+        status: 'no key',
+      });
+    expect(kevConfig({ HOME_KEV: 'on', HOME_KEV_PROVIDER_KEY: 'k'.repeat(512) }).status).toBe('on');
+    expect(PROVIDER_KEY_FORMAT.test(KEY)).toBe(true);
+  });
+
+  it('kevMonthlyCapNzd: read on every call; unset, valid, invalid (fail closed)', () => {
+    expect(kevMonthlyCapNzd({})).toBeUndefined();
+    for (const [v, n] of [
+      ['0', 0],
+      ['100', 100],
+      ['300', 300],
+    ] as const)
+      expect(kevMonthlyCapNzd({ HOME_KEV_MONTHLY_CAP_NZD: v })).toBe(n);
+    for (const v of ['', 'abc', '301', '12.5', '050', '-1', ' 100'])
+      expect(kevMonthlyCapNzd({ HOME_KEV_MONTHLY_CAP_NZD: v }), v).toBeNull();
   });
 });
 

@@ -1,11 +1,12 @@
 import 'server-only';
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
-import http, { type IncomingMessage } from 'node:http';
+import http, { type ClientRequest, type IncomingMessage } from 'node:http';
 import https from 'node:https';
 import type { Socket } from 'node:net';
-import { deploymentEnv } from '@/lib/env';
+import { deploymentEnv, PROVIDER_KEY_FORMAT } from '@/lib/env';
 import { isPublicAddress } from '@/lib/net-policy';
 import { LIMITS, TIERS } from '../config';
+import { providerTlsOptions, type ProviderTlsOptions } from './tls';
 
 // HOME's network policy for the model provider (M8 contract §5.4; ADR 0012
 // §14). The SDK is given this function as its `fetch`, so every request it
@@ -22,6 +23,10 @@ import { LIMITS, TIERS } from '../config';
 // - Addresses: every resolved address checked when connecting, and the
 //   connected socket's address checked again; a non-public one is
 //   `unreachable`.
+// - TLS: verified against Node's bundled public roots only, with the
+//   hostname checked, whatever NODE_TLS_REJECT_UNAUTHORIZED,
+//   NODE_EXTRA_CA_CERTS or `--use-openssl-ca` / `--use-system-ca` say
+//   (./tls.ts); a certificate that fails is `unreachable`, never retried.
 // - Redirects: never followed; a 3xx is `refused_destination`.
 // - Size: a request body over 1 MiB is refused before connecting; a
 //   response over 2 MiB, counted while it streams, is `too_large`.
@@ -38,7 +43,10 @@ import { LIMITS, TIERS } from '../config';
 //   any `authorization`, `anthropic-beta`, cookie or HOME header, and
 //   whatever ANTHROPIC_CUSTOM_HEADERS injected.
 // - Errors: `ProviderNetError` with a closed code only. No error, here or
-//   from here, carries the key, a header, a URL's query or a body.
+//   from here, carries the key, a header, a URL's query or a body. A
+//   request Node cannot even form (a key with a control character, say) is
+//   `auth`, rejected before any timer or listener exists, so nothing is
+//   left to fire later.
 
 export const PROVIDER_ORIGIN = 'https://api.anthropic.com';
 const PROVIDER_HOST = 'api.anthropic.com';
@@ -78,9 +86,19 @@ export type Lookup = (
   callback: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void,
 ) => void;
 
-/** How the request reaches the provider: TLS to the resolved public address, or (tests only) a local stub. */
+/**
+ * How the request reaches the provider: TLS to the resolved public address
+ * on 443 with production's TLS options, or (tests only) a local stub, over
+ * plain HTTP or over TLS with a test CA in place of the public roots.
+ */
 type Transport =
-  | { kind: 'tls'; lookup: Lookup; allowAddress: (a: string) => boolean }
+  | {
+      kind: 'tls';
+      lookup: Lookup;
+      allowAddress: (a: string) => boolean;
+      port: number;
+      tls: ProviderTlsOptions;
+    }
   | { kind: 'stub'; port: number; allowAddress: (a: string) => boolean };
 
 type Limits = typeof PROVIDER_FETCH_LIMITS;
@@ -93,8 +111,12 @@ type FetchInit = {
   signal?: AbortSignal | null;
 };
 
-/** The observer a call may attach, to learn whether any response byte arrived (HOME's retry rule). */
-export type FetchObserver = { responseBytes: number; status: number | null };
+/**
+ * The observer a call may attach: how many requests entered HOME's fetch
+ * (none means nothing of the call ever left HOME), and whether any response
+ * byte arrived (HOME's retry rule).
+ */
+export type FetchObserver = { requests: number; responseBytes: number; status: number | null };
 
 export type ProviderFetch = ((
   url: string | URL | Request,
@@ -140,7 +162,13 @@ export function allowedHeaders(
   key: string,
   bodyBytes: number,
 ): Record<string, string> {
-  const h = new Headers(input ?? {});
+  let h: Headers;
+  try {
+    h = new Headers(input ?? {});
+  } catch {
+    // A header value the platform refuses (a NUL or line break, say).
+    throw new ProviderNetError('auth', false, false);
+  }
   if (headerValue(h, 'x-api-key') !== key) throw new ProviderNetError('auth', false, false);
   const out: Record<string, string> = {
     'x-api-key': key,
@@ -193,6 +221,19 @@ function guardLookup(transport: Extract<Transport, { kind: 'tls' }>) {
 
 const KEPT_RESPONSE_HEADERS = ['content-type', 'retry-after', 'request-id'];
 
+/**
+ * A certificate or handshake refusal, by Node's and OpenSSL's error codes
+ * (typed fields, never message text): not a passing network fault, so never
+ * retried.
+ */
+function isTlsRefusal(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return (
+    typeof code === 'string' &&
+    /CERT|SELF_SIGNED|ISSUER|LEAF_SIGNATURE|^ERR_TLS_|^ERR_SSL_|^HOSTNAME_MISMATCH$/.test(code)
+  );
+}
+
 function build(key: string, transport: Transport, limits: Limits) {
   const fetchImpl = async (
     input: string | URL | Request,
@@ -218,6 +259,38 @@ function build(key: string, transport: Transport, limits: Limits) {
     if (signal?.aborted) throw abortError();
 
     return new Promise<Response>((resolve, reject) => {
+      // The request first, before any timer or listener (I6): if Node cannot
+      // form it (an invalid header value, which only the key can be), the
+      // call fails closed with nothing armed that could fire later.
+      const common = {
+        method,
+        path: url.pathname,
+        headers: { ...headers, host: PROVIDER_HOST },
+        agent: false as const,
+      };
+      let req: ClientRequest;
+      try {
+        req =
+          transport.kind === 'tls'
+            ? https.request({
+                ...common,
+                protocol: 'https:',
+                hostname: PROVIDER_HOST,
+                port: transport.port,
+                lookup: guardLookup(transport) as never,
+                ...transport.tls,
+                ca: transport.tls.ca as string[],
+              })
+            : http.request({
+                ...common,
+                protocol: 'http:',
+                hostname: '127.0.0.1',
+                port: transport.port,
+              });
+      } catch {
+        reject(new ProviderNetError('auth', false, false));
+        return;
+      }
       let settled = false;
       let response: IncomingMessage | undefined;
       let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -268,29 +341,6 @@ function build(key: string, transport: Transport, limits: Limits) {
         limits.maxCallMs,
       );
 
-      const common = {
-        method,
-        path: url.pathname,
-        headers: { ...headers, host: PROVIDER_HOST },
-        agent: false as const,
-      };
-      const req =
-        transport.kind === 'tls'
-          ? https.request({
-              ...common,
-              protocol: 'https:',
-              hostname: PROVIDER_HOST,
-              port: 443,
-              servername: PROVIDER_HOST,
-              lookup: guardLookup(transport) as never,
-            })
-          : http.request({
-              ...common,
-              protocol: 'http:',
-              hostname: '127.0.0.1',
-              port: transport.port,
-            });
-
       req.on('socket', (socket: Socket) => {
         const check = () => {
           const remote = socket.remoteAddress;
@@ -302,6 +352,8 @@ function build(key: string, transport: Transport, limits: Limits) {
       });
       req.on('error', (err) => {
         if (err instanceof ProviderNetError) return fail(err);
+        // A certificate HOME does not trust, or a name it does not match: never retried.
+        if (isTlsRefusal(err)) return fail(new ProviderNetError('unreachable', sent, false));
         // A connection that failed before any response: HOME's retry may follow.
         fail(new ProviderNetError('unreachable', sent, !settled));
       });
@@ -380,35 +432,56 @@ function abortError(): Error {
 
 /**
  * HOME's fetch for the provider, in production: TLS to api.anthropic.com's
- * public addresses only, with the frozen limits. It takes the key only, so
- * it can check the SDK sends exactly that key; nothing else can be passed.
+ * public addresses only, verified against Node's bundled roots (./tls.ts),
+ * with the frozen limits. It takes the key only, so it can check the SDK
+ * sends exactly that key; nothing else, no CA, agent or option, can be
+ * passed. A malformed key is refused here, before anything is built.
  */
 export function createProviderFetch(key: string): ProviderFetch {
-  if (typeof key !== 'string' || key.length === 0) throw new Error('a provider key is required');
+  if (typeof key !== 'string' || !PROVIDER_KEY_FORMAT.test(key))
+    throw new Error('a well-formed provider key is required');
   return build(
     key,
-    { kind: 'tls', lookup: dnsLookup as unknown as Lookup, allowAddress: isPublicAddress },
+    {
+      kind: 'tls',
+      lookup: dnsLookup as unknown as Lookup,
+      allowAddress: isPublicAddress,
+      port: 443,
+      tls: providerTlsOptions(),
+    },
     PROVIDER_FETCH_LIMITS,
   );
 }
 
-/** Refuses anywhere deployed: the test seam can never reach a real deployment. */
+const deployed = (source: Record<string, string | undefined>) =>
+  Boolean(source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production');
+
+/**
+ * Refuses anywhere deployed: the test seam can never reach a real
+ * deployment. The process's own environment is checked whatever `source`
+ * says (a benign `source` cannot open the seam on a deployed process).
+ */
 function assertNotDeployed(source: Record<string, string | undefined>): void {
-  if (source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production')
+  if (deployed(source) || deployed(deploymentEnv()))
     throw new Error('the provider test fetch is for local and CI tests only');
 }
 
 /**
- * Tests only (refused when VERCEL_ENV, VERCEL or NODE_ENV=production is set):
- * the same policy, but the request goes over plain HTTP to a local stub on
- * 127.0.0.1:`stubPort`, or (with `lookup`) resolves through an injected
- * resolver so a private address can be refused without any network. The
- * URL, method, path, header, size and redirect rules are production's.
+ * Tests only (refused when VERCEL_ENV, VERCEL or NODE_ENV=production is set,
+ * in `source` or in the process's environment): the same policy, but the
+ * request goes over plain HTTP to a local stub on 127.0.0.1:`stubPort`; or
+ * over TLS to a local stub on 127.0.0.1:`tlsStub.port` that must present a
+ * certificate for api.anthropic.com issued by `tlsStub.ca` (the only option
+ * that differs from production's TLS, and only here); or (with `lookup`)
+ * resolves through an injected resolver so a private address can be refused
+ * without any network. The URL, method, path, header, size and redirect
+ * rules, and every other TLS option, are production's.
  */
 export function createProviderFetchForTests(
   key: string,
   opts: {
     stubPort?: number;
+    tlsStub?: { port: number; ca: string };
     lookup?: Lookup;
     limits?: Partial<Limits>;
   },
@@ -416,14 +489,26 @@ export function createProviderFetchForTests(
 ): ProviderFetch {
   assertNotDeployed(source);
   const limits = { ...PROVIDER_FETCH_LIMITS, ...opts.limits };
-  const transport: Transport =
-    opts.stubPort !== undefined
-      ? { kind: 'stub', port: opts.stubPort, allowAddress: (a) => a === '127.0.0.1' }
-      : {
-          kind: 'tls',
-          lookup: opts.lookup ?? (dnsLookup as unknown as Lookup),
-          allowAddress: isPublicAddress,
-        };
+  const local = (a: string) => a === '127.0.0.1';
+  let transport: Transport;
+  if (opts.stubPort !== undefined)
+    transport = { kind: 'stub', port: opts.stubPort, allowAddress: local };
+  else if (opts.tlsStub !== undefined)
+    transport = {
+      kind: 'tls',
+      lookup: (_h, _o, cb) => cb(null, [{ address: '127.0.0.1', family: 4 }]),
+      allowAddress: local,
+      port: opts.tlsStub.port,
+      tls: Object.freeze({ ...providerTlsOptions(), ca: Object.freeze([opts.tlsStub.ca]) }),
+    };
+  else
+    transport = {
+      kind: 'tls',
+      lookup: opts.lookup ?? (dnsLookup as unknown as Lookup),
+      allowAddress: isPublicAddress,
+      port: 443,
+      tls: providerTlsOptions(),
+    };
   return build(key, transport, limits);
 }
 
@@ -435,6 +520,7 @@ export function createProviderFetchForTests(
 export function observedFetch(inner: ProviderFetch, observer: FetchObserver): ProviderFetch {
   if (!isProviderFetch(inner)) throw new Error('only HOME’s provider fetch may be observed');
   const f = (async (input: string | URL | Request, init?: FetchInit) => {
+    observer.requests += 1;
     const res = await inner(input, init);
     observer.status = res.status;
     if (!res.body) return res;

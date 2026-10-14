@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   approveDestination,
   createProviderFetch,
@@ -250,9 +250,11 @@ describe('N6: sizes and time', () => {
 });
 
 describe('the seams', () => {
-  it('the production fetch takes the key only, and needs one', () => {
+  it('the production fetch takes the key only, and needs a well-formed one', () => {
     expect(createProviderFetch.length).toBe(1);
     expect(() => createProviderFetch('')).toThrow();
+    for (const bad of [`${KEY}\n`, `${KEY}\x01`, `${KEY}\0`, 'with a space key', `${KEY}é`])
+      expect(() => createProviderFetch(bad)).toThrow(/well-formed/);
   });
 
   it('the test fetch is refused anywhere deployed', () => {
@@ -276,4 +278,59 @@ describe('the seams', () => {
         expect(text).not.toContain(s);
     }
   });
+});
+
+describe('I6: a malformed key never crashes the process', () => {
+  const uncaught: unknown[] = [];
+  const trap = (e: unknown) => uncaught.push(e);
+  beforeEach(() => {
+    uncaught.length = 0;
+    process.on('uncaughtException', trap);
+  });
+  afterEach(() => {
+    process.off('uncaughtException', trap);
+    vi.useRealTimers();
+  });
+
+  // Synthetic keys with each kind of character Node refuses in a header.
+  const MALFORMED = [
+    ['a control character', 'test-only-\x01-not-a-key'],
+    ['DEL', 'test-only-\x7f-not-a-key'],
+    ['a line feed', 'test-only-\n-not-a-key'],
+    ['CR LF', 'test-only-\r\n-not-a-key'],
+    ['NUL', 'test-only-\0-not-a-key'],
+    ['a character outside Latin-1', 'test-only-\u20ac-not-a-key'],
+  ] as const;
+
+  it.each(MALFORMED)(
+    'given %s directly (bypassing env): fails closed (`auth`), arms no timer, sends nothing',
+    async (_label, bad) => {
+      vi.useFakeTimers();
+      const f = createProviderFetchForTests(bad, { stubPort: stub.port });
+      const ac = new AbortController();
+      let error: unknown;
+      try {
+        await f(MESSAGES, {
+          ...post(),
+          headers: { ...post().headers, 'x-api-key': bad },
+          signal: ac.signal,
+        });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(ProviderNetError);
+      expect((error as ProviderNetError).code).toBe('auth');
+      expect((error as ProviderNetError).sent).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      // Past the idle limit and the 40 s backstop: nothing fires, nothing throws.
+      expect(() => vi.advanceTimersByTime(PROVIDER_FETCH_LIMITS.maxCallMs + 1_000)).not.toThrow();
+      ac.abort();
+      vi.useRealTimers();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(uncaught).toEqual([]);
+      expect(stub.seen).toEqual([]);
+      const text = [String(error), JSON.stringify(error), (error as Error).message].join(' ');
+      expect(text).not.toContain('test-only');
+    },
+  );
 });

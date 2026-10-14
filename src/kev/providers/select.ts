@@ -20,9 +20,19 @@ export type KevProviderSelection = Readonly<{
 /** The scripted provider's default transcript for a local run: one short synthetic reply. */
 const LOCAL_SCRIPT = [{ kind: 'answer' as const, text: ['Scripted reply.'] }];
 
+const deployed = (s: Record<string, string | undefined>) =>
+  Boolean(s.VERCEL_ENV || s.VERCEL || s.NODE_ENV === 'production');
+
+/**
+ * `source` is a test seam (local and CI only): on a deployed process it is
+ * refused whatever it says, so a benign-looking source can never stand in
+ * for the real environment (the gate, the key, the scripted provider).
+ */
 export function selectKevProvider(
   source?: Record<string, string | undefined>,
 ): KevProviderSelection {
+  if (source && deployed(deploymentEnv()))
+    throw new Error('a configuration source is for local and CI tests only');
   const config = source ? kevConfig(source) : kevConfig();
   switch (config.status) {
     case 'on':

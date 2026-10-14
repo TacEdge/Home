@@ -25,3 +25,20 @@ export const PURGE_MAX_BATCHES = 20;
 
 /** The person's words, at most (contract §13.4). */
 export const INPUT_TEXT_MAX_CHARS = 2_000;
+
+// The cap and the reservation bound, which the bookkeeping path derives and
+// checks itself (ADR 0012 §43, minors 4 and 5): the cap from validated
+// server configuration, never from a caller; a reservation never above the
+// turn ceiling. src/kev/config.ts re-exports these.
+
+/** A turn's cost ceiling, US$1.50 in micro-US-dollars: no reservation is larger (contract §13.6). */
+export const TURN_CEILING_USD_MICROS = 1_500_000n;
+
+/** The fixed, deliberately conservative exchange rate: NZ$1.80 per US$1 (contract §13.1). */
+export const NZD_PER_USD = Object.freeze({ num: 9n, den: 5n });
+
+/** The household's monthly cap when HOME_KEV_MONTHLY_CAP_NZD is unset (O2). */
+export const DEFAULT_MONTHLY_CAP_NZD = 100;
+
+/** At this share of the cap, deep is withdrawn (D19). Percent. */
+export const DEEP_WITHDRAWN_AT_PERCENT = 80;

@@ -1,6 +1,7 @@
 import 'server-only';
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk';
-import type { TurnBudget } from '../budget';
+import { exceedsInputCap, TurnBudget } from '../budget';
+import { PROVIDER_KEY_FORMAT } from '@/lib/env';
 import { INFERENCE_GEO, LIMITS, TIERS } from '../config';
 import {
   ANTHROPIC_VERSION,
@@ -170,11 +171,17 @@ function isSpendCap(err: InstanceType<typeof Anthropic.APIError>): boolean {
   return body?.error?.details?.error_code === 'enforced_spend_limit_reached';
 }
 
-function retryAfterMs(headers: Headers | undefined): number | null {
+/**
+ * `retry-after` as HOME honours it: whole decimal seconds only, digits and
+ * nothing else (no HTTP-date, sign, exponent, hex or zero padding); anything
+ * else means no retry. (Surrounding whitespace never reaches here: HTTP
+ * parsing and the Headers class strip it.) `retry-after-ms` is never read.
+ */
+export function retryAfterMs(headers: Headers | undefined): number | null {
   const raw = headers?.get('retry-after');
   if (raw === null || raw === undefined) return null;
-  const s = Number(raw);
-  return Number.isFinite(s) && s >= 0 ? s * 1000 : Number.POSITIVE_INFINITY;
+  if (!/^(?:0|[1-9][0-9]{0,8})$/.test(raw)) return Number.POSITIVE_INFINITY;
+  return Number(raw) * 1000;
 }
 
 export function mapProviderError(err: unknown): Mapped {
@@ -268,8 +275,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<boolean> {
  */
 export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): KevProvider {
   if (!isProviderFetch(fetch)) throw new Error('the SDK only ever gets HOME’s provider fetch');
-  if (typeof apiKey !== 'string' || apiKey.length === 0)
-    throw new Error('a provider key is required');
+  if (typeof apiKey !== 'string' || !PROVIDER_KEY_FORMAT.test(apiKey))
+    throw new Error('a well-formed provider key is required');
 
   async function once(
     request: ProviderRequest,
@@ -296,9 +303,12 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
     };
     if (signal?.aborted) onOuter();
     else signal?.addEventListener('abort', onOuter, { once: true });
-    const observer: FetchObserver = { responseBytes: 0, status: null };
+    const observer: FetchObserver = { requests: 0, responseBytes: 0, status: null };
     let usage: Usage | null = null;
+    // The provider's final usage: set only once the stream completed.
+    let finalUsage: CallUsage | null = null;
     let geoRefused = false;
+    let overInput = false;
     try {
       const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
       const stream = client.messages.stream(messagesParams(request), { signal: call.signal });
@@ -318,6 +328,13 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
             call.abort();
             break;
           }
+          // The 32,000-token input cap, on the provider's own count (I4):
+          // more ends the call now, and the budget halts the attempt.
+          if (exceedsInputCap(usage)) {
+            overInput = true;
+            call.abort();
+            break;
+          }
         } else if (event.type === 'message_delta' && usage) {
           const u = event.usage;
           usage.outputTokens = Math.max(usage.outputTokens, n(u.output_tokens));
@@ -329,6 +346,7 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
         }
       }
       if (geoRefused) throw new GeoRefused();
+      if (overInput) throw new InputOverCap();
       const final = await stream.finalMessage();
       const u = final.usage;
       const known: CallUsage = Object.freeze({
@@ -338,8 +356,10 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
         cacheWriteTokens: n(u.cache_creation_input_tokens),
         inferenceGeo: usage?.inferenceGeo ?? u.inference_geo ?? null,
       });
+      finalUsage = known;
       const ms = Date.now() - started;
       if (known.inferenceGeo !== INFERENCE_GEO) throw new GeoRefused();
+      if (exceedsInputCap(known)) throw new InputOverCap();
       if (final.stop_reason === 'refusal') {
         // Recorded with its reported usage (a refusal may still bill input).
         budget.endCall(ticket, {
@@ -389,25 +409,37 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
       };
     } catch (err) {
       const ms = Date.now() - started;
-      const mapped: Mapped =
-        err instanceof GeoRefused || geoRefused
-          ? { code: 'bad_response', retryable: false, notSent: false, retryAfterMs: null }
-          : timedOut || outerAborted
-            ? { code: 'timeout', retryable: false, notSent: false, retryAfterMs: null }
-            : mapProviderError(err);
-      const partial: CallUsage | null = usage ? Object.freeze({ ...(usage as Usage) }) : null;
+      // Nothing of the call left HOME if it never entered HOME's fetch (the
+      // SDK threw, or the call was aborted, before making the request): our
+      // own observer says so, never an error's text (M-2).
+      const neverSent = observer.requests === 0;
+      const base: Mapped =
+        err instanceof InputOverCap || overInput
+          ? { code: 'too_large', retryable: false, notSent: false, retryAfterMs: null }
+          : err instanceof GeoRefused || geoRefused
+            ? { code: 'bad_response', retryable: false, notSent: false, retryAfterMs: null }
+            : timedOut || outerAborted
+              ? { code: 'timeout', retryable: false, notSent: false, retryAfterMs: null }
+              : mapProviderError(err);
+      const mapped: Mapped = neverSent ? { ...base, notSent: true } : base;
+      // Final usage when the stream completed (a geo or cap refusal after
+      // it); otherwise what message_start and the deltas reported, which is
+      // partial and charged conservatively (I2).
+      const reported: CallUsage | null =
+        finalUsage ?? (usage ? Object.freeze({ ...(usage as Usage) }) : null);
       budget.endCall(ticket, {
         model: tier.model.id,
-        usage: partial,
+        usage: reported,
         ms,
         stop: 'error',
         errorCode: mapped.code,
         notSent: mapped.notSent,
+        partial: finalUsage === null && reported !== null,
       });
       const error = new ProviderError(mapped.code, {
         attemptId: budget.attemptId,
         ms,
-        partialUsage: partial,
+        partialUsage: reported,
         retried,
       });
       const streamStarted =
@@ -423,6 +455,10 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
     kind: 'anthropic' as const,
     async run(request: ProviderRequest, options: RunOptions): Promise<ProviderResult> {
       const { budget, signal } = options;
+      // Only the attempt's own TurnBudget, on a live reservation, may carry a
+      // call: a look-alike object is refused before anything is built.
+      if (!(budget instanceof TurnBudget) || !budget.live)
+        throw new Error('a call needs its attempt’s live TurnBudget');
       if (request.tier !== budget.tier) throw new Error('a request runs on its attempt’s tier');
       const first = await once(request, budget, signal, false);
       if (first.ok) return first.result;
@@ -446,6 +482,13 @@ class GeoRefused extends Error {
   constructor() {
     super('inference_geo');
     this.name = 'GeoRefused';
+  }
+}
+
+class InputOverCap extends Error {
+  constructor() {
+    super('input_tokens');
+    this.name = 'InputOverCap';
   }
 }
 
