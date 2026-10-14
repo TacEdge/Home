@@ -45,6 +45,14 @@ export const REDACTED_KEYS = [
   'longitude',
   'elevation',
   'coordinates',
+  // Kev (M8 contract §9.5, S12): the provider key under every name it could
+  // travel by, and the parts of a model request or answer that carry the
+  // family's words: prompts, messages, the system prompt and any content.
+  'x-api-key',
+  'prompt',
+  'messages',
+  'system',
+  'content',
 ] as const;
 
 /** A field whose name contains one of these is redacted wherever the word sits. */
@@ -55,6 +63,15 @@ export const REDACTED_WORDS = [
   'password',
   'sealed',
   'feed',
+  // Kev (M8 contract §9.5): wherever these sit in a field's name.
+  'apikey',
+  'api_key',
+  'api-key',
+  'authorization',
+  'prompt',
+  'messages',
+  'system',
+  'content',
 ] as const;
 
 // Value-based scrubbing (M4 contract §4.1): whatever a field is called, a

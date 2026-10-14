@@ -68,6 +68,26 @@ const schema = z.object({
   // Open-Meteo. Refused on any deployed environment (parseEnv), and again by
   // the composition root itself.
   HOME_TEST_WEATHER: z.enum(['fake']).optional(),
+  // Kev (M8 contract §1.3, §14; ADR 0012 §37). `on` or `off` (the default);
+  // any other value stops the boot, naming the variable. Production refuses
+  // Kev while the real-data gate is closed, whatever this says (kevConfig).
+  HOME_KEV: z.enum(['on', 'off']).default('off'),
+  // The scripted provider (contract §14): local and CI runs only. Refused on
+  // any deployed environment (parseEnv), and again by kevConfig.
+  HOME_TEST_KEV: z.enum(['scripted']).optional(),
+  // The household's monthly cap in whole NZ dollars, 0 to 300 (contract
+  // §13.4, L10); unset means NZ$100 (O2); 0 pauses Kev. Anything else, such
+  // as `abc`, `301`, `12.5` or `050`, stops the boot, naming the variable.
+  HOME_KEV_MONTHLY_CAP_NZD: z
+    .string()
+    .regex(/^(0|[1-9]\d{0,2})$/, 'must be a whole number of NZ dollars, 0 to 300')
+    .transform(Number)
+    .refine((n) => n <= 300, 'must be a whole number of NZ dollars, 0 to 300')
+    .optional(),
+  // HOME_KEV_PROVIDER_KEY is deliberately not in this schema: like the
+  // weather location key, it is read only by kevConfig() below and handed
+  // to the provider's composition root, never held on `env`, never logged.
+  // ANTHROPIC_API_KEY and every other ANTHROPIC_* variable are never read.
   // HOME_LAT, HOME_LON, HOME_ELEVATION and HOME_WEATHER_LOCATION_KEY are
   // deliberately not in this schema: the home location and its key are read
   // only by weatherConfig() below, never held on `env`, and a wrong value
@@ -121,6 +141,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     throw new EnvError(
       ['HOME_TEST_WEATHER'],
       'HOME_TEST_WEATHER (the fake weather provider is for local and CI runs only)',
+    );
+  if (env.HOME_TEST_KEV && (env.VERCEL_ENV || source.VERCEL || env.NODE_ENV === 'production'))
+    throw new EnvError(
+      ['HOME_TEST_KEV'],
+      'HOME_TEST_KEV (the scripted Kev provider is for local and CI runs only)',
     );
   if ((env.HOME_TEST_TIME || env.HOME_TEST_CLOCK) && env.VERCEL_ENV)
     throw new EnvError(
@@ -417,6 +442,61 @@ export function testWeatherEnv(source: Record<string, string | undefined> = proc
     VERCEL: source.VERCEL,
     NODE_ENV: source.NODE_ENV,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Kev (M8 contract §5.4, §14; ADR 0012 §14, §37). The provider key exists
+// only inside kevConfig(): it is read here, from HOME_KEV_PROVIDER_KEY and
+// nothing else, and handed to the provider's composition root
+// (src/kev/providers/select.ts). It is never held on `env`, never logged,
+// never in an error, and the boot line names a status only.
+
+/** What Kev may run with now. Only `on` carries the key. */
+export type KevConfig =
+  | { status: 'off' }
+  | { status: 'off (gate closed)' }
+  | { status: 'no key' }
+  | { status: 'scripted' }
+  | { status: 'on'; key: string };
+
+const deployed = (source: Record<string, string | undefined>) =>
+  Boolean(source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production');
+
+/**
+ * Kev's configuration as it is now, read on every call like the gate.
+ * Production with the real-data gate closed is always `off (gate closed)`,
+ * whatever HOME_KEV says (S10). Otherwise `off` unless HOME_KEV is exactly
+ * `on`; then the scripted provider where HOME_TEST_KEV allows it (never when
+ * deployed), else the key, or `no key` (N2). Never throws.
+ */
+export function kevConfig(source: Record<string, string | undefined> = process.env): KevConfig {
+  if (source.VERCEL_ENV === 'production' && !realDataGateOpen(source))
+    return { status: 'off (gate closed)' };
+  if (source.HOME_KEV !== 'on') return { status: 'off' };
+  if (source.HOME_TEST_KEV === 'scripted') {
+    return deployed(source) ? { status: 'off' } : { status: 'scripted' };
+  }
+  const key = source.HOME_KEV_PROVIDER_KEY?.trim();
+  if (!key) return { status: 'no key' };
+  return { status: 'on', key };
+}
+
+/**
+ * Whether this process is a deployed one, with what decides it, read on each
+ * call: the guards that keep test seams (the scripted provider, the provider
+ * test fetch) out of every deployment use it.
+ */
+export function deploymentEnv(source: Record<string, string | undefined> = process.env): {
+  VERCEL_ENV?: string;
+  VERCEL?: string;
+  NODE_ENV?: string;
+} {
+  return { VERCEL_ENV: source.VERCEL_ENV, VERCEL: source.VERCEL, NODE_ENV: source.NODE_ENV };
+}
+
+/** The boot line's status (contract §14): never the key. */
+export function kevBootStatus(config: KevConfig): string {
+  return config.status;
 }
 
 let cached: Env | undefined;
