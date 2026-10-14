@@ -24,6 +24,9 @@ cp .env.example .env.local                # fill in values; never commit this fi
 #   HOME_LAT=-41.29 and HOME_LON=174.78 (weather, optional): the synthetic public point only, never a real home
 #   HOME_WEATHER_LOCATION_KEY (weather, optional): its own `openssl rand -base64 32`, never equal to another key
 #   HOME_TEST_WEATHER=fake (weather, optional): a synthetic forecast instead of calling Open-Meteo
+#   HOME_KEV=on and HOME_TEST_KEV=scripted (Kev, optional): the scripted provider; no key, nothing leaves the machine
+#   HOME_KEV_MONTHLY_CAP_NZD (Kev, optional): whole NZ dollars 0–300; unset means 100
+#   HOME_KEV_PROVIDER_KEY: never set locally; no key exists until the owner's §E items (ANTHROPIC_API_KEY is never read)
 #   HOME_ALLOWED_EMAILS: the household's addresses (or the fixture ones for a sandbox)
 #   HOME_MAIL_TRANSPORT=test              # magic links are written to a mailbox file
 pnpm db:migrate                           # applies src/db/migrations with DATABASE_URL_MIGRATE
@@ -33,6 +36,8 @@ pnpm dev                                  # http://localhost:3000
 With `HOME_MAIL_TRANSPORT=test`, sign-in links are appended to `<tmpdir>/home-test-mailbox.jsonl` (macOS: `$TMPDIR/home-test-mailbox.jsonl`; Linux: `/tmp/...`). Open the link from there.
 
 **Weather (M7).** With `HOME_LAT`, `HOME_LON` and `HOME_WEATHER_LOCATION_KEY` set, the boot line reads `[home] weather location: set` (otherwise `absent`, `invalid` or `set, key missing`; never a value). Use only the synthetic Wellington point (`-41.29`, `174.78`); a test that moves the location uses Christchurch's (`-43.53`, `172.64`). Generate the key with `openssl rand -base64 32`; HOME refuses a key shorter than 32 bytes or equal to `HOME_CREDENTIALS_KEY`, `HOME_FINGERPRINT_KEY` or another secret, and then treats weather as unconfigured. With `HOME_TEST_WEATHER=fake` a refresh stores a dry synthetic week and nothing reaches Open-Meteo; without it, a refresh (`POST /weather/refresh`, which Today and Forward Week ask for after render when the forecast is due) calls the real provider, so leave the location unset unless you mean to. `HOME_TEST_WEATHER` is refused on Vercel and under `NODE_ENV=production`. No test reaches the network: the suites set these variables themselves and use the fake provider.
+
+**Kev (M8).** The boot line reads `[home] kev: off` (the default), `scripted`, `no key`, `on` or `off (gate closed)`, never the key. Locally and in CI Kev runs only with `HOME_KEV=on` and `HOME_TEST_KEV=scripted`: the scripted provider, deterministic and offline. `HOME_TEST_KEV` is refused on Vercel and under `NODE_ENV=production`. `HOME_KEV_MONTHLY_CAP_NZD` takes a whole number of NZ dollars from 0 to 300 (0 pauses Kev; `abc`, `301` or `12.5` stop the boot). `HOME_KEV_PROVIDER_KEY` is read only by `kevConfig()` in `src/lib/env.ts` and handed to the provider adapter; it is never set locally or in CI, and no test calls the provider: the adapter's tests use a local stub through `createProviderFetchForTests`, which refuses to exist anywhere deployed. No route uses Kev yet (M8 Packages 3–4).
 
 If you already had a Docker volume from before M1.1, create the role once: `docker compose exec postgres psql -U home -d home -f /docker-entrypoint-initdb.d/20-init-app-role.sql`, then `pnpm db:migrate` again so migration `0002_app_role`'s grants apply.
 

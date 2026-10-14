@@ -87,6 +87,8 @@ See [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md). In short:
 
 *Approved in M8 Package 0 (ADR 0012, owner decision, 2026-10-13):* Kev's own transcript and usage are written by a named bookkeeping path in `src/domain/kev-bookkeeping/`, acting as the requesting adult and unreachable from tools; the provider adapter's requests go through HOME's own network policy, to `api.anthropic.com` only (ADR 0012 §14, §25).
 
+*As built in M8 Package 1b (ADR 0012 §43):* **the provider network boundary.** `api.anthropic.com` is HOME's third outbound host (after Google's calendar export and Open-Meteo), reached only by the server, only through `src/kev/providers/fetch.ts`, the fetch HOME hands the SDK (`@anthropic-ai/sdk`, pinned exactly, imported only by `src/kev/providers/anthropic.ts`). It is built on Node's `https` like `safe-fetch` (which `kev` may not import and which is unchanged), reusing `isPublicAddress`: `https://api.anthropic.com` exactly, `POST /v1/messages` and `GET /v1/models/{id}` only, everything else refused before connecting; every resolved address and the connected socket checked as public; no redirects; requests at most 1 MiB, responses at most 2 MiB counted while streaming; a 15-second idle limit and a 40-second backstop, with the turn's per-call AbortSignal honoured; a header allow-list (the key it was built with, a fixed `anthropic-version`, content type, accept, the SDK's user agent), so the SDK's `x-stainless-*` platform headers, any `authorization` or beta header, and anything `ANTHROPIC_CUSTOM_HEADERS` injects never leave HOME; closed error codes that carry no key, header or body. The SDK is constructed with every implicit source neutralised (the key from `HOME_KEV_PROVIDER_KEY` only, explicit base URL, no auth token, no profile or config file, logging off, `maxRetries: 0`), and a test traps the global fetch and Node's `https.request` to prove it never bypasses HOME's fetch. The scripted provider serves local and CI runs and is refused when deployed. No route uses any of it yet (Package 4).
+
 ### 2.4 Integration layer
 Adapters that bring outside information in. Each adapter:
 - is **read-only** in V0.1;
@@ -280,7 +282,7 @@ A single package. No monorepo tooling until there is a second deployable.
 └── scripts/                   # backup, export, one-off maintenance
 ```
 
-**Dependency rule** (enforced by lint): `app → domain, kev, trust, ui`; `kev → domain, trust`; `domain → db, trust, lib`; `integrations → domain, lib`. Nothing imports from `app`. `kev` never imports `db`. Only `src/kev/providers/*` imports an LLM SDK.
+**Dependency rule** (enforced by lint): `app → domain, kev, trust, ui`; `kev → domain, trust, lib`; `domain → db, trust, lib`; `integrations → domain, lib`. Nothing imports from `app`. `kev` never imports `db`. Only `src/kev/providers/anthropic.ts` imports an LLM SDK. *(M8 Package 1b: `kev → lib` written down to match ESLint, which always allowed it; the SDK rule narrowed from `src/kev/providers/*` to the one adapter file, subpaths included.)*
 
 ## 5. Privacy & security architecture
 
