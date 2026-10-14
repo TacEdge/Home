@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '@/db/schema';
 import { user } from '@/db/schema';
 import { captureVerbatim } from '@/domain/captures/service';
@@ -10,6 +10,7 @@ import { exportFor } from '@/domain/export/service';
 import type { KevContentV2 } from '@/domain/kev-bookkeeping/schema';
 import {
   clearConversation,
+  getSpendReport,
   getSpendStatus,
   isLiveReservation,
   purgeExpired,
@@ -28,58 +29,48 @@ import { systemActor, type UserActor } from '@/trust/actor';
 import { listAudit } from '@/trust/audit';
 import { assertTestDatabase } from '../db-guard';
 import { TEST_APP_DATABASE_URL } from '../env';
+import { clockedPool, createTestClock, dropTestClock, setTestClock } from './clock';
 import { adminDb, testDb } from './db';
 
 // Kev's bookkeeping path as home_app (M8 contract §7.2, §9.6, §9.7, §13.6;
 // matrix rows L9–L11, L13–L17, L20–L29, S5, S13, S16). Synthetic adults
-// only. Reservations and usage rows can never be deleted (triggers), so the
-// money tests run in months of their own, years ahead, on a database clock
-// the test moves (below), and nothing here depends on another suite's rows.
-//
-// Moving the database's clock without passing the application's: a
-// test-only schema, `home_test_clock`, holds a `now()` that returns a
-// stored instant (or the real one when none is set). Connections of the
-// `clocked` pool put that schema before pg_catalog in their search_path, so
-// every unqualified now() the bookkeeping path writes or compares (the
-// reservation's period and created_at, the sweep, the month, each usage
-// row's at) and the born-open trigger read the moved clock. The code under
-// test is unchanged and never receives a time from the application.
+// only. Reservations and usage rows can never be deleted (triggers), and the
+// real month is shared with suites that record usage at the real now, so
+// every test that reserves runs in a month of its own, years ahead, on a
+// database clock the test moves (./clock.ts), and nothing here depends on
+// another suite's rows.
 
 const { db, close } = testDb();
 const admin = adminDb();
 const deps = { db };
-const clockedPool = new Pool({
-  connectionString: assertTestDatabase(TEST_APP_DATABASE_URL),
-  max: 60,
-  options: '-c search_path=home_test_clock,public,pg_catalog',
-});
-clockedPool.on('connect', (c) => c.on('error', () => undefined));
-const clocked = drizzle(clockedPool, { schema, casing: 'snake_case' });
+const { pool: clockedPoolHandle, db: clocked } = clockedPool();
 const cdeps = { db: clocked };
 
-async function setClock(instant: string | null) {
-  await admin.db.execute(sql`update home_test_clock.clock set now = ${instant}::timestamptz`);
+// The household cap is derived by the bookkeeping path from the server's
+// configuration (HOME_KEV_MONTHLY_CAP_NZD, read on every call), never passed
+// by a caller (ADR 0012 §43): each test sets it as the server would, in
+// whole NZ dollars. NZ$1 = 555,556 µ$ at NZ$1.80 per US$1.
+const savedCap = process.env.HOME_KEV_MONTHLY_CAP_NZD;
+function setCapNzd(nzd: number) {
+  process.env.HOME_KEV_MONTHLY_CAP_NZD = String(nzd);
 }
+beforeEach(() => setCapNzd(300));
+afterAll(() => {
+  if (savedCap === undefined) delete process.env.HOME_KEV_MONTHLY_CAP_NZD;
+  else process.env.HOME_KEV_MONTHLY_CAP_NZD = savedCap;
+});
+/** The system-only budget report (counts and parts the adults never see; I5). */
+const report = (d: { db: typeof clocked } = cdeps) => getSpendReport(systemActor, d);
+
+const setClock = (instant: string | null) => setTestClock(admin, instant);
 
 beforeAll(async () => {
-  await admin.db.execute(
-    sql.raw(`
-    drop schema if exists home_test_clock cascade;
-    create schema home_test_clock;
-    create table home_test_clock.clock (now timestamptz);
-    insert into home_test_clock.clock values (null);
-    create function home_test_clock.now() returns timestamptz language sql stable
-      as $$ select coalesce((select c.now from home_test_clock.clock c), pg_catalog.now()) $$;
-    grant usage on schema home_test_clock to home_app;
-    grant select on home_test_clock.clock to home_app;
-    grant execute on function home_test_clock.now() to home_app;
-  `),
-  );
+  await createTestClock(admin);
 });
 afterAll(async () => {
   await setClock(null);
-  await clockedPool.end();
-  await admin.db.execute(sql.raw('drop schema if exists home_test_clock cascade'));
+  await clockedPoolHandle.end();
+  await dropTestClock(admin);
   await close();
   await admin.close();
 });
@@ -138,12 +129,18 @@ const call = (costUsdMicros: bigint, over: Record<string, unknown> = {}) => ({
 });
 /** Sweeps every stale open reservation at the clock's now (a refused reservation still sweeps). */
 async function sweep(a: UserActor, d = cdeps) {
-  const r = await reserveAttempt(
-    a,
-    { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
-    d,
-  );
-  expect(r.ok).toBe(false);
+  const prev = process.env.HOME_KEV_MONTHLY_CAP_NZD;
+  setCapNzd(0);
+  try {
+    const r = await reserveAttempt(
+      a,
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n },
+      d,
+    );
+    expect(r.ok).toBe(false);
+  } finally {
+    process.env.HOME_KEV_MONTHLY_CAP_NZD = prev;
+  }
 }
 async function reservationRow(attemptId: string) {
   const r = await admin.db.execute<{
@@ -173,11 +170,7 @@ describe('S5: who may call the six adult functions', () => {
     const calls = (a: UserActor) => [
       recordUserMessage(a, { text: 'x' }, deps),
       recordKevMessage(a, { content: kevAnswer(uuid()), tier: 'fast', model: 'm' }, deps),
-      reserveAttempt(
-        a,
-        { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n },
-        deps,
-      ),
+      reserveAttempt(a, { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n }, deps),
       settleAttempt(a, { attemptId: uuid(), conversationId: null, calls: [] }, deps),
       purgeExpired(a, deps),
       clearConversation(a, deps),
@@ -209,10 +202,12 @@ describe('S5: who may call the six adult functions', () => {
       ),
     ).toBe('not_found');
     expect(await clearConversation(alex, deps)).toEqual({ ok: true, deleted: 0 });
+    await setClock('2037-01-10T00:00:00Z');
+    await sweep(sam);
     const r = await reserveAttempt(
       sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 15n },
-      deps,
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n },
+      cdeps,
     );
     if (!r.ok) throw new Error('reserve');
     expect(
@@ -220,15 +215,17 @@ describe('S5: who may call the six adult functions', () => {
         settleAttempt(
           alex,
           { attemptId: r.reservation.attemptId, conversationId: null, calls: [] },
-          deps,
+          cdeps,
         ),
       ),
     ).toBe('not_found');
     expect((await reservationRow(r.reservation.attemptId))[0]?.status).toBe('open');
+    // Alex's attempt on Sam's attempt never revokes Sam's live handle (minor 7).
+    expect(isLiveReservation(r.reservation)).toBe(true);
     await settleAttempt(
       sam,
       { attemptId: r.reservation.attemptId, conversationId: null, calls: [] },
-      deps,
+      cdeps,
     );
   });
 });
@@ -479,13 +476,14 @@ describe('reserveAttempt and settleAttempt', () => {
         attemptId,
         tier: 'fast',
         reservedUsdMicros: attemptReservation('fast'),
-        capUsdMicros: 55_555_556n,
       },
       cdeps,
     );
     if (!r.ok) throw new Error(r.code);
     expect(isLiveReservation(r.reservation)).toBe(true);
-    expect(r.count.countedUsdMicros).toBe(665_280n);
+    // The reserving adult learns only that it was taken, never a household figure (I5).
+    expect(Object.keys(r).sort()).toEqual(['ok', 'reservation']);
+    expect((await report()).count.countedUsdMicros).toBe(665_280n);
     const s = await settleAttempt(
       sam,
       {
@@ -529,11 +527,12 @@ describe('reserveAttempt and settleAttempt', () => {
     await setClock('2033-03-10T00:00:00Z');
     await sweep(sam);
     const R = attemptReservation('fast');
-    const cap = 1_000_000n;
+    setCapNzd(2);
+    const cap = 1_111_111n; // NZ$2
     // Sam: 200,000 settled, plus one open reservation.
     const s1 = await reserveAttempt(
       sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
       cdeps,
     );
     if (!s1.ok) throw new Error(s1.code);
@@ -544,14 +543,14 @@ describe('reserveAttempt and settleAttempt', () => {
     );
     const s2 = await reserveAttempt(
       sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 100_000n, capUsdMicros: cap },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 100_000n },
       cdeps,
     );
     expect(s2.ok).toBe(true);
-    // 300,000 counted; Alex's 665,280 would make 965,280 ≤ 1,000,000: allowed.
+    // 300,000 counted; Alex's 665,280 would make 965,280 ≤ 1,111,111: allowed.
     const a1 = await reserveAttempt(
       alex,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
       cdeps,
     );
     expect(a1.ok).toBe(true);
@@ -559,12 +558,13 @@ describe('reserveAttempt and settleAttempt', () => {
     for (const who of [alex, sam]) {
       const refused = await reserveAttempt(
         who,
-        { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
+        { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
         cdeps,
       );
       expect(refused).toMatchObject({ ok: false, code: 'cap_reached' });
     }
-    const status = await getSpendStatus(sam, cap, cdeps);
+    const status = await report();
+    expect(status.capUsdMicros).toBe(cap);
     expect(status.count).toEqual({
       settledUsdMicros: 200_000n,
       openUsdMicros: 100_000n + R,
@@ -572,6 +572,12 @@ describe('reserveAttempt and settleAttempt', () => {
       countedUsdMicros: 300_000n + R,
     });
     expect(status.count.countedUsdMicros).toBeLessThanOrEqual(cap);
+    // What an adult sees: the cap and the recorded usage only.
+    expect(await getSpendStatus(alex, cdeps)).toEqual({
+      capUsdMicros: cap,
+      recordedUsdMicros: 200_000n,
+      state: 'open',
+    });
   });
 
   it('L27: a second reservation for the same attempt is a refusal outcome, never thrown; one row remains', async () => {
@@ -581,15 +587,16 @@ describe('reserveAttempt and settleAttempt', () => {
       attemptId,
       tier: 'fast' as const,
       reservedUsdMicros: 1n,
-      capUsdMicros: 10n ** 15n,
     };
-    expect((await reserveAttempt(sam, input, deps)).ok).toBe(true);
-    expect(await reserveAttempt(sam, input, deps)).toMatchObject({
+    await setClock('2037-02-10T00:00:00Z');
+    await sweep(sam);
+    expect((await reserveAttempt(sam, input, cdeps)).ok).toBe(true);
+    expect(await reserveAttempt(sam, input, cdeps)).toEqual({
       ok: false,
       code: 'duplicate_attempt',
     });
     expect(await reservationRow(attemptId)).toHaveLength(1);
-    await settleAttempt(sam, { attemptId, conversationId: null, calls: [] }, deps);
+    await settleAttempt(sam, { attemptId, conversationId: null, calls: [] }, cdeps);
   });
 
   it('L17: an open reservation 121 s old is marked unreconciled by the next, counted in full, shown and audited', async () => {
@@ -618,18 +625,15 @@ describe('reserveAttempt and settleAttempt', () => {
     const crashed = uuid();
     await reserveAttempt(
       sam,
-      { attemptId: crashed, tier: 'fast', reservedUsdMicros: 50_000n, capUsdMicros: 10n ** 12n },
+      { attemptId: crashed, tier: 'fast', reservedUsdMicros: 50_000n },
       cdeps,
     );
     await setClock('2033-04-10T00:02:00Z'); // 120 s: not yet; nothing stale, nothing audited
     const notYet = uuid();
+    setCapNzd(0);
     expect(
       await sweepRows(
-        reserveAttempt(
-          sam,
-          { attemptId: notYet, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
-          cdeps,
-        ),
+        reserveAttempt(sam, { attemptId: notYet, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
       ),
     ).toEqual([]);
     expect((await reservationRow(crashed))[0]?.status).toBe('open');
@@ -638,11 +642,7 @@ describe('reserveAttempt and settleAttempt', () => {
     await setClock('2033-04-10T00:02:01Z');
     const refused = uuid();
     const rows = await sweepRows(
-      reserveAttempt(
-        alex,
-        { attemptId: refused, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
-        cdeps,
-      ),
+      reserveAttempt(alex, { attemptId: refused, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
     );
     expect(rows).toEqual([
       {
@@ -659,7 +659,8 @@ describe('reserveAttempt and settleAttempt', () => {
     const [row] = await reservationRow(crashed);
     expect(row?.status).toBe('unreconciled');
     expect(new Date(row!.closed_at!).toISOString()).toBe('2033-04-10T00:02:01.000Z');
-    const status = await getSpendStatus(sam, 10n ** 12n, cdeps);
+    setCapNzd(300);
+    const status = await report();
     expect(status.count.unreconciledUsdMicros).toBe(50_000n);
     expect(status.unreconciledCount).toBe(1);
     // Shown in neither adult's Activity.
@@ -674,19 +675,11 @@ describe('reserveAttempt and settleAttempt', () => {
       [sam, c1],
       [alex, c2],
     ] as const)
-      await reserveAttempt(
-        who,
-        { attemptId: id, tier: 'fast', reservedUsdMicros: 7n, capUsdMicros: 10n ** 12n },
-        cdeps,
-      );
+      await reserveAttempt(who, { attemptId: id, tier: 'fast', reservedUsdMicros: 7n }, cdeps);
     await setClock('2033-04-10T00:05:00Z');
     const taken = uuid();
     const okRows = await sweepRows(
-      reserveAttempt(
-        sam,
-        { attemptId: taken, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 12n },
-        cdeps,
-      ),
+      reserveAttempt(sam, { attemptId: taken, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
     );
     expect(okRows.map((r) => [r.actor_via, r.meta])).toEqual([['system', { count: 2 }]]);
     expect((await reservationRow(taken))[0]?.status).toBe('open');
@@ -701,7 +694,7 @@ describe('reserveAttempt and settleAttempt', () => {
     const attemptId = uuid();
     const r = await reserveAttempt(
       sam,
-      { attemptId, tier: 'fast', reservedUsdMicros: 665_280n, capUsdMicros: 10n ** 12n },
+      { attemptId, tier: 'fast', reservedUsdMicros: 665_280n },
       cdeps,
     );
     expect(r.ok).toBe(true);
@@ -716,7 +709,7 @@ describe('reserveAttempt and settleAttempt', () => {
     const [row] = await reservationRow(attemptId);
     expect(row).toMatchObject({ status: 'unreconciled', settled_usd_micros: null });
     expect(await usageRows(attemptId)).toHaveLength(1);
-    const status = await getSpendStatus(sam, 10n ** 12n, cdeps);
+    const status = await report();
     expect(status.count.countedUsdMicros).toBe(665_280n + 40_000n);
     expect(status.lateSettledCount).toBe(1);
     expect(status.lateSettledUsdMicros).toBe(40_000n);
@@ -729,11 +722,7 @@ describe('reserveAttempt and settleAttempt', () => {
     await setClock('2033-06-10T00:00:00Z');
     await sweep(sam);
     const attemptId = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId, tier: 'fast', reservedUsdMicros: 10_000n, capUsdMicros: 10n ** 12n },
-      cdeps,
-    );
+    await reserveAttempt(sam, { attemptId, tier: 'fast', reservedUsdMicros: 10_000n }, cdeps);
     // The fault, injected between the inserts and the update: a trigger on
     // the reservation's update for this attempt only.
     await admin.db.execute(
@@ -766,11 +755,7 @@ describe('reserveAttempt and settleAttempt', () => {
     await setClock('2033-07-10T00:00:00Z');
     await sweep(sam);
     const attemptId = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId, tier: 'fast', reservedUsdMicros: 665_280n, capUsdMicros: 10n ** 12n },
-      cdeps,
-    );
+    await reserveAttempt(sam, { attemptId, tier: 'fast', reservedUsdMicros: 665_280n }, cdeps);
     expect(
       await settleAttempt(
         sam,
@@ -778,7 +763,7 @@ describe('reserveAttempt and settleAttempt', () => {
         cdeps,
       ),
     ).toEqual({ ok: true, late: false, settledUsdMicros: 700_000n });
-    expect((await getSpendStatus(sam, 10n ** 12n, cdeps)).count.countedUsdMicros).toBe(700_000n);
+    expect((await report()).count.countedUsdMicros).toBe(700_000n);
   });
 
   it('no usage without a reservation: settling an attempt that never reserved writes nothing', async () => {
@@ -799,29 +784,30 @@ describe('the month boundary on the database clock (L21, L22)', () => {
     await setClock('2032-10-31T10:59:59Z');
     await sweep(sam);
     const R = attemptReservation('fast');
-    const big = 10n ** 12n;
     const s = await reserveAttempt(
       sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: big },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
       cdeps,
     );
     const a = await reserveAttempt(
       alex,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: big },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
       cdeps,
     );
     if (!s.ok || !a.ok) throw new Error('reserve');
     expect((await reservationRow(s.reservation.attemptId))[0]?.period).toBe('2032-10-01');
     // 1 November, 00:00:01: room for a third only if the two were left out.
     await setClock('2032-10-31T11:00:01Z');
-    const cap = 2n * R; // the two October ones fill it exactly
+    // NZ$3 (1,666,667 µ$): room for one, or for the two October ones, never three.
+    setCapNzd(3);
+    const cap = 1_666_667n;
     const third = await reserveAttempt(
       sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
       cdeps,
     );
     expect(third).toMatchObject({ ok: false, code: 'cap_reached' });
-    let nov = await getSpendStatus(sam, cap, cdeps);
+    let nov = await report();
     expect(nov.count.countedUsdMicros).toBe(2n * R);
     // They settle at 00:00:30: their usage rows fall in November.
     await setClock('2032-10-31T11:00:30Z');
@@ -830,7 +816,7 @@ describe('the month boundary on the database clock (L21, L22)', () => {
       { attemptId: s.reservation.attemptId, conversationId: null, calls: [call(80_000n)] },
       cdeps,
     );
-    nov = await getSpendStatus(sam, cap, cdeps);
+    nov = await report();
     expect(nov.count.countedUsdMicros).toBe(80_000n + R);
     expect(nov.count.countedUsdMicros).toBeLessThanOrEqual(cap);
     await settleAttempt(
@@ -838,7 +824,7 @@ describe('the month boundary on the database clock (L21, L22)', () => {
       { attemptId: a.reservation.attemptId, conversationId: null, calls: [call(70_000n)] },
       cdeps,
     );
-    nov = await getSpendStatus(sam, cap, cdeps);
+    nov = await report();
     expect(nov.count).toMatchObject({
       settledUsdMicros: 150_000n,
       openUsdMicros: 0n,
@@ -848,36 +834,27 @@ describe('the month boundary on the database clock (L21, L22)', () => {
     expect(new Date(rows[0]!.at).toISOString()).toBe('2032-10-31T11:00:30.000Z');
     // And October no longer counts them at all (settled, usage in November).
     await setClock('2032-10-31T10:59:59Z');
-    expect((await getSpendStatus(sam, cap, cdeps)).count.countedUsdMicros).toBe(0n);
+    expect((await report()).count.countedUsdMicros).toBe(0n);
   });
 
   it('L22: unreconciled October reservations from 23:58:30 count in November; from 23:55:00 they do not; both in October', async () => {
     const sam = await adult('l22');
     await setClock('2034-10-31T10:50:00Z');
     await sweep(sam);
-    const big = 10n ** 12n;
     await setClock('2034-10-31T10:55:00Z'); // 23:55:00 NZDT
     const early = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId: early, tier: 'fast', reservedUsdMicros: 1_111n, capUsdMicros: big },
-      cdeps,
-    );
+    await reserveAttempt(sam, { attemptId: early, tier: 'fast', reservedUsdMicros: 1_111n }, cdeps);
     await setClock('2034-10-31T10:58:30Z'); // 23:58:30 NZDT
     const late = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId: late, tier: 'fast', reservedUsdMicros: 2_222n, capUsdMicros: big },
-      cdeps,
-    );
+    await reserveAttempt(sam, { attemptId: late, tier: 'fast', reservedUsdMicros: 2_222n }, cdeps);
     await setClock('2034-10-31T11:02:00Z'); // 1 November, 00:02 NZDT: both swept
     await sweep(sam);
     expect((await reservationRow(early))[0]?.status).toBe('unreconciled');
     expect((await reservationRow(late))[0]?.status).toBe('unreconciled');
-    const nov = await getSpendStatus(sam, big, cdeps);
+    const nov = await report();
     expect(nov.count.unreconciledUsdMicros).toBe(2_222n);
     await setClock('2034-10-31T10:59:00Z');
-    const oct = await getSpendStatus(sam, big, cdeps);
+    const oct = await report();
     expect(oct.count.unreconciledUsdMicros).toBe(3_333n);
   });
 });
@@ -889,16 +866,15 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
     await setClock('2035-01-10T00:00:00Z');
     await sweep(sam);
     const R = attemptReservation('fast');
+    // NZ$2 (1,111,111 µ$) in an empty month: room for one reservation, not two.
+    setCapNzd(2);
+    const cap = 1_111_111n;
     for (let round = 0; round < 10; round++) {
-      const before = (await getSpendStatus(sam, 0n, cdeps)).count.countedUsdMicros;
-      const cap = before + R + R - 1n; // room for one more, not two
+      const before = (await report()).count.countedUsdMicros;
+      expect(before).toBe(0n);
       const results = await Promise.all(
         [sam, alex].map((who) =>
-          reserveAttempt(
-            who,
-            { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
-            cdeps,
-          ),
+          reserveAttempt(who, { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R }, cdeps),
         ),
       );
       expect(
@@ -906,9 +882,16 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
         `round ${round}`,
       ).toHaveLength(1);
       expect(results.filter((r) => !r.ok)[0]).toMatchObject({ code: 'cap_reached' });
-      const after = (await getSpendStatus(sam, cap, cdeps)).count.countedUsdMicros;
+      const after = (await report()).count.countedUsdMicros;
       expect(after).toBe(before + R);
       expect(after).toBeLessThanOrEqual(cap);
+      // The winner settles with no usage, so the next round starts from empty.
+      const won = results.find((r) => r.ok) as Extract<(typeof results)[number], { ok: true }>;
+      await settleAttempt(
+        [sam, alex].find((a) => a.userId === won.reservation.userId)!,
+        { attemptId: won.reservation.attemptId, conversationId: null, calls: [] },
+        cdeps,
+      );
     }
   });
 
@@ -919,22 +902,25 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
     const settled = uuid();
     const pre = await reserveAttempt(
       adults[0]!,
-      { attemptId: settled, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 12n },
+      { attemptId: settled, tier: 'fast', reservedUsdMicros: 1n },
       cdeps,
     );
     if (!pre.ok) throw new Error('pre');
     await settleAttempt(
       adults[0]!,
-      { attemptId: settled, conversationId: null, calls: [call(123_457n)] },
+      { attemptId: settled, conversationId: null, calls: [call(236_782n)] },
       cdeps,
     );
     const R = attemptReservation('fast');
-    const cap = 123_457n + 10n * R + R / 2n; // room for ten and a half
+    // NZ$13 (7,222,222 µ$) less 236,782 settled leaves 6,985,440: ten and a half reservations.
+    setCapNzd(13);
+    const cap = 7_222_222n;
+    expect(cap - 236_782n).toBe(10n * R + R / 2n);
     const results = await Promise.all(
       Array.from({ length: 50 }, (_, i) =>
         reserveAttempt(
           adults[i % 5]!,
-          { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R, capUsdMicros: cap },
+          { attemptId: uuid(), tier: 'fast', reservedUsdMicros: R },
           cdeps,
         ),
       ),
@@ -943,8 +929,8 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
     expect(
       results.filter((r) => !r.ok).every((r) => (r as { code: string }).code === 'cap_reached'),
     ).toBe(true);
-    const status = await getSpendStatus(adults[0]!, cap, cdeps);
-    expect(status.count.countedUsdMicros).toBe(123_457n + 10n * R);
+    const status = await report();
+    expect(status.count.countedUsdMicros).toBe(236_782n + 10n * R);
     expect(status.count.countedUsdMicros).toBeLessThanOrEqual(cap);
     // Leave nothing open in this month.
     for (const r of results)
@@ -957,23 +943,28 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
   });
 
   it('L28: with the application’s clock a day ahead or behind, created_at, closed_at and at are the database’s', async () => {
-    await setClock(null);
+    // The database's clock is fixed at DB_NOW (a month of its own); the
+    // application's is a day ahead of the real time, then a day behind.
+    const DB_NOW = '2037-03-10T00:00:00Z';
+    await setClock(DB_NOW);
     const sam = await adult('l28');
+    await sweep(sam);
     for (const offset of [86_400_000, -86_400_000]) {
       vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + offset });
       try {
         const attemptId = uuid();
         const r = await reserveAttempt(
           sam,
-          { attemptId, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 15n },
-          deps,
+          { attemptId, tier: 'fast', reservedUsdMicros: 1n },
+          cdeps,
         );
         expect(r.ok).toBe(true);
-        await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(1n)] }, deps);
+        await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(1n)] }, cdeps);
         const check = await admin.db.execute<{ ok: boolean }>(sql`
-          select (abs(extract(epoch from (r.created_at - now()))) < 60
-              and abs(extract(epoch from (r.closed_at - now()))) < 60
-              and abs(extract(epoch from (u.at - now()))) < 60
+          select (r.created_at = ${DB_NOW}::timestamptz
+              and r.closed_at = ${DB_NOW}::timestamptz
+              and u.at = ${DB_NOW}::timestamptz
+              and r.period = '2037-03-01'
               and r.period = date_trunc('month', r.created_at at time zone ${env.HOME_TIMEZONE})::date) as ok
           from kev_budget_reservation r join kev_usage u on u.attempt_id = r.attempt_id
           where r.attempt_id = ${attemptId}`);
@@ -987,10 +978,11 @@ describe('concurrency (L14, L15) and the database clock (L28)', () => {
 
 describe('L20, L16: no transaction is held while the model runs; every call is settled', () => {
   it('a test provider sees no checked-out connection and no open transaction while it runs', async () => {
-    await setClock(null);
+    await setClock('2037-04-10T00:00:00Z');
     const sam = await adult('l20');
-    const pool = new Pool({ connectionString: assertTestDatabase(TEST_APP_DATABASE_URL), max: 4 });
-    const d = { db: drizzle(pool, { schema, casing: 'snake_case' }) };
+    await sweep(sam);
+    const { pool, db: l20db } = clockedPool(4);
+    const d = { db: l20db };
     const probes: { checkedOut: number; inTx: number }[] = [];
     try {
       const attemptId = uuid();
@@ -1000,7 +992,6 @@ describe('L20, L16: no transaction is held while the model runs; every call is s
           attemptId,
           tier: 'fast',
           reservedUsdMicros: attemptReservation('fast'),
-          capUsdMicros: 10n ** 15n,
         },
         d,
       );
@@ -1088,7 +1079,7 @@ describe('L20, L16: no transaction is held while the model runs; every call is s
       await expect(
         reserveAttempt(
           sam,
-          { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n },
+          { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n },
           { db: drizzle(broken, { schema, casing: 'snake_case' }) },
         ),
       ).rejects.toThrow();
@@ -1122,12 +1113,10 @@ describe('S13, S16: audit rows and the export', () => {
       deps,
     );
     const attemptId = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId, tier: 'fast', reservedUsdMicros: 5n, capUsdMicros: 10n ** 15n },
-      deps,
-    );
-    await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(424_242n)] }, deps);
+    await setClock('2037-05-10T00:00:00Z');
+    await sweep(sam);
+    await reserveAttempt(sam, { attemptId, tier: 'fast', reservedUsdMicros: 5n }, cdeps);
+    await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(424_242n)] }, cdeps);
     await clearConversation(sam, deps);
     const rows = await admin.db.execute<{
       event: string;
@@ -1171,12 +1160,10 @@ describe('S13, S16: audit rows and the export', () => {
     await recordUserMessage(sam, { text: 'export question' }, deps);
     await recordKevMessage(sam, { content: kevAnswer(uuid()), tier: 'fast', model: 'm' }, deps);
     const attemptId = uuid();
-    await reserveAttempt(
-      sam,
-      { attemptId, tier: 'fast', reservedUsdMicros: 5n, capUsdMicros: 10n ** 15n },
-      deps,
-    );
-    await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(5n)] }, deps);
+    await setClock('2037-06-10T00:00:00Z');
+    await sweep(sam);
+    await reserveAttempt(sam, { attemptId, tier: 'fast', reservedUsdMicros: 5n }, cdeps);
+    await settleAttempt(sam, { attemptId, conversationId: null, calls: [call(5n)] }, cdeps);
     const e = await exportFor(asUi(sam), {}, deps);
     expect(e.version).toBe(3);
     expect(e.records.messages.map((m) => (m.content as { v: number }).v)).toEqual([2, 2]);
@@ -1186,5 +1173,174 @@ describe('S13, S16: audit rows and the export', () => {
     expect(
       JSON.stringify(e, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)),
     ).not.toMatch(/reserved_?usd/i);
+  });
+});
+
+describe('I3: a late settlement happens once, even when two arrive together', () => {
+  async function lateAttempt(label: string, at: string) {
+    const sam = await adult(label);
+    await setClock(at);
+    await sweep(sam);
+    const attemptId = uuid();
+    const r = await reserveAttempt(
+      sam,
+      { attemptId, tier: 'fast', reservedUsdMicros: attemptReservation('fast') },
+      cdeps,
+    );
+    if (!r.ok) throw new Error(r.code);
+    // 121 s later the sweep marks it unreconciled.
+    await setClock(new Date(Date.parse(at) + 121_000).toISOString());
+    await sweep(sam);
+    expect((await reservationRow(attemptId))[0]?.status).toBe('unreconciled');
+    return { sam, attemptId, reservationId: r.reservation.reservationId };
+  }
+  const auditPairs = async (reservationId: string) =>
+    (
+      await admin.db.execute<{ event: string; n: number }>(sql`
+        select event, count(*)::int as n from audit_log
+         where subject_type = 'kev_budget_reservation' and subject_id = ${reservationId}
+           and event in ('kev_usage.record', 'kev_budget.late_settle')
+         group by event order by event`)
+    ).rows;
+
+  it('sequentially: the second is `already_settled`, writes nothing, never throws', async () => {
+    const { sam, attemptId, reservationId } = await lateAttempt('i3-seq', '2036-03-10T00:00:00Z');
+    const settle = () =>
+      settleAttempt(
+        sam,
+        { attemptId, conversationId: null, calls: [call(40_000n), call(2_000n)] },
+        cdeps,
+      );
+    expect(await settle()).toEqual({ ok: true, late: true, settledUsdMicros: 42_000n });
+    expect(await settle()).toEqual({ ok: false, code: 'already_settled' });
+    expect(await usageRows(attemptId)).toHaveLength(2);
+    expect(await auditPairs(reservationId)).toEqual([
+      { event: 'kev_budget.late_settle', n: 1 },
+      { event: 'kev_usage.record', n: 1 },
+    ]);
+    expect((await reservationRow(attemptId))[0]?.status).toBe('unreconciled');
+    const r = await report();
+    expect(r.lateSettledCount).toBe(1);
+    expect(r.lateSettledUsdMicros).toBe(42_000n);
+  });
+
+  it('concurrently, on two connections: exactly one set of rows; the other `already_settled`', async () => {
+    const { sam, attemptId, reservationId } = await lateAttempt('i3-conc', '2036-04-10T00:00:00Z');
+    const { pool: other, db: otherDb } = clockedPool(2);
+    const d2 = { db: otherDb };
+    try {
+      const results = await Promise.all(
+        [cdeps, d2, cdeps, d2].map((d) =>
+          settleAttempt(sam, { attemptId, conversationId: null, calls: [call(30_000n)] }, d),
+        ),
+      );
+      expect(results.filter((r) => r.ok)).toEqual([
+        { ok: true, late: true, settledUsdMicros: 30_000n },
+      ]);
+      expect(results.filter((r) => !r.ok)).toEqual(
+        Array(3).fill({ ok: false, code: 'already_settled' }),
+      );
+    } finally {
+      await other.end();
+    }
+    expect(await usageRows(attemptId)).toHaveLength(1);
+    expect(await auditPairs(reservationId)).toEqual([
+      { event: 'kev_budget.late_settle', n: 1 },
+      { event: 'kev_usage.record', n: 1 },
+    ]);
+  });
+
+  it('a late settlement with no calls also happens once (its audit pair is the record)', async () => {
+    const { sam, attemptId, reservationId } = await lateAttempt('i3-empty', '2036-05-10T00:00:00Z');
+    const settle = () => settleAttempt(sam, { attemptId, conversationId: null, calls: [] }, cdeps);
+    expect(await settle()).toEqual({ ok: true, late: true, settledUsdMicros: 0n });
+    expect(await settle()).toEqual({ ok: false, code: 'already_settled' });
+    expect(await auditPairs(reservationId)).toEqual([
+      { event: 'kev_budget.late_settle', n: 1 },
+      { event: 'kev_usage.record', n: 1 },
+    ]);
+  });
+});
+
+describe('minor 7: settlement revokes the live handle, even when it fails', () => {
+  it('a settlement that throws still leaves the budget unable to call; another adult can never revoke it', async () => {
+    const sam = await adult('m7');
+    const alex = await adult('m7-other');
+    await setClock('2036-06-10T00:00:00Z');
+    await sweep(sam);
+    const attemptId = uuid();
+    const r = await reserveAttempt(
+      sam,
+      { attemptId, tier: 'fast', reservedUsdMicros: attemptReservation('fast') },
+      cdeps,
+    );
+    if (!r.ok) throw new Error(r.code);
+    const budget = TurnBudget.open(r.reservation, { deadline: Date.now() + 55_000 });
+    // Alex naming Sam's attempt: not found, and Sam's handle stays live.
+    expect(
+      await code(settleAttempt(alex, { attemptId, conversationId: null, calls: [] }, cdeps)),
+    ).toBe('not_found');
+    expect(isLiveReservation(r.reservation)).toBe(true);
+    expect(budget.canCall(Date.now()).ok).toBe(true);
+    // Sam's settlement fails (a conversation that is not Sam's): it throws,
+    // writes nothing, and the handle is revoked all the same.
+    await expect(
+      settleAttempt(sam, { attemptId, conversationId: uuid(), calls: [call(5n)] }, cdeps),
+    ).rejects.toThrow();
+    expect(await usageRows(attemptId)).toEqual([]);
+    expect(isLiveReservation(r.reservation)).toBe(false);
+    expect(budget.canCall(Date.now())).toEqual({ ok: false, reason: 'reservation_closed' });
+    expect((await reservationRow(attemptId))[0]?.status).toBe('open');
+  });
+});
+
+describe('I5: the full budget report is the system’s alone', () => {
+  it('refuses every user actor, via Kev or the UI', async () => {
+    const sam = await adult('i5-report');
+    expect(await code(getSpendReport(sam, deps))).toBe('system_only');
+    expect(await code(getSpendReport(asUi(sam), deps))).toBe('system_only');
+    expect(Object.keys(await getSpendReport(systemActor, deps)).sort()).toEqual([
+      'capUsdMicros',
+      'count',
+      'lateSettledCount',
+      'lateSettledUsdMicros',
+      'openCount',
+      'unreconciledCount',
+    ]);
+  });
+
+  it('the cap comes from the server’s configuration only: unset NZ$100, invalid fails closed', async () => {
+    const sam = await adult('i5-cap');
+    await setClock('2037-07-10T00:00:00Z');
+    await sweep(sam);
+    delete process.env.HOME_KEV_MONTHLY_CAP_NZD;
+    expect((await getSpendStatus(sam, cdeps)).capUsdMicros).toBe(55_555_556n);
+    setCapNzd(120);
+    expect((await getSpendStatus(sam, cdeps)).capUsdMicros).toBe(66_666_667n);
+    process.env.HOME_KEV_MONTHLY_CAP_NZD = 'abc';
+    expect((await getSpendStatus(sam, cdeps)).capUsdMicros).toBe(0n);
+    expect(
+      await reserveAttempt(sam, { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n }, cdeps),
+    ).toEqual({ ok: false, code: 'cap_reached' });
+    // A caller-supplied cap is refused by the input schema, and so is a
+    // reservation above the turn ceiling or not above zero.
+    setCapNzd(300);
+    for (const input of [
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 15n },
+      { attemptId: uuid(), tier: 'deep', reservedUsdMicros: 1_500_001n },
+      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 0n },
+    ])
+      await expect(reserveAttempt(sam, input as never, cdeps)).rejects.toThrow();
+    const ok = await reserveAttempt(
+      sam,
+      { attemptId: uuid(), tier: 'deep', reservedUsdMicros: 1_500_000n },
+      cdeps,
+    );
+    if (!ok.ok) throw new Error(ok.code);
+    await settleAttempt(
+      sam,
+      { attemptId: ok.reservation.attemptId, conversationId: null, calls: [] },
+      cdeps,
+    );
   });
 });

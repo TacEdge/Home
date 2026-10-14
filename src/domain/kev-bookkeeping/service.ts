@@ -4,14 +4,18 @@ import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
 import { conversation, kevBudgetReservation, kevUsage, message } from '@/db/schema';
 import type { KevTier } from '@/db/schema/conversation';
-import { env } from '@/lib/env';
+import { env, kevMonthlyCapNzd } from '@/lib/env';
 import { systemActor, type Actor, type UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
+import { capState, monthlyCapUsdMicros, type CapState } from '@/trust/usage';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertFamilyWritesOpen } from '../common/guards';
 import { auditedWrite, type Deps, type DomainAudit } from '../common/write';
 import {
+  DEEP_WITHDRAWN_AT_PERCENT,
+  DEFAULT_MONTHLY_CAP_NZD,
   MESSAGE_RETENTION_DAYS,
+  NZD_PER_USD,
   PURGE_BATCH_ROWS,
   PURGE_MAX_BATCHES,
   RESERVATION_STALE_SECONDS,
@@ -270,10 +274,24 @@ export function isLiveReservation(r: unknown): r is Reservation {
   return typeof r === 'object' && r !== null && live.has(r as Reservation);
 }
 
-function revoke(attemptId: string): void {
+/** Revokes the actor's own live reservation for an attempt; another adult's is never touched. */
+function revoke(attemptId: string, userId: string): void {
   const r = liveByAttempt.get(attemptId)?.deref();
+  if (r && r.userId !== userId) return;
   if (r) live.delete(r);
   liveByAttempt.delete(attemptId);
+}
+
+/**
+ * The household's monthly cap in µ$, derived here from the server's
+ * validated configuration (HOME_KEV_MONTHLY_CAP_NZD, read on every call;
+ * unset is NZ$100) at the fixed rate, never from a caller (ADR 0012 §43). A
+ * value the boot would refuse counts as 0: Kev paused, fail closed.
+ */
+function householdCapUsdMicros(): bigint {
+  const nzd = kevMonthlyCapNzd();
+  if (nzd === null) return 0n;
+  return monthlyCapUsdMicros(nzd ?? DEFAULT_MONTHLY_CAP_NZD, NZD_PER_USD);
 }
 
 /** The month's counted total and its parts (µ$), as the cap check reads them. */
@@ -288,14 +306,15 @@ export type BudgetCount = Readonly<{
   countedUsdMicros: bigint;
 }>;
 
+/**
+ * What the reserving adult learns: whether the reservation was taken (and
+ * their own handle to it), or why not. Never a household figure: a count
+ * or amount here would change with the other adult's turns in flight
+ * (ADR 0012 §43, I5).
+ */
 export type ReserveOutcome =
-  | Readonly<{ ok: true; reservation: Reservation; count: BudgetCount; capUsdMicros: bigint }>
-  | Readonly<{
-      ok: false;
-      code: 'cap_reached' | 'duplicate_attempt';
-      count: BudgetCount | null;
-      capUsdMicros: bigint;
-    }>;
+  | Readonly<{ ok: true; reservation: Reservation }>
+  | Readonly<{ ok: false; code: 'cap_reached' | 'duplicate_attempt' }>;
 
 /**
  * The month's counted total (contract §13.6, "Which reservations count"),
@@ -344,7 +363,7 @@ async function countMonth(tx: DbOrTx): Promise<BudgetCount> {
  * a swept reservation may be the other adult's, so attributing the row to the
  * reserving adult, or showing it to the swept row's owner with the reserving
  * adult as its actor, would tell one adult about the other's turns. The
- * owner's Usage view already shows the month's unreconciled count.
+ * month's unreconciled count is the system-only report's (getSpendReport).
  */
 async function sweepStale(tx: DbOrTx): Promise<number> {
   const swept = await tx.execute<{ id: string }>(sql`
@@ -393,21 +412,14 @@ export async function reserveAttempt(
 ): Promise<ReserveOutcome> {
   assertKevAsAdult(actor);
   const data = reserveAttemptInput.parse(input);
+  const cap = householdCapUsdMicros();
   try {
     return await auditedWrite<ReserveOutcome>(actor, deps, async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${BUDGET_LOCK_KEY}, 0))`);
       await sweepStale(tx);
       const count = await countMonth(tx);
-      if (count.countedUsdMicros + data.reservedUsdMicros > data.capUsdMicros)
-        return {
-          result: {
-            ok: false,
-            code: 'cap_reached',
-            count,
-            capUsdMicros: data.capUsdMicros,
-          } as const,
-          audit: null,
-        };
+      if (count.countedUsdMicros + data.reservedUsdMicros > cap)
+        return { result: { ok: false, code: 'cap_reached' } as const, audit: null };
       const tz = env.HOME_TIMEZONE;
       const [row] = await tx
         .insert(kevBudgetReservation)
@@ -434,16 +446,7 @@ export async function reserveAttempt(
         reservedUsdMicros: data.reservedUsdMicros,
       });
       return {
-        result: {
-          ok: true,
-          reservation,
-          count: {
-            ...count,
-            openUsdMicros: count.openUsdMicros + data.reservedUsdMicros,
-            countedUsdMicros: count.countedUsdMicros + data.reservedUsdMicros,
-          },
-          capUsdMicros: data.capUsdMicros,
-        } as const,
+        result: { ok: true, reservation } as const,
         audit: {
           event: 'kev_budget.reserve',
           subjectType: 'kev_budget_reservation',
@@ -461,8 +464,7 @@ export async function reserveAttempt(
       return outcome;
     });
   } catch (e) {
-    if (isAttemptUnique(e))
-      return { ok: false, code: 'duplicate_attempt', count: null, capUsdMicros: data.capUsdMicros };
+    if (isAttemptUnique(e)) return { ok: false, code: 'duplicate_attempt' };
     throw e;
   }
 }
@@ -487,9 +489,15 @@ export type SettleOutcome =
  * If the sweep already marked it `unreconciled` (late settlement, L23), the
  * usage rows are still committed (real usage is never discarded), the
  * reservation stays `unreconciled` and keeps counting in full, and an
- * explicit `kev_budget.late_settle` audit row records the double count. With
- * no reservation of the actor's for the attempt, nothing is written
- * (NotFound): no usage exists without a reservation.
+ * explicit `kev_budget.late_settle` audit row records the double count. A
+ * late settlement happens at most once (I3): under the reservation's row
+ * lock, an `unreconciled` reservation whose attempt already has usage rows
+ * (or a `kev_budget.late_settle` row) is `already_settled`, nothing written,
+ * so two late settlements, even concurrent ones, record one set of rows.
+ * With no reservation of the actor's for the attempt, nothing is written
+ * (NotFound): no usage exists without a reservation. Whatever happens, the
+ * actor's live handle for the attempt is revoked at the end (also when
+ * settlement throws), so no further call can be made on it.
  */
 export async function settleAttempt(
   actor: UserActor,
@@ -498,7 +506,19 @@ export async function settleAttempt(
 ): Promise<SettleOutcome> {
   assertKevAsAdult(actor);
   const data = settleAttemptInput.parse(input);
-  const outcome = await auditedWrite<SettleOutcome>(actor, deps, async (tx) => {
+  try {
+    return await settleLocked(actor, data, deps);
+  } finally {
+    revoke(data.attemptId, actor.userId);
+  }
+}
+
+async function settleLocked(
+  actor: UserActor,
+  data: ReturnType<typeof settleAttemptInput.parse>,
+  deps: Deps,
+): Promise<SettleOutcome> {
+  return auditedWrite<SettleOutcome>(actor, deps, async (tx) => {
     const [reservation] = await tx
       .select({
         id: kevBudgetReservation.id,
@@ -516,6 +536,21 @@ export async function settleAttempt(
     if (!reservation) throw new NotFoundError('kev_budget_reservation');
     if (reservation.status === 'settled')
       return { result: { ok: false, code: 'already_settled' } as const, audit: null };
+    // A late settlement already recorded (I3): checked after the row lock,
+    // so a concurrent second settlement waits for the first to commit and
+    // then sees its rows (each statement reads the latest committed data).
+    // Its usage rows, or (for one with no calls) its audit row: a scan of
+    // the audit log on this rare path only (no index serves the subject).
+    if (reservation.status === 'unreconciled') {
+      const prior = await tx.execute<{ n: number }>(sql`
+        select (exists (select 1 from kev_usage where attempt_id = ${data.attemptId})
+             or exists (select 1 from audit_log
+                         where event = 'kev_budget.late_settle'
+                           and subject_type = 'kev_budget_reservation'
+                           and subject_id = ${reservation.id}))::int as n`);
+      if (Number(prior.rows[0]?.n ?? 0) > 0)
+        return { result: { ok: false, code: 'already_settled' } as const, audit: null };
+    }
     if (data.conversationId) {
       const [c] = await tx
         .select({ id: conversation.id })
@@ -572,14 +607,72 @@ export async function settleAttempt(
       audit: audits,
     };
   });
-  revoke(data.attemptId);
-  return outcome;
 }
 
 // ---------------------------------------------------------------------------
 // The spend-cap status (for the later Usage view; no UI in Package 1b).
 
+/**
+ * What any signed-in adult may see of the household's month (ADR 0005 §43's
+ * shared figure; ADR 0012 §43, I5): the cap and the month's **recorded**
+ * usage (settled `kev_usage` cost in the home-zone month), with a threshold
+ * state computed from that recorded total alone. Nothing here changes while
+ * another adult's turn is in flight: no reservation, open or unreconciled,
+ * no late settlement, no tier, no attempt, no count of anything.
+ */
 export type SpendStatus = Readonly<{
+  capUsdMicros: bigint;
+  recordedUsdMicros: bigint;
+  /** From the recorded total only: `paused` at or above the cap (or a cap of 0), `deep_withdrawn` at 80%. */
+  state: CapState;
+}>;
+
+/** The month's recorded usage, household-wide (settled `kev_usage` cost in the home-zone month). */
+async function recordedMonth(tx: DbOrTx): Promise<bigint> {
+  const tz = env.HOME_TIMEZONE;
+  const result = await tx.execute<{ settled: string }>(sql`
+    with m as (
+      select date_trunc('month', now() at time zone ${tz}) at time zone ${tz} as starts,
+             (date_trunc('month', now() at time zone ${tz}) + interval '1 month') at time zone ${tz} as ends
+    )
+    select (select coalesce(sum(u.cost_usd_micros), 0) from kev_usage u, m
+             where u.at >= m.starts and u.at < m.ends)::text as settled
+    from m`);
+  return BigInt(result.rows[0]?.settled ?? '0');
+}
+
+/**
+ * The household's month as an adult may see it (above). Any signed-in adult
+ * may read it (the cap is the household's); it names no adult and reads no
+ * content. Not gated: it writes nothing. The enforcement itself (reserve)
+ * still counts open and unreconciled reservations; this view does not.
+ */
+export async function getSpendStatus(actor: UserActor, deps: Deps = {}): Promise<SpendStatus> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  const db = deps.db ?? getDb();
+  const cap = householdCapUsdMicros();
+  const recorded = await recordedMonth(db);
+  return {
+    capUsdMicros: cap,
+    recordedUsdMicros: recorded,
+    state: capState({
+      counted: recorded,
+      cap,
+      nextFastReservation: 0n,
+      deepWithdrawnAtPercent: DEEP_WITHDRAWN_AT_PERCENT,
+    }),
+  };
+}
+
+/**
+ * The household's budget in full, for the system only (an operator or
+ * maintenance view; ADR 0012 §43, I5): what the cap counts and its parts
+ * (§13.6), and the month's open, unreconciled and late-settled reservations.
+ * These change with each adult's turns in flight, so no user actor may read
+ * them: showing any of it to an adult (the owner's Usage view, Package 4)
+ * needs the owner's explicit decision first.
+ */
+export type SpendReport = Readonly<{
   capUsdMicros: bigint;
   /** What the cap counts (settled usage + open + unreconciled, as the reservation reads it). */
   count: BudgetCount;
@@ -590,19 +683,8 @@ export type SpendStatus = Readonly<{
   lateSettledUsdMicros: bigint;
 }>;
 
-/**
- * The household's month (contract §13.6, §11.2): actual recorded usage and
- * the conservatively counted budget, kept as separate fields, with the
- * month's unreconciled and late-settled attempts. Any signed-in adult may
- * read it (the cap is the household's); it names no adult and reads no
- * content. Not gated: it writes nothing.
- */
-export async function getSpendStatus(
-  actor: UserActor,
-  capUsdMicros: bigint,
-  deps: Deps = {},
-): Promise<SpendStatus> {
-  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+export async function getSpendReport(actor: Actor, deps: Deps = {}): Promise<SpendReport> {
+  if (actor.kind !== 'system') throw new NotPermittedError('system_only');
   const db = deps.db ?? getDb();
   const tz = env.HOME_TIMEZONE;
   return db.transaction(async (tx) => {
@@ -633,7 +715,7 @@ export async function getSpendStatus(
       from m`);
     const row = result.rows[0];
     return {
-      capUsdMicros,
+      capUsdMicros: householdCapUsdMicros(),
       count,
       openCount: Number(row?.open_count ?? 0),
       unreconciledCount: Number(row?.unreconciled_count ?? 0),

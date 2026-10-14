@@ -25,6 +25,7 @@ import {
   seedFixtureFamily,
   type SeedManifest,
 } from '../fixtures/seed';
+import { clockedPool, createTestClock, dropTestClock, setTestClock } from './clock';
 import { adminDb, testDb } from './db';
 import { clearDomainRows } from './fixtures';
 
@@ -46,6 +47,11 @@ import { clearDomainRows } from './fixtures';
 const { db, close } = testDb();
 const admin = adminDb();
 const deps = { db };
+// Kev's reservations and settlements run in a month of their own on a moved
+// database clock (./clock.ts): the real month is shared with suites that
+// record usage at the real now, and the household cap counts all of it.
+const { pool: clockedHandle, db: clocked } = clockedPool(10);
+const kevDeps = { db: clocked };
 let seed: Required<SeedManifest>;
 type Adult = 'sam' | 'alex';
 const OTHER: Record<Adult, Adult> = { sam: 'alex', alex: 'sam' };
@@ -56,10 +62,15 @@ beforeAll(async () => {
   const s = await seedFixtureFamily(db);
   if (s.status !== 'seeded') throw new Error('the privacy suite needs a fresh seed');
   seed = s as Required<SeedManifest>;
+  await createTestClock(admin);
+  // Before the bookkeeping suite's months (2032 on), so its sweeps clear what this leaves open.
+  await setTestClock(admin, '2030-06-10T00:00:00Z');
 });
 afterAll(async () => {
   // Leave no seeded rows (linked people especially) for the suites after this one.
   await clearDomainRows(db);
+  await clockedHandle.end();
+  await dropTestClock(admin);
   await close();
   await admin.close();
 });
@@ -617,23 +628,21 @@ function writeCalls(own: Adult): Record<string, Call> {
           attemptId: crypto.randomUUID(),
           tier: 'fast',
           reservedUsdMicros: 1n,
-          capUsdMicros: 10n ** 15n,
         },
-        d,
+        kevDeps,
       ),
     // Via Kev, settle an attempt it reserved; anyone else, any attempt.
     'kevBookkeeping.settleAttempt': (a) => {
       const attemptId = crypto.randomUUID();
       const settle = () =>
-        kevBookkeeping.settleAttempt(a, { attemptId, conversationId: null, calls: [] }, d);
+        kevBookkeeping.settleAttempt(a, { attemptId, conversationId: null, calls: [] }, kevDeps);
       return a.via === 'kev'
         ? kevBookkeeping
-            .reserveAttempt(
-              a,
-              { attemptId, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 15n },
-              d,
-            )
-            .then(settle)
+            .reserveAttempt(a, { attemptId, tier: 'fast', reservedUsdMicros: 1n }, kevDeps)
+            .then((r) => {
+              if (!r.ok) throw new Error(`reserve: ${r.code}`);
+              return settle();
+            })
         : settle();
     },
     'kevBookkeeping.recordKevMessage': (a) =>
@@ -819,5 +828,80 @@ describe('the real-data gate in Production', () => {
     } finally {
       restore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I5 (ADR 0012 §43): the household's spend status tells one adult nothing
+// about the other's turn while it is in flight. An adult sees the cap and
+// the month's recorded usage only; open reservations, their count, tier and
+// amount, and any reservation outcome's household figures never reach them.
+
+describe('I5: one adult’s spend status never reveals the other’s turn in flight', () => {
+  it('Alex’s status before, during (Sam’s open fast and deep reservations) and after Sam’s turn differs only by Sam’s recorded usage', async () => {
+    const sam = actor('sam', 'kev');
+    const alex = actor('alex', 'kev');
+    const before = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(Object.keys(before).sort()).toEqual(['capUsdMicros', 'recordedUsdMicros', 'state']);
+
+    // Sam's turn: a fast attempt, then an escalated deep one, both open.
+    const fastId = crypto.randomUUID();
+    const deepId = crypto.randomUUID();
+    const fast = await kevBookkeeping.reserveAttempt(
+      sam,
+      { attemptId: fastId, tier: 'fast', reservedUsdMicros: 665_280n },
+      kevDeps,
+    );
+    const deep = await kevBookkeeping.reserveAttempt(
+      sam,
+      { attemptId: deepId, tier: 'deep', reservedUsdMicros: 1_500_000n },
+      kevDeps,
+    );
+    // The reserving adult's own outcome carries no household figure.
+    for (const r of [fast, deep]) {
+      expect(r.ok).toBe(true);
+      expect(Object.keys(r).sort()).toEqual(['ok', 'reservation']);
+      expect(
+        JSON.stringify(r, (_k, v: unknown) => (typeof v === 'bigint' ? String(v) : v)),
+      ).not.toMatch(/count|open|unreconciled|cap/i);
+    }
+    const during = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(during).toEqual(before);
+    // Sam sees the same as Alex: nothing about the attempt in flight.
+    expect(await kevBookkeeping.getSpendStatus(sam, kevDeps)).toEqual(before);
+
+    // Sam's turn settles: only then does Alex's view change, by the recorded usage.
+    const usage = (cost: bigint, tier: 'fast' | 'deep') => ({
+      tier,
+      model: 'fixture-model',
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsdMicros: cost,
+      escalated: tier === 'deep',
+    });
+    await kevBookkeeping.settleAttempt(
+      sam,
+      { attemptId: fastId, conversationId: null, calls: [usage(12_345n, 'fast')] },
+      kevDeps,
+    );
+    await kevBookkeeping.settleAttempt(
+      sam,
+      { attemptId: deepId, conversationId: null, calls: [usage(54_321n, 'deep')] },
+      kevDeps,
+    );
+    const after = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(after.capUsdMicros).toBe(before.capUsdMicros);
+    expect(after.recordedUsdMicros - before.recordedUsdMicros).toBe(12_345n + 54_321n);
+    expect(after.state).toBe(before.state);
+  });
+
+  it('the system-only report, with the open count, refuses both adults however they ask', async () => {
+    for (const a of ADULTS)
+      for (const via of ['ui', 'kev'] as const)
+        expect(await outcome(kevBookkeeping.getSpendReport(actor(a, via), kevDeps))).toBe(
+          'system_only',
+        );
   });
 });

@@ -3,7 +3,7 @@ import { KEV_TIERS, type KevTier } from '@/db/schema/conversation';
 
 export { KEV_TIERS, type KevTier };
 import { recordId } from '../common/inputs';
-import { INPUT_TEXT_MAX_CHARS } from './constants';
+import { INPUT_TEXT_MAX_CHARS, TURN_CEILING_USD_MICROS } from './constants';
 
 // Message content v2 (M8 contract §7.6) and the bookkeeping path's inputs.
 // Application schemas only: the database checks that content is an object
@@ -87,7 +87,12 @@ export const KEV_ERROR_CODES = [
   'cap_reached',
 ] as const;
 
-/** Why a provider call stopped: a closed code, never provider text (src/kev/providers/types.ts). */
+/**
+ * Why a provider call stopped: a closed code, never provider text
+ * (src/kev/providers/types.ts). `partial`: the call ended without the
+ * provider's final usage, so its tokens are what had been reported and its
+ * cost the conservative charge (ADR 0012 §43, I2).
+ */
 export const CALL_STOP_CODES = [
   'end_turn',
   'tool_use',
@@ -97,6 +102,7 @@ export const CALL_STOP_CODES = [
   'other',
   'refusal',
   'error',
+  'partial',
 ] as const;
 
 const isoInstant = z.iso.datetime({ offset: true });
@@ -210,10 +216,15 @@ export const reserveAttemptInput = z
   .object({
     attemptId: z.uuid(),
     tier: z.enum(KEV_TIERS),
-    /** The attempt's maximum permitted exposure (src/trust/usage.ts). */
-    reservedUsdMicros: micros.refine((v) => v > 0n, 'must be positive'),
-    /** The household's monthly cap, from HOME_KEV_MONTHLY_CAP_NZD at the fixed rate. */
-    capUsdMicros: micros,
+    /**
+     * The attempt's maximum permitted exposure (src/trust/usage.ts): above
+     * zero and never above the turn's US$1.50 ceiling. The household's cap
+     * is not an input: the bookkeeping path derives it from the server's
+     * configuration (HOME_KEV_MONTHLY_CAP_NZD).
+     */
+    reservedUsdMicros: micros
+      .refine((v) => v > 0n, 'must be positive')
+      .refine((v) => v <= TURN_CEILING_USD_MICROS, 'must not pass the turn ceiling'),
   })
   .strict();
 export type ReserveAttemptInput = z.input<typeof reserveAttemptInput>;
