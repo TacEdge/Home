@@ -5,7 +5,7 @@ import type { DbOrTx } from '@/db/create';
 import { conversation, kevBudgetReservation, kevUsage, message } from '@/db/schema';
 import type { KevTier } from '@/db/schema/conversation';
 import { env } from '@/lib/env';
-import type { Actor, UserActor } from '@/trust/actor';
+import { systemActor, type Actor, type UserActor } from '@/trust/actor';
 import { recordAudit } from '@/trust/audit';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertFamilyWritesOpen } from '../common/guards';
@@ -334,6 +334,38 @@ async function countMonth(tx: DbOrTx): Promise<BudgetCount> {
   };
 }
 
+/**
+ * The sweep (contract §13.6): every `open` reservation older than 120 s
+ * becomes `unreconciled`, counted in full and never released. It runs in the
+ * reserving adult's transaction, whether that reservation is then taken or
+ * refused, and is audited there (CLAUDE.md rule 8) by one structural
+ * `kev_budget.sweep` row with the count only, when anything was swept. The
+ * row is the system's and private to no one, like `message.retention_purge`:
+ * a swept reservation may be the other adult's, so attributing the row to the
+ * reserving adult, or showing it to the swept row's owner with the reserving
+ * adult as its actor, would tell one adult about the other's turns. The
+ * owner's Usage view already shows the month's unreconciled count.
+ */
+async function sweepStale(tx: DbOrTx): Promise<number> {
+  const swept = await tx.execute<{ id: string }>(sql`
+    update kev_budget_reservation set status = 'unreconciled', closed_at = now()
+    where status = 'open'
+      and created_at < now() - make_interval(secs => ${RESERVATION_STALE_SECONDS})
+    returning id`);
+  const n = swept.rows.length;
+  if (n > 0)
+    await recordAudit(
+      systemActor,
+      {
+        event: 'kev_budget.sweep',
+        meta: { count: n },
+        snapshot: { visibility: 'private', visibleToUserId: null },
+      },
+      { db: tx },
+    );
+  return n;
+}
+
 const isAttemptUnique = (e: unknown): boolean => {
   for (let x: unknown = e, i = 0; x && typeof x === 'object' && i < 5; i++) {
     const c = x as { code?: string; constraint?: string; cause?: unknown };
@@ -364,10 +396,7 @@ export async function reserveAttempt(
   try {
     return await auditedWrite<ReserveOutcome>(actor, deps, async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${BUDGET_LOCK_KEY}, 0))`);
-      await tx.execute(sql`
-        update kev_budget_reservation set status = 'unreconciled', closed_at = now()
-        where status = 'open'
-          and created_at < now() - make_interval(secs => ${RESERVATION_STALE_SECONDS})`);
+      await sweepStale(tx);
       const count = await countMonth(tx);
       if (count.countedUsdMicros + data.reservedUsdMicros > data.capUsdMicros)
         return {

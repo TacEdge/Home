@@ -592,8 +592,27 @@ describe('reserveAttempt and settleAttempt', () => {
     await settleAttempt(sam, { attemptId, conversationId: null, calls: [] }, deps);
   });
 
-  it('L17: an open reservation 121 s old is marked unreconciled by the next, counted in full and shown', async () => {
+  it('L17: an open reservation 121 s old is marked unreconciled by the next, counted in full, shown and audited', async () => {
     const sam = await adult('l17');
+    const alex = await adult('l17-other');
+    /** The sweep's audit rows written by `p`. */
+    const sweepRows = async (p: Promise<unknown>) => {
+      const since = (
+        await admin.db.execute<{ t: string }>(sql`select clock_timestamp()::text as t`)
+      ).rows[0]!.t;
+      await p;
+      return (
+        await admin.db.execute<{
+          actor_user_id: string | null;
+          actor_via: string;
+          subject_type: string | null;
+          meta: unknown;
+          visibility: string;
+          visible_to_user_id: string | null;
+        }>(sql`select actor_user_id, actor_via, subject_type, meta, visibility, visible_to_user_id
+               from audit_log where event = 'kev_budget.sweep' and at > ${since}::timestamptz`)
+      ).rows;
+    };
     await setClock('2033-04-10T00:00:00Z');
     await sweep(sam);
     const crashed = uuid();
@@ -602,22 +621,77 @@ describe('reserveAttempt and settleAttempt', () => {
       { attemptId: crashed, tier: 'fast', reservedUsdMicros: 50_000n, capUsdMicros: 10n ** 12n },
       cdeps,
     );
-    await setClock('2033-04-10T00:02:00Z'); // 120 s: not yet
-    await reserveAttempt(
-      sam,
-      { attemptId: uuid(), tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
-      cdeps,
-    );
+    await setClock('2033-04-10T00:02:00Z'); // 120 s: not yet; nothing stale, nothing audited
+    const notYet = uuid();
+    expect(
+      await sweepRows(
+        reserveAttempt(
+          sam,
+          { attemptId: notYet, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
+          cdeps,
+        ),
+      ),
+    ).toEqual([]);
     expect((await reservationRow(crashed))[0]?.status).toBe('open');
-    await setClock('2033-04-10T00:02:01Z'); // 121 s
-    await sweep(sam);
+    // 121 s, on the refused (cap_reached) path: swept and audited once; the
+    // refused attempt itself writes no reservation.
+    await setClock('2033-04-10T00:02:01Z');
+    const refused = uuid();
+    const rows = await sweepRows(
+      reserveAttempt(
+        alex,
+        { attemptId: refused, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 0n },
+        cdeps,
+      ),
+    );
+    expect(rows).toEqual([
+      {
+        actor_user_id: null,
+        actor_via: 'system',
+        subject_type: null,
+        meta: { count: 1 },
+        visibility: 'private',
+        visible_to_user_id: null,
+      },
+    ]);
+    expect(await reservationRow(refused)).toEqual([]);
+    expect(await reservationRow(notYet)).toEqual([]);
     const [row] = await reservationRow(crashed);
     expect(row?.status).toBe('unreconciled');
     expect(new Date(row!.closed_at!).toISOString()).toBe('2033-04-10T00:02:01.000Z');
     const status = await getSpendStatus(sam, 10n ** 12n, cdeps);
     expect(status.count.unreconciledUsdMicros).toBe(50_000n);
     expect(status.unreconciledCount).toBe(1);
-    // Never released: settling it now is a late settlement, below.
+    // Shown in neither adult's Activity.
+    for (const a of [sam, alex])
+      expect(
+        (await listAudit(asUi(a), { limit: 200 }, deps)).rows.map((r) => r.event),
+      ).not.toContain('kev_budget.sweep');
+    // The success path: two stale reservations swept by a reservation that is taken.
+    const c1 = uuid();
+    const c2 = uuid();
+    for (const [who, id] of [
+      [sam, c1],
+      [alex, c2],
+    ] as const)
+      await reserveAttempt(
+        who,
+        { attemptId: id, tier: 'fast', reservedUsdMicros: 7n, capUsdMicros: 10n ** 12n },
+        cdeps,
+      );
+    await setClock('2033-04-10T00:05:00Z');
+    const taken = uuid();
+    const okRows = await sweepRows(
+      reserveAttempt(
+        sam,
+        { attemptId: taken, tier: 'fast', reservedUsdMicros: 1n, capUsdMicros: 10n ** 12n },
+        cdeps,
+      ),
+    );
+    expect(okRows.map((r) => [r.actor_via, r.meta])).toEqual([['system', { count: 2 }]]);
+    expect((await reservationRow(taken))[0]?.status).toBe('open');
+    // Never released: settling a swept one now is a late settlement, below.
+    await settleAttempt(sam, { attemptId: taken, conversationId: null, calls: [] }, cdeps);
   });
 
   it('L23: a late settlement records its usage, never reopens the reservation, and is counted twice, visibly', async () => {

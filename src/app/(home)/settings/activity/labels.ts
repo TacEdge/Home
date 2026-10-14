@@ -54,6 +54,7 @@ const EXACT: Record<string, string> = {
   'kev_usage.record': 'Kev ran',
   'kev_budget.reserve': 'Kev set aside spending for an answer',
   'kev_budget.late_settle': 'Kev’s spending recorded late, and counted twice',
+  'kev_budget.sweep': 'Unfinished Kev answers counted in full',
   'conversation.purge': 'Old messages with Kev removed',
   'conversation.clear': 'A conversation with Kev cleared',
   'message.retention_purge': 'Old messages with Kev removed',

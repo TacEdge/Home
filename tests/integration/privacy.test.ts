@@ -704,6 +704,11 @@ describe('Kev and the system cannot write anywhere in the M2 domain', () => {
           expect(r, name).toBe('resolved');
           // Only its own structural rows, as the adult via Kev, private to them.
           for (const row of rows) {
+            // A reservation's sweep of stale reservations is the system's, private to no one.
+            if (row.event === 'kev_budget.sweep') {
+              expect(row).toMatchObject({ actor_via: 'system', visible_to_user_id: null });
+              continue;
+            }
             expect(BOOKKEEPING_EVENTS.has(row.event), `${name}: ${row.event}`).toBe(true);
             expect(row).toMatchObject({
               actor_via: 'kev',
