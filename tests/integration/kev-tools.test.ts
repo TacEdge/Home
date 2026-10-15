@@ -22,6 +22,7 @@ import {
   SAT,
   SUN,
   THU,
+  timed,
   writeForecast,
   ZONE,
   type KevFixture,
@@ -250,6 +251,50 @@ describe('T3–T14: each tool on the fixture', () => {
       (await data<C>(f.kev.sam, 'get_conflicts', { from: '2026-10-08', to: '2026-10-13' }))
         .conflicts,
     ).toEqual([]);
+  });
+
+  it('T4: get_conflicts ends no later than today + 89, the last day the read covers; that day’s conflicts are found; today + 90 is refused, never cut', async () => {
+    type C = { conflicts: { person: { ref: { id: string } }; when: string }[]; count: number };
+    const last = '2027-01-11'; // today + 89
+    const beyond = '2027-01-12'; // today + 90
+    const made = [
+      await createEventWithPeople(
+        f.h.sam,
+        { title: 'Edge one', kind: 'other', time: timed(at(last, '10:00'), at(last, '11:00')) },
+        [{ personId: f.id.isla, role: 'attending' }],
+        deps,
+      ),
+      await createEventWithPeople(
+        f.h.sam,
+        { title: 'Edge two', kind: 'other', time: timed(at(last, '10:30'), at(last, '11:30')) },
+        [{ personId: f.id.isla, role: 'attending' }],
+        deps,
+      ),
+    ];
+    try {
+      const edge = await data<C>(f.kev.sam, 'get_conflicts', { from: last, to: last });
+      expect(edge.conflicts.map((c) => [c.person.ref.id, c.when])).toEqual([[f.id.isla, last]]);
+      const wide = await data<C>(f.kev.sam, 'get_conflicts', { from: THU, to: last });
+      expect(wide.conflicts.some((c) => c.when === last)).toBe(true);
+      for (const input of [
+        { from: beyond, to: beyond },
+        { from: last, to: beyond },
+        { from: '2026-10-20', to: beyond },
+      ]) {
+        const out = await call(f.kev.sam, 'get_conflicts', input);
+        expect(out.result, JSON.stringify(input)).toEqual({ ok: false, code: 'out_of_range' });
+        expect(out.content).toBe('{"error":"out_of_range"}');
+      }
+    } finally {
+      for (const e of made) await archiveEvent(f.h.sam, e.id, deps);
+    }
+  });
+
+  it('T6: get_tasks due_before is deliberately bounded for M8: today + 90 is accepted, today + 91 and 8 days back are refused', async () => {
+    expect(await code(f.kev.sam, 'get_tasks', { due_before: '2027-01-12' })).toBe('ok');
+    expect(await code(f.kev.sam, 'get_tasks', { due_before: '2026-10-07' })).toBe('ok');
+    for (const due_before of ['2027-01-13', '2026-10-06'])
+      expect(await code(f.kev.sam, 'get_tasks', { due_before }), due_before).toBe('out_of_range');
   });
 
   it('T5: get_insights forward_week lists Nana Jo’s birthday for Sam; once Sam dismisses it, it is absent for Sam and Alex’s is unchanged', async () => {

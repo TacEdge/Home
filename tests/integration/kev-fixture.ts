@@ -81,7 +81,7 @@ export type KevFixture = {
   >;
 };
 
-const timed = (start: Date, end: Date) => ({
+export const timed = (start: Date, end: Date) => ({
   allDay: false as const,
   startsAt: start.toISOString(),
   endsAt: end.toISOString(),
