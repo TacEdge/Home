@@ -523,7 +523,7 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
     expect: {
       outcome: 'answer',
       toolsCalled: ['get_calendar_health', 'search'],
-      shows: ['The calendar “Family calendar” is up to date. Last updated today, 06:58.'],
+      shows: ['The calendar “Family calendar” is up to date. Last updated 5 min ago.'],
     },
   },
   {

@@ -110,12 +110,13 @@ const KEV_VERBS = new Set(
   arranged confirmed reserved shared forwarded copied stored tracked flagged`.split(/\s+/),
 );
 
-/** Words a record's own text shares with ordinary prose: never a reason to refuse. */
+/** Words a record's own text shares with ordinary prose (and HOME's own nouns): never a reason to refuse. */
 const COMMON = words(`the and for with from that this these those what when where which who how why
   are was were has have had been being its it's into onto over under after before about above
   below again also here there then than them they your you our out off one not but all any can may
   might could would should will just like look looks looking worth still even back next last time
-  thing things stuff bit lot way side some more most much very well good great new old big small`);
+  thing things stuff bit lot way side some more most much very well good great new old big small
+  calendar calendars task tasks project projects event events note notes forecast list lists`);
 
 /** The words before which "one" stands for a thing, not a number. */
 const ONE_AS_THING = new Set([

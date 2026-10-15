@@ -60,8 +60,20 @@ const sse =
     res.end(body);
   };
 const usage = { input_tokens: 2_000, cache_creation_input_tokens: 0 };
-const answerJson = (say: string, cites: unknown[]) =>
-  JSON.stringify({ say: { text: say, cites }, blocks: [], decline: null });
+/** An answer plan (owner amendment, ADR 0012 §46): a lead and the records chosen, by ref. */
+const planOf = (lead: string, refs: { type: string; id: string; at?: string }[]) => ({
+  lead,
+  facts: refs.map((r) => ({
+    kind: r.type,
+    ref: { type: r.type, id: r.id, at: r.at ?? null },
+    show: [],
+    scope: null,
+  })),
+  view: null,
+  decline: null,
+});
+const answerJson = (lead: string, refs: { type: string; id: string; at?: string }[]) =>
+  JSON.stringify(planOf(lead, refs));
 
 beforeAll(async () => {
   for (const k of WEATHER_VARIABLES) delete process.env[k];
@@ -117,7 +129,7 @@ describe('N15: the grow-only request, on the wire', () => {
       ),
       sse(
         messageStart(FAST, usage) +
-          textBlock(0, answerJson('Football on Saturday at 9.', [football])) +
+          textBlock(0, answerJson('Here’s {when}.', [football])) +
           messageEnd('end_turn', 60),
       ),
     );
@@ -212,7 +224,7 @@ describe('N15: the grow-only request, on the wire', () => {
       content: { type: string; text: string }[];
     };
     expect(note.role).toBe('user');
-    expect(note.content.at(-1)!.text).toContain('time.unsupported in the say sentence');
+    expect(note.content.at(-1)!.text).toContain('prose.number in the lead');
     expect(note.content.at(-1)!.text).not.toContain('at 4');
 
     // Nothing provider-shaped was stored (N13).
@@ -223,11 +235,7 @@ describe('N15: the grow-only request, on the wire', () => {
 
   it('I-2 on the wire, the answer-tool path: after the last round and for the regeneration, tool_choice stays auto with the same tools, and the answer tool answers', async () => {
     const football = { type: 'event', id: f.id.football, at: `${SAT}T09:00:00+13:00` };
-    const answerInput = (say: string) => ({
-      say: { text: say, cites: [football] },
-      blocks: [],
-      decline: null,
-    });
+    const answerInput = (lead: string) => planOf(lead, [football]);
     stub.seen.length = 0;
     stub.counts.length = 0;
     stub.queue.push(
@@ -254,7 +262,7 @@ describe('N15: the grow-only request, on the wire', () => {
       ),
       sse(
         messageStart(FAST, usage) +
-          toolBlock(0, 'toolu_late_5', 'answer', answerInput('Football on Saturday at 9.')) +
+          toolBlock(0, 'toolu_late_5', 'answer', answerInput('Here’s {when}.')) +
           messageEnd('tool_use', 60),
       ),
     );
@@ -276,7 +284,7 @@ describe('N15: the grow-only request, on the wire', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'answer' });
     expect(events.find((e) => e.type === 'say')).toEqual({
       type: 'say',
-      text: 'Football on Saturday at 9.',
+      text: 'Here’s Saturday 17 October.',
     });
     expect(stub.seen).toHaveLength(5);
     expect(stub.counts).toHaveLength(5);
@@ -296,7 +304,7 @@ describe('N15: the grow-only request, on the wire', () => {
     const lastUser = (b: Record<string, unknown>) => bytes((b.messages as unknown[]).at(-1));
     // After the third round, HOME asks for the answer tool; the regeneration says so again.
     expect(lastUser(bodies[3]!)).toContain('Give your answer now with the answer tool');
-    expect(lastUser(bodies[4]!)).toContain('time.unsupported in the say sentence');
+    expect(lastUser(bodies[4]!)).toContain('prose.number in the lead');
     expect(lastUser(bodies[4]!)).toContain('Give your answer now with the answer tool');
   });
 });

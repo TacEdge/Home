@@ -64,40 +64,54 @@ export async function clockNow(admin: Admin): Promise<string> {
 
 const wireRef = (r: Ref) => ({ type: r.type, id: r.id, at: r.at ?? null });
 
-/** A final answer in HOME's answer format (the flat, structured-output shape). */
-export function answer(
-  say: string,
-  cites: Ref[],
-  blocks: { kind: 'fact' | 'view'; text: string; cites: Ref[] }[] = [],
-): ScriptStep {
-  return {
-    kind: 'answer',
-    text: [
-      JSON.stringify({
-        say: { text: say, cites: cites.map(wireRef) },
-        blocks: blocks.map((b) => ({ ...b, cites: b.cites.map(wireRef) })),
-        decline: null,
-      }),
-    ],
-  };
+/** An absence's or count's scope, as the plan carries it (owner amendment, ADR 0012 §46). */
+export type ScopeIn = {
+  of?: 'agenda' | 'conflicts' | 'forecast' | 'search';
+  from?: string | null;
+  to?: string | null;
+  people?: string[];
+  part?: 'morning' | 'afternoon' | 'evening' | null;
+  else?: boolean;
+};
+/** A fact block: a record by its ref (its usual fields), with `show`, or an absence or count. */
+export type FactIn = Ref | { ref: Ref; show: string[] } | { absence: ScopeIn } | { count: ScopeIn };
+
+const scopeOf = (s: ScopeIn) => ({
+  of: s.of ?? 'agenda',
+  from: s.from ?? null,
+  to: s.to ?? null,
+  people: s.people ?? [],
+  part: s.part ?? null,
+  else: s.else ?? false,
+});
+function factOf(f: FactIn): Record<string, unknown> {
+  if ('absence' in f) return { kind: 'absence', ref: null, show: [], scope: scopeOf(f.absence) };
+  if ('count' in f) return { kind: 'count', ref: null, show: [], scope: scopeOf(f.count) };
+  if ('show' in f) return { kind: f.ref.type, ref: wireRef(f.ref), show: f.show, scope: null };
+  return { kind: f.type, ref: wireRef(f), show: [], scope: null };
 }
 
-/** The same answer as the strict `answer` tool's input (G7's fallback path). */
+/** A final answer plan (the flat, structured-output shape): a fact-free lead, the facts chosen, a view. */
 export function answerInput(
-  say: string,
-  cites: Ref[],
-  blocks: { kind: 'fact' | 'view'; text: string; cites: Ref[] }[] = [],
+  lead: string,
+  facts: FactIn[] = [],
+  view: { text: string; about: number[] } | null = null,
 ): Record<string, unknown> {
-  return {
-    say: { text: say, cites: cites.map(wireRef) },
-    blocks: blocks.map((b) => ({ ...b, cites: b.cites.map(wireRef) })),
-    decline: null,
-  };
+  return { lead, facts: facts.map(factOf), view, decline: null };
+}
+
+/** The same plan as the structured-output text. */
+export function answer(
+  lead: string,
+  facts: FactIn[] = [],
+  view: { text: string; about: number[] } | null = null,
+): ScriptStep {
+  return { kind: 'answer', text: [JSON.stringify(answerInput(lead, facts, view))] };
 }
 
 export const decline = (code: string): ScriptStep => ({
   kind: 'answer',
-  text: [JSON.stringify({ say: null, blocks: [], decline: code })],
+  text: [JSON.stringify({ lead: null, facts: [], view: null, decline: code })],
 });
 
 export const plain = (text: string): ScriptStep => ({ kind: 'answer', text: [text] });
