@@ -84,7 +84,7 @@ async function failure(p: Promise<unknown>) {
   throw new Error('expected a ProviderError');
 }
 /** No model call was made and nothing was charged. */
-function noCall(b: InstanceType<typeof TurnBudget>) {
+function noCall(b: ReturnType<typeof TurnBudget.open>) {
   expect(stub.seen).toHaveLength(0);
   expect(b.modelCalls).toBe(0);
   expect(b.calls).toEqual([]);
