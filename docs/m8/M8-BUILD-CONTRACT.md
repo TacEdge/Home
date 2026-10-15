@@ -1160,7 +1160,7 @@ What leaves HOME is §5.5's table, per turn, and nothing else. Two rules decide 
 
 ADR 0005 §39 left open how Kev records its own transcript and usage, "an exception like `captureVerbatim`, or recording as the person", and forbade a silent relaxation. M8 decides: **a named, narrow path, acting as the requesting adult.**
 
-- **Where:** `src/domain/kev-bookkeeping/`, six functions acting as the adult and one system function (*a seventh adult function added in the Package 3 review, owner-approved 2026-10-15, I-5: `recordTurnEnd(actor, {outcome})`, one structural `kev.turn_end` audit row private to the adult, no message, so a turn that stores no Kev message releases the one-turn guard at once*):
+- **Where:** `src/domain/kev-bookkeeping/`, six functions acting as the adult and one system function (*a seventh adult function added in the Package 3 review, approved by the owner 2026-10-15 as the seventh and last (server-owned, actor-bound, content-free, private, audited, never a model tool; S5, S11), I-5: `recordTurnEnd(actor, {outcome})`, one structural `kev.turn_end` audit row private to the adult, no message, so a turn that stores no Kev message releases the one-turn guard at once*):
   - `recordUserMessage(actor, text, focus?)`: the person's words, verbatim, before any model call, under the conversation row lock (one turn at a time);
   - `recordKevMessage(actor, content, tier, model)`;
   - `reserveAttempt(actor, attempt)`: the attempt's reservation, under the budget lock (§13.6);
