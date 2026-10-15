@@ -100,18 +100,55 @@ async function lockConversation(tx: DbOrTx, actor: UserActor) {
   return row ?? null;
 }
 
-/** A person's message under 70 seconds old with no Kev reply after it: a turn is in flight. */
-async function turnInFlight(tx: DbOrTx, conversationId: string): Promise<boolean> {
-  const [latest] = await tx
-    .select({
-      role: message.role,
-      recent: sql<boolean>`${message.createdAt} > now() - make_interval(secs => ${TURN_IN_FLIGHT_SECONDS})`,
-    })
-    .from(message)
-    .where(eq(message.conversationId, conversationId))
-    .orderBy(desc(message.createdAt), desc(message.id))
-    .limit(1);
-  return latest?.role === 'user' && latest.recent === true;
+/** The structural marker a turn that stores no Kev message ends with (I-5). */
+export const TURN_END_EVENT = 'kev.turn_end';
+
+/**
+ * Whether a turn is in flight in the adult's conversation (contract §7.2,
+ * L12; corrected in the Package 3 review, I-5 and M-6): the latest message
+ * is the person's, under 70 seconds old, and no Kev message or turn-end
+ * marker (`kev.turn_end`, written when a turn ends without storing Kev's
+ * message) follows it; or the adult has an `open` budget reservation
+ * younger than the sweep's 120 seconds (an attempt really running, even
+ * one that has outlived the 70 seconds).
+ */
+async function turnInFlight(tx: DbOrTx, conversationId: string, userId: string): Promise<boolean> {
+  // The marker is compared with the person's own `message.add` audit row,
+  // audit time with audit time (the column default's clock, pg_catalog.now(),
+  // which also bounds the scan by the `at` index): never with a message's
+  // time, which is written from the session's now().
+  const result = await tx.execute<{ in_flight: boolean }>(sql`
+    with latest as (
+      select role, created_at from message
+       where conversation_id = ${conversationId}
+       order by created_at desc, id desc limit 1
+    ),
+    asked as (
+      select max(b.at) as at from audit_log b
+       where b.at > pg_catalog.now() - make_interval(secs => ${RESERVATION_STALE_SECONDS})
+         and b.event = 'message.add'
+         and b.subject_type = 'conversation'
+         and b.subject_id = ${conversationId}
+         and b.meta ->> 'role' = 'user'
+    )
+    select (
+      exists (
+        select 1 from latest l
+         where l.role = 'user'
+           and l.created_at > now() - make_interval(secs => ${TURN_IN_FLIGHT_SECONDS})
+           and not exists (
+             select 1 from audit_log a, asked
+              where a.at >= asked.at
+                and a.event = ${TURN_END_EVENT}
+                and a.subject_type = 'conversation'
+                and a.subject_id = ${conversationId}
+                and a.actor_user_id = ${userId}))
+      or exists (
+        select 1 from kev_budget_reservation r
+         where r.user_id = ${userId} and r.status = 'open'
+           and r.created_at > now() - make_interval(secs => ${RESERVATION_STALE_SECONDS}))
+    ) as in_flight`);
+  return result.rows[0]?.in_flight === true;
 }
 
 /**
@@ -166,7 +203,7 @@ export async function recordUserMessage(
       return { result: { ok: false, code: 'rate_limited_day' } as const, audit: null };
     if (counted.lastMinute >= TURNS_PER_MINUTE)
       return { result: { ok: false, code: 'rate_limited_minute' } as const, audit: null };
-    if (current && (await turnInFlight(tx, current.id)))
+    if (current && (await turnInFlight(tx, current.id, actor.userId)))
       return { result: { ok: false, code: 'turn_in_flight' } as const, audit: null };
 
     const audits: DomainAudit[] = [];
@@ -262,6 +299,59 @@ export async function recordKevMessage(
         record: privateTo(actor.userId),
       },
     };
+  });
+}
+
+/**
+ * Ends a turn that stores no Kev message (an error, the cap, the provider
+ * unreachable or timing out, a failure after the person's words were
+ * stored; I-5): one structural audit row, `kev.turn_end`, on the adult's
+ * conversation, private to them, with the outcome code only, never text.
+ * The one-turn guard reads it, so the adult's next message and Clear are
+ * accepted at once rather than after 70 seconds. Writes no message.
+ */
+export async function recordTurnEnd(
+  actor: UserActor,
+  input: { outcome: string },
+  deps: Deps = {},
+): Promise<void> {
+  assertKevAsAdult(actor);
+  const outcome = input.outcome;
+  if (!/^[a-z_]{1,40}$/.test(outcome)) throw new RangeError('outcome');
+  await auditedWrite(actor, deps, async (tx) => {
+    const conv = await lockConversation(tx, actor);
+    if (!conv) throw new NotFoundError('conversation');
+    return {
+      result: undefined,
+      audit: {
+        event: TURN_END_EVENT,
+        subjectType: 'conversation',
+        subjectId: conv.id,
+        meta: { outcome },
+        record: privateTo(actor.userId),
+      },
+    };
+  });
+}
+
+/**
+ * The month's routing state for the deep tier (owner decision, 2026-10-15;
+ * contract §13.6): from what the cap counts (settled usage, open and
+ * unreconciled reservations, household-wide), conservative, so another
+ * adult's turn in flight counts. For the orchestrator's routing only: it is
+ * never shown to an adult, whose view stays the recorded aggregate
+ * (getSpendStatus, ADR 0012 §43, I5). A state, never a figure.
+ */
+export async function getRoutingState(actor: UserActor, deps: Deps = {}): Promise<CapState> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  if (actor.via !== 'kev') throw new NotPermittedError('kev_bookkeeping_only');
+  const db = deps.db ?? getDb();
+  const count = await countMonth(db);
+  return capState({
+    counted: count.countedUsdMicros,
+    cap: householdCapUsdMicros(),
+    nextFastReservation: 0n,
+    deepWithdrawnAtPercent: DEEP_WITHDRAWN_AT_PERCENT,
   });
 }
 
@@ -839,7 +929,7 @@ export async function clearConversation(actor: UserActor, deps: Deps = {}): Prom
   return auditedWrite<ClearOutcome>(actor, deps, async (tx) => {
     const conv = await lockConversation(tx, actor);
     if (!conv) return { result: { ok: true, deleted: 0 } as const, audit: null };
-    if (await turnInFlight(tx, conv.id))
+    if (await turnInFlight(tx, conv.id, actor.userId))
       return { result: { ok: false, code: 'turn_in_flight' } as const, audit: null };
     const rows = await tx
       .delete(message)

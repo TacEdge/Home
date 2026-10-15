@@ -56,6 +56,7 @@ export const KEV_TURN_ERROR_CODES = [
   'refused',
   'bad_response',
   'budget_exhausted',
+  'not_saved',
 ] as const;
 export type KevTurnErrorCode = (typeof KEV_TURN_ERROR_CODES)[number];
 
@@ -75,6 +76,9 @@ export const ERROR_TEXT: Readonly<Record<KevTurnErrorCode, string>> = Object.fre
   bad_response: 'Kev isn’t answering right now. What you asked is kept here.',
   // Not shown as an error: a turn out of budget ends with the safe fallback.
   budget_exhausted: 'I can’t answer that reliably right now.',
+  // Something failed before the person's words were stored (§9.9's added
+  // row, Package 3 review I-4): nothing is kept, and the line says so.
+  not_saved: 'Something went wrong and nothing was saved. Try again in a moment.',
 });
 
 /** Errors under which the adult may keep their words (D6; §9.9). */

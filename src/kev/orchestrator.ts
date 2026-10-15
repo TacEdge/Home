@@ -2,10 +2,11 @@ import 'server-only';
 import type { Deps } from '@/domain/common/write';
 import type { KevContentV2 } from '@/domain/kev-bookkeeping/schema';
 import {
-  getSpendStatus,
+  getRoutingState,
   listConversationWindow,
   purgeExpired,
   recordKevMessage,
+  recordTurnEnd,
   recordUserMessage,
   reserveAttempt,
   settleAttempt,
@@ -35,7 +36,7 @@ import {
 } from './answer/schema';
 import { codesOf, validateAnswer, type Violation, type ValidatorCode } from './answer/validate';
 import { BudgetExhausted, TurnBudget, type BudgetRefusal, type CallRecord } from './budget';
-import { ANSWER_PATH, LIMITS, TIERS } from './config';
+import { ANSWER_PATH, COUNT_TOKENS_COST_USD_MICROS, LIMITS, TIERS } from './config';
 import { assembleBundle } from './context/assemble';
 import { requestTokens } from './context/tokens';
 import { selectWindow } from './context/window';
@@ -52,7 +53,7 @@ import {
   type ProviderToolUse,
 } from './providers/types';
 import { attemptReservation, initialTier, mayEscalate, offersEscalate } from './router';
-import { createToolRunner, toolDefinitions, type TraceEntry } from './tools/registry';
+import { createToolRunner, REGISTRY, toolDefinitions, type TraceEntry } from './tools/registry';
 import { assertKevContext, ContextRefusal, MAX_RESULT_BYTES, type Ref } from './tools/types';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 
@@ -67,8 +68,9 @@ import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 //   2. store      purge on use (the adult's expired messages), then the
 //                 person's words verbatim under the conversation lock, with
 //                 the rate limits and the one-turn guard, before any model call;
-//   3. route      fast (deep only by escalation), the month's state from the
-//                 adult's recorded-spend view;
+//   3. route      fast (deep only by escalation), the month's routing state
+//                 from what the cap counts (settled, open and unreconciled:
+//                 conservative, system-side; never shown to an adult);
 //   4. reserve    the attempt's maximum exposure, under the budget lock;
 //   5. assemble   stable prefix (system prompt, tools, answer schema) ‖ the
 //                 conversation window ‖ the bundle and the question;
@@ -76,11 +78,15 @@ import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 //                 at most 3 tool rounds, 8 tool calls, 5 model calls, 32,000
 //                 input tokens a call, inside the 55 s deadline;
 //   7. answer     the validator; one regeneration (a labelled user-turn
-//                 block); then escalation (fast, ≥ 30 s left, under 80%) or
-//                 the safe fallback;
+//                 block); then escalation (the model's `escalate` while reads
+//                 are still allowed, or two failed answers on fast; ≥ 30 s
+//                 left; under 80% of the counted month) or the safe
+//                 fallback, which a budget refusal also ends in;
 //   8. settle     every provider call's usage, in a `finally`, the reservation
 //                 closed;
-//   9. record     Kev's message (content v2), then the answer is emitted.
+//   9. record     Kev's message (content v2), then the answer is emitted; a
+//                 turn that stores no Kev message ends with the structural
+//                 `kev.turn_end` marker, so the adult can go on at once.
 //
 // Nothing the model wrote is emitted before step 7 has passed it: progress
 // (`working`, `escalated`) streams; `say`, `detail` and `cite` come once,
@@ -168,10 +174,17 @@ export function regenerationNote(violations: readonly Violation[]): string {
 }
 
 type AttemptEnd =
-  | { kind: 'answer'; answer: KevAnswer; ledger: Ledger; coverage: Coverage }
-  | { kind: 'escalate'; ledger: Ledger }
-  | { kind: 'invalid'; ledger: Ledger; violations: Violation[] }
-  | { kind: 'fallback'; ledger: Ledger; reason: BudgetRefusal | 'input_cap' | 'tool_loop' }
+  | { kind: 'answer'; answer: KevAnswer; ledger: Ledger; coverage: Coverage; absence: boolean }
+  | { kind: 'escalate'; ledger: Ledger; coverage: Coverage }
+  | { kind: 'invalid'; ledger: Ledger; coverage: Coverage; violations: Violation[] }
+  | {
+      kind: 'fallback';
+      ledger: Ledger;
+      coverage: Coverage;
+      reason: BudgetRefusal | 'input_cap' | 'tool_loop';
+      /** The failed answer's codes, when the budget refused its regeneration (I-1). */
+      violations?: Violation[];
+    }
   | { kind: 'refused' }
   | { kind: 'error'; code: KevTurnErrorCode }
   | { kind: 'cap' };
@@ -244,17 +257,29 @@ export async function* handle(req: KevRequest, deps: KevDeps = {}): AsyncGenerat
 /** `kev.handle()`: the one entry point for every conversational turn (CLAUDE.md rule 12). */
 export const kev = Object.freeze({ handle });
 
+/** The turn-end marker (I-5), best effort: its failure only delays the next turn by 70 s. */
+async function endTurn(actor: UserActor, outcome: string, db: Deps): Promise<void> {
+  try {
+    await recordTurnEnd(actor, { outcome }, db);
+  } catch {
+    log.error('kev_turn_end_failed', { stage: 'turn_end' });
+  }
+}
+
 async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => void): Promise<void> {
   const started = Date.now();
   const db: Deps = deps.db ? { db: deps.db } : {};
+  /** Whether the person's words are stored: what a failure may say about them (I-4). */
+  let stored = false;
+  let escalated = false;
   const fail = (code: KevTurnErrorCode) => {
     emit({ type: 'error', code, message: ERROR_TEXT[code] });
     emit({
       type: 'done',
       outcome: 'error',
       limits: [],
-      escalated: false,
-      keepable: KEEPABLE_ERRORS.has(code),
+      escalated,
+      keepable: stored && KEEPABLE_ERRORS.has(code),
     });
   };
   const turnLog: Record<string, unknown> = { outcome: 'error' };
@@ -297,16 +322,18 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     } catch {
       log.warn('kev_turn_purge_failed', { stage: 'purge' });
     }
-    const stored = await recordUserMessage(actor, { text: words, ...(focus ? { focus } : {}) }, db);
-    if (!stored.ok) {
-      turnLog.refusal = stored.code;
-      return fail(stored.code === 'turn_in_flight' ? 'turn_in_flight' : 'rate_limited');
+    const kept = await recordUserMessage(actor, { text: words, ...(focus ? { focus } : {}) }, db);
+    if (!kept.ok) {
+      turnLog.refusal = kept.code;
+      return fail(kept.code === 'turn_in_flight' ? 'turn_in_flight' : 'rate_limited');
     }
+    stored = true;
     emit({ type: 'started' });
     emit({ type: 'working', label: 'start', text: WORKING_TEXT.start });
 
     // 3. Route.
-    const month: CapState = (await getSpendStatus(actor, db)).state;
+    // The routing state from what the cap counts (owner decision, 2026-10-15).
+    const month: CapState = await getRoutingState(actor, db);
     const window = selectWindow(
       await listConversationWindow(actor, { hours: LIMITS.windowHours }, db),
     );
@@ -331,24 +358,35 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
         signal,
         window,
         focus,
-        conversationId: stored.conversationId,
+        conversationId: kept.conversationId,
         turn,
         emit,
       });
 
     let end = await attempt(turn.tier);
+    // Escalation (§4.2, N11; I-1): only on its approved triggers (the
+    // model's `escalate`, or two failed answers on fast), never on a budget
+    // refusal (that is the fallback), and only with the time and the counted
+    // month's room for it, read again now the fast attempt has settled.
     if ((end.kind === 'escalate' || end.kind === 'invalid') && turn.tier === 'fast') {
       const remainingMs = deadline - Date.now();
-      if (mayEscalate({ tier: 'fast', escalationsSoFar: 0, remainingMs, month })) {
+      const monthNow = await getRoutingState(actor, db);
+      if (mayEscalate({ tier: 'fast', escalationsSoFar: 0, remainingMs, month: monthNow })) {
         turn.escalated = true;
+        escalated = true;
         turn.tier = 'deep';
         emit({ type: 'escalated', tier: 'deep' });
-        const fastLedger = end.ledger;
+        const fastEnd = end;
         const deepEnd = await attempt('deep');
         // Deep unavailable (the cap refused its reservation): the safe fallback (§9.9).
         end =
           deepEnd.kind === 'cap'
-            ? { kind: 'fallback', ledger: fastLedger, reason: 'reservation_exhausted' }
+            ? {
+                kind: 'fallback',
+                ledger: fastEnd.ledger,
+                coverage: fastEnd.coverage,
+                reason: 'reservation_exhausted',
+              }
             : deepEnd;
       }
     }
@@ -356,12 +394,16 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     // 7–9. The outcome, recorded, then emitted.
     await finish(end, { actor, db, turn, emit, turnLog });
   } catch (e) {
-    // Anything unexpected (a database failure, say): the person's words, if
-    // stored, stay; the adult sees the provider-unavailable line. Logged by
-    // stage and class only, never content.
+    // Anything unexpected (a database failure, say). Logged by stage and
+    // class only, never content. What the adult is told depends on whether
+    // their words were stored (I-4): kept, with Keep in To sort, and the
+    // turn ended so they can go on; or nothing saved, said so.
     log.error('kev_turn_failed', { kind: e instanceof Error ? e.name : 'unknown' });
     turnLog.outcome = 'error';
-    fail('provider_unavailable');
+    if (stored) {
+      await endTurn(req.actor, 'provider_unavailable', db);
+      fail('provider_unavailable');
+    } else fail('not_saved');
   } finally {
     log.info('kev_turn', { ...turnLog, ms: Date.now() - started });
   }
@@ -389,11 +431,17 @@ type AttemptInput = {
   emit: (e: KevEvent) => void;
 };
 
+/** A HOME note on the `answer` tool path when no more reads are allowed (I-2). */
+export const ANSWER_NOW_NOTE = `${HOME_LABEL}: no more reads this turn. Give your answer now with the answer tool, from what you already have.`;
+
 /** One attempt (§4.2 steps 4–8): its own reservation, ledger, request and settlement. */
 async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
   const { req, deps, db, provider, tier, month, turn } = a;
   const actor = req.actor;
   const attemptId = crypto.randomUUID();
+  // G22's count is free (config.ts). Were it priced, settlement would have to
+  // record it before any live call; until then, no attempt runs (M-2).
+  if (COUNT_TOKENS_COST_USD_MICROS !== 0n) throw new Error('a priced count is not settled');
   // No attempt starts that could not make its first call in time (L5).
   if (a.deadline - Date.now() < TIERS[tier].minStartMs) return { kind: 'error', code: 'timeout' };
   // 4. Reserve.
@@ -403,13 +451,15 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
     db,
   );
   if (!reserved.ok) return { kind: 'cap' };
-  const budget = TurnBudget.open(reserved.reservation, {
-    deadline: a.deadline,
-    turnSettledUsdMicros: turn.settled,
-  });
   const ledger = new Ledger();
   const coverage: Coverage = { calendarsUnhealthy: false, noCalendars: false, gapsUnknown: false };
+  let budget: TurnBudget | null = null;
   try {
+    // Opened inside the try, so a refusal to open still settles (closes) the reservation (M-3).
+    budget = TurnBudget.open(reserved.reservation, {
+      deadline: a.deadline,
+      turnSettledUsdMicros: turn.settled,
+    });
     // 5. Assemble: fixed for the attempt (§4.2).
     const bundle = await assembleBundle({
       actor,
@@ -449,44 +499,70 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
       ...(deps.db ? { deps: { db: deps.db } } : {}),
     });
     const replayTokens: number[] = [];
-    let toolChoice: 'auto' | 'none' = 'auto';
+    /**
+     * Whether reads are over: after the last tool round or the eighth call,
+     * and for the regeneration. The format path then sends `tool_choice:
+     * none` (§4.2). The `answer` tool path cannot (it would forbid the
+     * answer tool too) nor force the tool (`any`/`tool` are refused by the
+     * pinned models: ADR 0012 §45, I-2), so it keeps `auto` with the same
+     * tool list, refuses every further read in code, and appends a labelled
+     * note asking for the answer tool.
+     */
+    let readsOver = false;
     let failedOnce: Violation[] | null = null;
     const request = (): ProviderRequest =>
       Object.freeze({
         tier,
         system: SYSTEM_PROMPT,
         tools: Object.freeze([...tools]),
-        toolChoice,
+        toolChoice: readsOver && path === 'format' ? 'none' : 'auto',
         messages: Object.freeze([...messages]),
         ...(path === 'format' ? { outputFormat: ANSWER_JSON_SCHEMA } : {}),
       });
+    const lateNote = (): NeutralText[] => (path === 'tool' ? [text(ANSWER_NOW_NOTE)] : []);
+    // A budget refusal ends the attempt in the fallback, never as a failed
+    // answer (which escalation would read as a trigger, I-1).
+    const refusedBy = (reason: BudgetRefusal): AttemptEnd =>
+      reason === 'too_little_time' && !failedOnce
+        ? { kind: 'error', code: 'timeout' }
+        : {
+            kind: 'fallback',
+            ledger,
+            coverage,
+            reason,
+            ...(failedOnce ? { violations: failedOnce } : {}),
+          };
 
     // 6. The loop. Bounded: every pass is a model call, and the budget allows five.
     for (;;) {
       const next = request();
       // L4: the assembly's own accounting keeps every request under the cap.
       if (requestTokens(next, replayTokens) > LIMITS.inputTokensPerCall)
-        return { kind: 'fallback', ledger, reason: 'input_cap' };
+        return {
+          kind: 'fallback',
+          ledger,
+          coverage,
+          reason: 'input_cap',
+          ...(failedOnce ? { violations: failedOnce } : {}),
+        };
       const check = budget.canCall(Date.now());
-      if (!check.ok) {
-        if (check.reason === 'too_little_time' && !failedOnce)
-          return { kind: 'error', code: 'timeout' };
-        return failedOnce
-          ? { kind: 'invalid', ledger, violations: failedOnce }
-          : { kind: 'fallback', ledger, reason: check.reason };
-      }
+      if (!check.ok) return refusedBy(check.reason);
       let result: ProviderResult;
       try {
         result = await provider.run(next, { budget, signal: a.signal });
       } catch (e) {
-        if (e instanceof BudgetExhausted)
-          return e.reason === 'too_little_time' && !failedOnce
-            ? { kind: 'error', code: 'timeout' }
-            : { kind: 'fallback', ledger, reason: e.reason };
+        if (e instanceof BudgetExhausted) return refusedBy(e.reason);
         if (e instanceof ProviderError) {
           // The preflight count over the cap, or the provider's own count over
           // it (I4): no further call; the fallback (§13.4).
-          if (e.code === 'too_large') return { kind: 'fallback', ledger, reason: 'input_cap' };
+          if (e.code === 'too_large')
+            return {
+              kind: 'fallback',
+              ledger,
+              coverage,
+              reason: 'input_cap',
+              ...(failedOnce ? { violations: failedOnce } : {}),
+            };
           return errorOf(e);
         }
         throw e;
@@ -495,9 +571,10 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
       replayTokens.push(result.usage.outputTokens);
 
       const uses = result.toolUses;
-      const escalate = uses.find((u) => u.name === 'escalate');
+      // `escalate` only while reads are allowed (the request's tool_choice was auto for reads).
+      const escalate = readsOver ? undefined : uses.find((u) => u.name === 'escalate');
       if (escalate && escalateOffered && isEscalateInput(escalate.input))
-        return { kind: 'escalate', ledger };
+        return { kind: 'escalate', ledger, coverage };
       const answerUse = path === 'tool' ? uses.find((u) => u.name === 'answer') : undefined;
       if (answerUse || uses.length === 0) {
         // 7. The answer, checked.
@@ -509,26 +586,35 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
           timeZone: env.HOME_TIMEZONE,
           ...(deps.sensitive ? { sensitive: deps.sensitive } : {}),
         });
-        if (checked.ok) return { kind: 'answer', answer: checked.answer, ledger, coverage };
-        if (failedOnce) return { kind: 'invalid', ledger, violations: checked.violations };
+        if (checked.ok)
+          return {
+            kind: 'answer',
+            answer: checked.answer,
+            ledger,
+            coverage,
+            absence: checked.absence,
+          };
+        if (failedOnce)
+          return { kind: 'invalid', ledger, coverage, violations: checked.violations };
         failedOnce = checked.violations;
-        // One regeneration: appended, never an edit (N15); no more tools.
+        // One regeneration: appended, never an edit (N15); no more reads.
         const contents = new Map(
           uses.map((u) => [
             u,
             { content: JSON.stringify({ error: 'not_accepted' }), isError: true },
           ]),
         );
+        readsOver = true;
         messages.push(
           Object.freeze({
             role: 'user' as const,
             content: Object.freeze([
               ...resultsFor(uses, contents),
               text(regenerationNote(checked.violations)),
+              ...lateNote(),
             ]),
           }),
         );
-        toolChoice = 'none';
         continue;
       }
 
@@ -536,8 +622,7 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
       const contents = new Map<ProviderToolUse, { content: string; isError: boolean }>();
       const reads = uses;
       let allowed = 0;
-      if (toolChoice === 'auto' && budget.canToolRound())
-        allowed = budget.takeToolRound(reads.length);
+      if (!readsOver && budget.canToolRound()) allowed = budget.takeToolRound(reads.length);
       else for (const u of reads) contents.set(u, { content: NO_MORE_TOOLS, isError: true });
       const running = reads.slice(0, allowed);
       for (const u of reads.slice(allowed))
@@ -553,8 +638,9 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
         0,
         Math.min(MAX_RESULT_BYTES, Math.floor((room * 2) / Math.max(1, running.length))),
       );
+      // The working line: fixed copy, for a registered read tool's own name only (I-6).
       const labels = new Set<WorkingLabel>();
-      for (const u of running) if (u.name in WORKING_TEXT) labels.add(u.name as WorkingLabel);
+      for (const u of running) if (isReadLabel(u.name)) labels.add(u.name);
       for (const l of labels) a.emit({ type: 'working', label: l, text: WORKING_TEXT[l] });
       const outcomes = await Promise.all(
         running.map((u) => runner.run(u.name, u.input, { maxBytes })),
@@ -588,20 +674,29 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
         if (o.trace.tool === 'get_gaps' && data.coverage?.status === 'unknown')
           coverage.gapsUnknown = true;
       });
+      // After the last permitted round, or the eighth call, the answer is asked for with what it has.
+      const nowOver =
+        !readsOver && (!budget.canToolRound() || budget.toolCalls >= LIMITS.toolCallsPerAttempt);
       messages.push(
         Object.freeze({
           role: 'user' as const,
-          content: Object.freeze(resultsFor(uses, contents)),
+          content: Object.freeze([
+            ...resultsFor(uses, contents),
+            ...(nowOver || readsOver ? lateNote() : []),
+          ]),
         }),
       );
-      // After the last permitted round, or the eighth call, the answer is asked for with what it has.
-      if (!budget.canToolRound() || budget.toolCalls >= LIMITS.toolCallsPerAttempt)
-        toolChoice = 'none';
+      if (nowOver) readsOver = true;
     }
   } finally {
     // 8. Settle, whatever happened: every provider call, the reservation closed.
     await settle(a, attemptId, budget);
   }
+}
+
+/** A registered read tool's own name (never an inherited property: I-6), with a working line. */
+function isReadLabel(name: string): name is Exclude<WorkingLabel, 'start'> {
+  return name !== 'start' && Object.hasOwn(WORKING_TEXT, name) && REGISTRY.has(name);
 }
 
 const isEscalateInput = (i: unknown) =>
@@ -616,11 +711,16 @@ function pushTrace(turn: AttemptInput['turn'], entry: TraceEntry | TraceV2): voi
   if (turn.trace.length < 16) turn.trace.push(entry as TraceV2);
 }
 
-async function settle(a: AttemptInput, attemptId: string, budget: TurnBudget): Promise<void> {
+async function settle(
+  a: AttemptInput,
+  attemptId: string,
+  budget: TurnBudget | null,
+): Promise<void> {
   const { turn, tier } = a;
-  const records: CallRecord[] = [...budget.calls];
+  // No budget: it never opened (M-3), so no call was made; the reservation still closes.
+  const records: CallRecord[] = budget ? [...budget.calls] : [];
   // A call still in flight (never expected: every call is awaited) is charged at the maximum.
-  const inFlight = budget.callsInFlight;
+  const inFlight = budget ? budget.callsInFlight : 0;
   const escalated = tier === 'deep' && turn.escalated;
   const calls = [
     ...records.map((c) => ({
@@ -640,7 +740,7 @@ async function settle(a: AttemptInput, attemptId: string, budget: TurnBudget): P
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsdMicros: budget.perCallMaxUsdMicros,
+      costUsdMicros: budget!.perCallMaxUsdMicros,
       escalated,
     })),
   ].slice(0, LIMITS.modelCallsPerAttempt);
@@ -720,7 +820,7 @@ async function finish(
           say: end.answer.say.text,
           blocks: end.answer.blocks,
           cites,
-          limits: limitsFor(cites, end.coverage),
+          limits: limitsFor(cites, end.coverage, { absence: end.absence }),
         };
       }
       break;
@@ -729,14 +829,16 @@ async function finish(
     case 'invalid':
     case 'fallback': {
       const f = buildFallback(end.ledger);
-      const violations: ValidatorCode[] = end.kind === 'invalid' ? codesOf(end.violations) : [];
+      const failed = end.kind === 'escalate' ? undefined : end.violations;
+      const violations: ValidatorCode[] = failed ? codesOf(failed) : [];
       content = {
         ...base,
         outcome: 'fallback',
         say: f.say,
         blocks: [],
         cites: f.cites,
-        limits: [],
+        // The rows' own sentences (§8.4): a gap's limit, a forecast's time and credit (I-15).
+        limits: limitsFor(f.cites, end.coverage),
         ...(violations.length > 0 ? { violations } : {}),
         ...(end.kind === 'fallback' ? { errorCode: 'budget_exhausted' as const } : {}),
       };
@@ -799,9 +901,17 @@ async function finish(
       );
       kevMessageId = row.id;
     } catch {
+      // Never shown unstored: the error state instead, the words kept (minor, review).
       log.error('kev_turn_record_failed', { stage: 'record' });
+      errorCode = 'provider_unavailable';
+      turnLog.outcome = 'error';
+      turnLog.errorCode = errorCode;
+      content = { ...content, outcome: 'error', limits: [] };
+      decline = undefined;
     }
   }
+  // A turn that stores no Kev message ends with the structural marker (I-5).
+  if (errorCode) await endTurn(actor, errorCode, db);
 
   if (errorCode) {
     emit({ type: 'error', code: errorCode, message: ERROR_TEXT[errorCode] });

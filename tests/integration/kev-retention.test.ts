@@ -242,7 +242,7 @@ describe('C23: a capture kept from a deleted message', () => {
     const conv = await conversationOf(h.sam.userId);
     await admin.db.execute(sql`
       insert into message (conversation_id, role, channel, content, created_at)
-      values (${conv}::uuid, 'user', 'web', '{"v":2,"text":"Keep the shed key words"}'::jsonb, now() - interval '91 days')`);
+      values (${conv}::uuid, 'user', 'web', '{"v":2,"text":"Keep the shed key words"}'::jsonb, now() - interval '89 days')`);
     const [m] = (
       await admin.db.execute<{ id: string }>(
         sql`select id from message where conversation_id = ${conv}::uuid`,
@@ -254,6 +254,10 @@ describe('C23: a capture kept from a deleted message', () => {
       { db },
     );
     expect(kept.messageId).toBe(m!.id);
+    // Kept while it was live (an expired message cannot be kept); then it expires.
+    await admin.db.execute(
+      sql`update message set created_at = now() - interval '91 days' where id = ${m!.id}::uuid`,
+    );
     process.env.CRON_SECRET = SECRET;
     await GET(request('GET', `Bearer ${SECRET}`));
     const row = await admin.db.execute(

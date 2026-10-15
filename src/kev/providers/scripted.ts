@@ -49,7 +49,12 @@ export type ScriptEntry = ScriptStep | ((request: ProviderRequest) => ScriptStep
  * or a malformed body.
  */
 export type ScriptedCount =
-  number | { fail: ProviderErrorCode } | { stall: true } | { malformed: unknown };
+  | number
+  | { fail: ProviderErrorCode }
+  | { stall: true }
+  | { malformed: unknown }
+  /** A count that arrives after `ms` (I-3's slow-but-successful count). */
+  | { slow: number; tokens: number };
 
 export type ScriptedOptions = {
   /** Runs at the start of every call, while "the model" works (L20's probe). */
@@ -124,14 +129,14 @@ export function createScriptedProvider(
   const requests: ProviderRequest[] = [];
   const counted: ProviderRequest[] = [];
 
-  /** As the adapter: count first, under the call's timeout; fail closed; refuse over the cap. */
+  /** As the adapter: count first, under the count's own bound (I-3); fail closed; refuse over the cap. */
   async function preflight(
     request: ProviderRequest,
     budget: TurnBudget,
     signal: AbortSignal | undefined,
   ): Promise<number> {
     const started = Date.now();
-    const check = budget.canCall(started);
+    const check = budget.countTimeoutMs(started);
     if (!check.ok) throw new BudgetExhausted(check.reason);
     const index = counted.length;
     counted.push(request);
@@ -143,8 +148,16 @@ export function createScriptedProvider(
       await wait(check.timeoutMs, signal);
       throw failed('timeout');
     }
+    if (typeof scripted === 'object' && 'slow' in scripted) {
+      const aborted = await wait(Math.min(scripted.slow, check.timeoutMs), signal);
+      if (aborted || scripted.slow >= check.timeoutMs) throw failed('timeout');
+    }
     const n = validCount(
-      typeof scripted === 'number' ? { input_tokens: scripted } : scripted.malformed,
+      typeof scripted === 'number'
+        ? { input_tokens: scripted }
+        : 'slow' in scripted
+          ? { input_tokens: scripted.tokens }
+          : scripted.malformed,
     );
     if (n === null) throw failed('bad_response');
     if (n > LIMITS.inputTokensPerCall)
@@ -208,6 +221,17 @@ export function createScriptedProvider(
         // As the adapter: both are found at message_start, which ends the call.
         if (usage.inferenceGeo !== 'us') throw fail('bad_response', usage, 'error');
         if (exceedsInputCap(usage)) throw fail('too_large', usage, 'error');
+        // tool_choice as the API holds it (I-2): under `none` the model calls
+        // no tool at all, the `answer` tool included, and the `answer` tool
+        // is never called when it was not offered. A script that does either
+        // is a call the real provider could not answer: it fails here, loudly.
+        const offered = new Set(request.tools.map((t) => t.name));
+        if (
+          answer.toolUses?.some(
+            (t) => request.toolChoice === 'none' || (t.name === 'answer' && !offered.has('answer')),
+          )
+        )
+          throw fail('bad_response', usage, 'error');
         const ms = Date.now() - started;
         const stop = answer.stop ?? (answer.toolUses?.length ? 'tool_use' : 'end_turn');
         budget.endCall(ticket, { model, usage, ms, stop });

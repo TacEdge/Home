@@ -116,8 +116,9 @@ export const TIERS: Readonly<Record<KevTier, TierConfig>> = Object.freeze({
  * from the Messages API's). Kept here so the accounting is explicit: a
  * count is charged nothing, writes no `kev_usage` row and is not one of an
  * attempt's five model calls. If the provider ever prices it, this changes
- * with G2's price check, and settlement must record it before any live call
- * (tests/unit/kev-money.test.ts holds it at zero until then).
+ * with G2's price check, and settlement must record it before any live call:
+ * until then the orchestrator refuses to run an attempt with a non-zero
+ * value (its use site, src/kev/orchestrator.ts; tests/unit/kev-preflight.test.ts).
  */
 export const COUNT_TOKENS_COST_USD_MICROS = 0n;
 
@@ -170,6 +171,12 @@ export const LIMITS = Object.freeze({
   callTimeoutMarginMs: 5_000,
   /** No byte for this long ends the call (`timeout`). */
   idleMs: 15_000,
+  /**
+   * The preflight token count's own timeout (G22; Package 3 review, I-3):
+   * 5 s, or less when the call after it would otherwise have too little
+   * time to start (TurnBudget.countTimeoutMs). Never the call's timeout.
+   */
+  preflightCountTimeoutMs: 5_000,
   /** The turn's cost ceiling, US$1.50; it bounds the deep attempt's reservation (§13.6). */
   turnCeilingUsdMicros: TURN_CEILING_USD_MICROS,
   /** At this share of the cap, deep is withdrawn (D19). Percent. */

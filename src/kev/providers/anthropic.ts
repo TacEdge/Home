@@ -309,8 +309,9 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
   /**
    * The preflight token count (G22; owner decision, 2026-10-15): the
    * request's complete input, counted through HOME's fetch on POST
-   * /v1/messages/count_tokens before the call, under the same per-call
-   * timeout and the turn's signal. Any failure (an error status, a timeout,
+   * /v1/messages/count_tokens before the call, under its own short bound
+   * (TurnBudget.countTimeoutMs: at most 5 s, and never past the point where
+   * the call could still start) and the turn's signal. Any failure (an error status, a timeout,
    * a refusal by HOME's network policy, a malformed or missing count) fails
    * closed: a ProviderError marked `preflight: 'failed'`, and no model call.
    * Never retried. Not a model call: it is not counted among the attempt's
@@ -323,7 +324,8 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
     signal: AbortSignal | undefined,
   ): Promise<number> {
     const started = Date.now();
-    const check = budget.canCall(started);
+    // Its own short bound, never the call's (I-3): a slow count cannot use up the call's time.
+    const check = budget.countTimeoutMs(started);
     if (!check.ok) throw new BudgetExhausted(check.reason);
     const call = new AbortController();
     const timer = setTimeout(() => call.abort(), check.timeoutMs);

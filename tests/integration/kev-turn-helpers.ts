@@ -82,6 +82,19 @@ export function answer(
   };
 }
 
+/** The same answer as the strict `answer` tool's input (G7's fallback path). */
+export function answerInput(
+  say: string,
+  cites: Ref[],
+  blocks: { kind: 'fact' | 'view'; text: string; cites: Ref[] }[] = [],
+): Record<string, unknown> {
+  return {
+    say: { text: say, cites: cites.map(wireRef) },
+    blocks: blocks.map((b) => ({ ...b, cites: b.cites.map(wireRef) })),
+    decline: null,
+  };
+}
+
 export const decline = (code: string): ScriptStep => ({
   kind: 'answer',
   text: [JSON.stringify({ say: null, blocks: [], decline: code })],

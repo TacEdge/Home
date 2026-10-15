@@ -220,4 +220,83 @@ describe('N15: the grow-only request, on the wire', () => {
     for (const s of ['sig-empty-1', 'sig-2', 'toolu_synthetic', 'thinking', 'Synthetic thinking'])
       expect(stored).not.toContain(s);
   });
+
+  it('I-2 on the wire, the answer-tool path: after the last round and for the regeneration, tool_choice stays auto with the same tools, and the answer tool answers', async () => {
+    const football = { type: 'event', id: f.id.football, at: `${SAT}T09:00:00+13:00` };
+    const answerInput = (say: string) => ({
+      say: { text: say, cites: [football] },
+      blocks: [],
+      decline: null,
+    });
+    stub.seen.length = 0;
+    stub.counts.length = 0;
+    stub.queue.push(
+      sse(
+        messageStart(FAST, usage) +
+          toolBlock(0, 'toolu_late_1', 'get_agenda', { from: SAT, to: '2026-10-18' }) +
+          messageEnd('tool_use', 50),
+      ),
+      sse(
+        messageStart(FAST, usage) +
+          toolBlock(0, 'toolu_late_2', 'get_people', {}) +
+          messageEnd('tool_use', 50),
+      ),
+      sse(
+        messageStart(FAST, usage) +
+          toolBlock(0, 'toolu_late_3', 'get_projects', {}) +
+          messageEnd('tool_use', 50),
+      ),
+      sse(
+        messageStart(FAST, usage) +
+          thinking(0, '', 'sig-late-4') +
+          toolBlock(1, 'toolu_late_4', 'answer', answerInput('Football on Saturday at 4.')) +
+          messageEnd('tool_use', 70),
+      ),
+      sse(
+        messageStart(FAST, usage) +
+          toolBlock(0, 'toolu_late_5', 'answer', answerInput('Football on Saturday at 9.')) +
+          messageEnd('tool_use', 60),
+      ),
+    );
+    const provider = buildAnthropicProvider(
+      KEY,
+      createProviderFetchForTests(KEY, { stubPort: stub.port }),
+    );
+    const events: KevEvent[] = [];
+    for await (const e of handle(
+      {
+        actor: f.kev.alex,
+        channel: 'web',
+        input: { text: 'What have we got this weekend?' },
+        now: NOW,
+      },
+      { db: clocked, provider, answerPath: { fast: 'tool' } },
+    ))
+      events.push(e);
+    expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'answer' });
+    expect(events.find((e) => e.type === 'say')).toEqual({
+      type: 'say',
+      text: 'Football on Saturday at 9.',
+    });
+    expect(stub.seen).toHaveLength(5);
+    expect(stub.counts).toHaveLength(5);
+    const bodies = stub.seen.map((s) => JSON.parse(s.body) as Record<string, unknown>);
+    const bytes = (v: unknown) => JSON.stringify(v);
+    // Never `none` (it would forbid the answer tool) and never forced (the pinned models refuse it).
+    expect(bodies.map((b) => bytes(b.tool_choice))).toEqual(Array(5).fill(bytes({ type: 'auto' })));
+    for (const b of bodies) {
+      expect(bytes(b.tools)).toBe(bytes(bodies[0]!.tools));
+      expect((b.tools as { name: string }[]).map((t) => t.name)).toContain('answer');
+    }
+    for (let i = 1; i < bodies.length; i++) {
+      const pm = bodies[i - 1]!.messages as unknown[];
+      const nm = bodies[i]!.messages as unknown[];
+      for (let k = 0; k < pm.length; k++) expect(bytes(nm[k])).toBe(bytes(pm[k]));
+    }
+    const lastUser = (b: Record<string, unknown>) => bytes((b.messages as unknown[]).at(-1));
+    // After the third round, HOME asks for the answer tool; the regeneration says so again.
+    expect(lastUser(bodies[3]!)).toContain('Give your answer now with the answer tool');
+    expect(lastUser(bodies[4]!)).toContain('time.unsupported in the say sentence');
+    expect(lastUser(bodies[4]!)).toContain('Give your answer now with the answer tool');
+  });
 });
