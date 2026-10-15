@@ -118,3 +118,5 @@ export function timeColumns(t: EventTime) {
         endDate: null,
       };
 }
+
+export { EVENT_KINDS, EVENT_PERSON_ROLES };

@@ -381,3 +381,60 @@ export function staleSentence(
     facts: [fact(fetchedAt, fetchedAt, fetchedAt)],
   };
 }
+
+// ---- A day's outlook (M8 Package 2: Kev's get_weather) -----------------
+
+/** One home date's forecast in M7's words and figures, for a reader asking about that day. */
+export type DayOutlook = {
+  date: IsoDate;
+  /** `weather.day`'s phrase, exactly as Forward Week says it ("Looks dry", "Showers possible, windy"). */
+  phrase: string;
+  /** Over the same hours as the phrase (the day's planning hours; the remaining ones today). */
+  lowC: number | null;
+  highC: number | null;
+  maxGustKmh: number | null;
+  /** Each part of the day the forecast fully covers, with its band (a part already over today is left out). */
+  parts: { part: DayPart; band: Band }[];
+  fact: ForecastFact;
+};
+
+/**
+ * A date's outlook, or null exactly when `dayPhrase` says nothing: an absent
+ * or unusable forecast, a date outside today … today + 6, or planning hours
+ * the forecast does not fully cover with a band. Pure; it adds figures to
+ * M7's phrase and changes none of its words or rules.
+ */
+export function dayOutlook(
+  forecast: Forecast | null,
+  date: IsoDate,
+  now: Date,
+  timeZone: string,
+): DayOutlook | null {
+  const words = dayPhrase(forecast, date, now, timeZone);
+  if (!words || !forecast) return null;
+  const fact = words.facts[0]!;
+  const hours = hoursCovering(forecast.hours, new Date(fact.from), new Date(fact.to)) ?? [];
+  const temps = hours.map((h) => h.temperatureC);
+  const gusts = hours.map((h) => h.gustKmh);
+  const notBefore = date === isoDateInZone(now, timeZone) ? hourOf(now) : null;
+  const parts: DayOutlook['parts'] = [];
+  for (const p of DAY_PARTS) {
+    const partFrom = atHome(date, p.from, timeZone);
+    const to = atHome(date, p.to, timeZone);
+    const from = notBefore && notBefore > partFrom ? notBefore : partFrom;
+    if (from.getTime() >= to.getTime()) continue;
+    const covered = hoursCovering(forecast.hours, from, to);
+    const band = covered ? bandOf(covered) : null;
+    if (band) parts.push({ part: p.part, band });
+  }
+  return {
+    date,
+    phrase: words.text,
+    lowC: temps.length && temps.every((t) => t !== null) ? Math.min(...(temps as number[])) : null,
+    highC: temps.length && temps.every((t) => t !== null) ? Math.max(...(temps as number[])) : null,
+    maxGustKmh:
+      gusts.length && gusts.every((g) => g !== null) ? Math.max(...(gusts as number[])) : null,
+    parts,
+    fact,
+  };
+}
