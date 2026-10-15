@@ -219,15 +219,46 @@ describe('G22: every counting failure fails closed, with no model call', () => {
     noCall(b);
   });
 
-  it('a count that never answers times out at the call’s own timeout', async () => {
+  it('I-3: a count that never answers times out at its own bound (at most 5 s), never the call’s timeout', async () => {
     stub.countQueue.push(() => undefined);
-    // 8.3 s left: the timeout is 3.3 s.
-    const b = budget(8_300);
+    // 55 s left: the call's timeout would be 20 s; the count's is 5 s.
+    const b = budget(55_000);
     const started = Date.now();
     const e = await failure(provider().run(request(), { budget: b }));
     expect([e.code, e.detail.preflight]).toEqual(['timeout', 'failed']);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    const took = Date.now() - started;
+    expect(took).toBeGreaterThanOrEqual(LIMITS.preflightCountTimeoutMs - 100);
+    expect(took).toBeLessThan(LIMITS.preflightCountTimeoutMs + 2_000);
     noCall(b);
+  }, 15_000);
+
+  it('I-3: near the deadline the count’s bound shrinks so the call could still start; past it, fail closed', async () => {
+    stub.countQueue.push(() => undefined);
+    // 9 s left on fast (8 s minimum start): the count may take at most 1 s.
+    const b = budget(9_000);
+    expect(b.countTimeoutMs(Date.now())).toMatchObject({ ok: true });
+    const started = Date.now();
+    const e = await failure(provider().run(request(), { budget: b }));
+    expect([e.code, e.detail.preflight]).toEqual(['timeout', 'failed']);
+    expect(Date.now() - started).toBeLessThan(1_800);
+    noCall(b);
+  });
+
+  it('I-3: a slow but successful count is followed by a call that still starts', async () => {
+    stub.countQueue.push((_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ input_tokens: 1_234 }));
+      }, 600);
+    });
+    stub.queue.push(
+      okStream(FAST, { usage: { input_tokens: 1_000, cache_creation_input_tokens: 0 } }),
+    );
+    const b = budget(9_300);
+    const result = await provider().run(request(), { budget: b });
+    expect(result.countedInputTokens).toBe(1_234);
+    expect(b.modelCalls).toBe(1);
+    expect(stub.seen).toHaveLength(1);
   });
 
   it('the turn’s signal ends a count in flight', async () => {

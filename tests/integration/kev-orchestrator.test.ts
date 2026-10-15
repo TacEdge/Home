@@ -401,6 +401,31 @@ describe('G22 in the turn: the preflight count fails closed, with zero model cal
     },
   );
 
+  it('I-3 (scripted): a slow count that answers leaves the call time to start; one past its bound fails closed at the bound', async () => {
+    const t = await turn(
+      f.kev.sam,
+      'What’s happening today?',
+      [answer('Just swimming at 3:30.', [swim])],
+      { count: () => ({ slow: 400, tokens: 2_000 }), deps: { turnDeadlineMs: 9_500 } },
+    );
+    expect(t.done.outcome).toBe('answer');
+    expect(t.provider.requests).toHaveLength(1);
+    await clockForward(admin, 2);
+    const started = Date.now();
+    const u = await turn(f.kev.sam, 'What’s happening today?', [answer('x', [swim])], {
+      count: () => ({ slow: 4_000, tokens: 2_000 }),
+      deps: { turnDeadlineMs: 9_500 },
+    });
+    // 9.5 s less the fast tier's 8 s minimum start: the count may take about 1.5 s, not 4.
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(u.provider.requests).toHaveLength(0);
+    expect(u.events).toContainEqual({
+      type: 'error',
+      code: 'timeout',
+      message: ERROR_TEXT.timeout,
+    });
+  });
+
   it('every model call in a turn is counted first, and the count sees the complete request', async () => {
     const t = await turn(f.kev.sam, 'What have we got this weekend?', [
       tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
@@ -944,24 +969,22 @@ describe('the conversation (C3–C11, C16, C17)', () => {
     expect(tokens).toBeLessThanOrEqual(LIMITS.windowTokens);
   });
 
-  it('C6: an earlier answer is replayed as its validated say and blocks with ref ids only: no trace, usage or tool result', async () => {
+  it('C6: an earlier answer is replayed as its validated say and blocks, its text labelled untrusted (I-7), with ref ids only: no trace, usage or tool result', async () => {
     await turn(f.kev.sam, 'What have we got this weekend?', [
       tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
       answer('Football on Saturday at 9 with Milo.', [football]),
     ]);
     await clockForward(admin, 2);
-    const t = await turn(f.kev.sam, 'and Sunday?', [
-      answer('Nothing else is recorded for today.', []),
-    ]);
+    const t = await turn(f.kev.sam, 'and Sunday?', [answer('Just swimming at 3:30.', [swim])]);
     const replay = t.provider.requests[0]!.messages.find(
       (m) => m.role === 'assistant' && 'content' in m,
     );
     const text = replay && 'content' in replay ? (replay.content[0] as { text: string }).text : '';
     expect(JSON.parse(text)).toEqual({
-      say: { text: 'Football on Saturday at 9 with Milo.', cites: [football] },
+      say: { text: { untrusted_text: 'Football on Saturday at 9 with Milo.' }, cites: [football] },
       blocks: [],
     });
-    for (const k of ['trace', 'calls', 'attemptId', 'untrusted_text', 'tool_result', 'limits'])
+    for (const k of ['trace', 'calls', 'attemptId', 'tool_result', 'limits'])
       expect(
         JSON.stringify(
           t.provider.requests[0]!.messages.slice(0, 2).map((m) =>

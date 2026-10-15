@@ -8,9 +8,10 @@ import { estimateTokens } from './tokens';
 // (the bookkeeping read applies that bound, in instants, on the database's
 // clock, together with the 90-day expiry), at most 10 of them and at most
 // 6,000 tokens by HOME's estimate, the oldest dropped first, whole. Each
-// earlier Kev message is replayed as its stored, validated `say` and blocks
-// with its citation refs as ids only (type, id, `at`): never a tool result,
-// trace, usage, thinking or anything provider-shaped. No summary, ever (D12).
+// earlier Kev message is replayed as its stored, validated `say` and blocks,
+// each text labelled `untrusted_text` (I-7), with its citation refs as ids
+// only (type, id, `at`): never a tool result, trace, usage, thinking or
+// anything provider-shaped. No summary, ever (D12).
 
 export type StoredMessage = Readonly<{ role: 'user' | 'kev'; content: unknown }>;
 
@@ -34,10 +35,17 @@ function userText(content: unknown): string | null {
     : null;
 }
 
+/** Text as replayed: labelled, because an earlier answer may quote a record's own words. */
+const labelled = (t: string) => ({ untrusted_text: t });
+
 /**
  * Kev's reply as replayed: the validated `say` and blocks, with refs as ids
- * only, in the answer format the model writes. Nothing else of the stored
- * content (trace, calls, limits, codes) is ever replayed.
+ * only, in the answer format's shape. Nothing else of the stored content
+ * (trace, calls, limits, codes) is ever replayed. Every replayed text is
+ * labelled `untrusted_text` (Package 3 review, I-7): an earlier answer may
+ * quote a record's title or name word for word, and such text, written by a
+ * person or a calendar, must reach the next turn as data, never as the
+ * assistant's own words. The label is structural, whatever the text says.
  */
 function kevText(content: unknown): string | null {
   const c = content as Record<string, unknown> | null;
@@ -46,19 +54,19 @@ function kevText(content: unknown): string | null {
     const blocks = Array.isArray(c.blocks) ? c.blocks : [];
     const cites = Array.isArray(c.cites) ? c.cites : [];
     return JSON.stringify({
-      say: { text: c.say, cites: cites.map(refOnly).filter(Boolean) },
+      say: { text: labelled(c.say), cites: cites.map(refOnly).filter(Boolean) },
       blocks: blocks
         .map((b) => b as Record<string, unknown>)
         .filter((b) => (b.kind === 'fact' || b.kind === 'view') && typeof b.text === 'string')
         .map((b) => ({
           kind: b.kind,
-          text: b.text,
+          text: labelled(b.text as string),
           cites: (Array.isArray(b.cites) ? b.cites : []).map(refOnly).filter(Boolean),
         })),
     });
   }
   if (c.v === 1 && typeof c.text === 'string')
-    return JSON.stringify({ say: { text: c.text, cites: [] }, blocks: [] });
+    return JSON.stringify({ say: { text: labelled(c.text), cites: [] }, blocks: [] });
   return null;
 }
 

@@ -89,6 +89,17 @@ beforeAll(async () => {
     { subject: { type: 'household' }, content: INJECTIONS.context, category: 'routine' },
     d,
   );
+  // Tuesday 20 October 10:00, the household's: Kev may quote it; the next turn's model obeys it.
+  await createEventWithPeople(
+    f.h.sam,
+    {
+      title: INJECTIONS.replayTitle,
+      kind: 'other',
+      time: timed(at('2026-10-20', '10:00'), at('2026-10-20', '11:00')),
+    },
+    [],
+    d,
+  );
   await calendarRow(
     admin.db,
     f.h.sam.userId,
@@ -192,6 +203,25 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
     for (const n of [`ni-${other}-`, CANARY_MARK[other], SENSITIVE_MARK]) {
       expect(requests, n).not.toContain(n);
       expect(shown, n).not.toContain(n);
+    }
+    // Labelled only (I-7): every occurrence inside an untrusted_text value, replays included.
+    for (const n of e.onlyLabelled ?? []) {
+      const texts = last.provider.requests.flatMap((r) =>
+        r.messages.flatMap((m) =>
+          'content' in m
+            ? m.content.map((b) =>
+                b.type === 'text' ? b.text : (b as { content: string }).content,
+              )
+            : [],
+        ),
+      );
+      expect(texts.join('\n'), n).toContain(n);
+      const unlabelled = texts.map((t) =>
+        t.replace(/"untrusted_text":"(?:[^"\\]|\\.)*"/g, '"untrusted_text":"[labelled]"'),
+      );
+      for (const t of unlabelled) expect(t, n).not.toContain(n);
+      const replays = texts.filter((t) => t.includes('"say":{"text":{"untrusted_text"'));
+      expect(replays.join(''), 'the earlier answer is replayed, labelled').toContain(n);
     }
     // No model text is shown that the validator did not pass: an answer's
     // `say` is the stored, checked one.

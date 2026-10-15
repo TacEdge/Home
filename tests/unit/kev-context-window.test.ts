@@ -107,9 +107,19 @@ describe('C6: what an earlier answer replays as', () => {
         violations: ['time.unsupported'],
       }),
     ]);
+    // Every replayed text labelled (I-7): an earlier answer may quote a record word for word.
     expect(JSON.parse(e!.kev)).toEqual({
-      say: { text: 'Football on Saturday at 9.', cites: [{ type: 'event', id: 'e1', at }] },
-      blocks: [{ kind: 'fact', text: 'Nothing else is recorded for Sunday.', cites: [] }],
+      say: {
+        text: { untrusted_text: 'Football on Saturday at 9.' },
+        cites: [{ type: 'event', id: 'e1', at }],
+      },
+      blocks: [
+        {
+          kind: 'fact',
+          text: { untrusted_text: 'Nothing else is recorded for Sunday.' },
+          cites: [],
+        },
+      ],
     });
     for (const k of [
       'trace',

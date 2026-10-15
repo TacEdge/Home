@@ -88,6 +88,12 @@ export type Expectations = {
   limits?: string[];
   /** On the fast configuration only: whether the turn moved to deep. */
   escalated?: boolean;
+  /**
+   * Record text that reaches the last turn's requests only inside an
+   * `untrusted_text` value: in tool results, the bundle and replayed earlier
+   * answers alike (I-7). Each must appear there at least once.
+   */
+  onlyLabelled?: string[];
 };
 
 export type Scenario = {
