@@ -425,6 +425,45 @@ describe('the reviewers’ surviving coverage mutations, each now caught', () =>
       ).toEqual(['absence.unsupported']);
   });
 
+  it('R4b: an event from 16:50 to 17:05 reaches the evening', () => {
+    const late: Ref = { type: 'event', id: id(82), at: `${SAT}T16:50:00+13:00` };
+    const l = agendaRead(fixtureLedger([]), SAT, SAT, [
+      {
+        date: SAT,
+        items: [
+          {
+            type: 'event',
+            ref: late,
+            title: u('Pick-up'),
+            all_day: false,
+            start: late.at,
+            end: `${SAT}T17:05:00+13:00`,
+            kind: null,
+            people: [],
+          },
+        ],
+      },
+    ]);
+    expect(
+      codes(check(plan('here_you_go', [absence({ from: SAT, to: SAT, part: 'evening' })]), l)),
+    ).toEqual(['absence.unsupported']);
+    expect(
+      texts(check(plan('here_you_go', [absence({ from: SAT, to: SAT, part: 'morning' })]), l))[1],
+    ).toBe('Nothing is recorded for Saturday 17 October, in the morning.');
+  });
+
+  it('a timed occurrence over several days is on the days between, even listed only on its first', () => {
+    // Read for Tuesday 13 October only (a week back is askable): the conference is listed under it.
+    const l = agendaRead(fixtureLedger([]), '2026-10-13', '2026-10-13', [
+      { date: '2026-10-13', items: [{ ...confItem, day: 1 }] },
+    ]);
+    const e = l.entries.find((x) => x.ref.id === conf.id && x.record)!;
+    expect([...e.dates].sort()).toEqual(['2026-10-13', '2026-10-14', '2026-10-15']);
+    expect(
+      codes(check(plan('here_you_go', [absence({ from: TODAY, to: TODAY, people: [P.alex] })]), l)),
+    ).toEqual(['absence.unsupported']);
+  });
+
   it('overnight (Saturday 22:00 to Sunday 02:00): Saturday evening and Sunday morning only', () => {
     const night: Ref = { type: 'event', id: id(90), at: `${SAT}T22:00:00+13:00` };
     const item = {
@@ -475,6 +514,28 @@ describe('the reviewers’ surviving coverage mutations, each now caught', () =>
 
   it('R11: a forecast absence for a day the forecast has is refused', () => {
     const l = fixtureLedger([reads.weekendWeather]);
+    expect(
+      codes(check(plan('here_you_go', [absence({ of: 'forecast', from: SAT, to: SAT })]), l)),
+    ).toEqual(['absence.unsupported']);
+  });
+
+  it('R11, isolated: a forecast record for the day contradicts another read’s "uncovered"', () => {
+    const l = fixtureLedger([reads.weekendWeather]);
+    l.addResult(
+      'get_weather',
+      getWeather.output.parse({
+        configured: true,
+        freshness: 'fresh',
+        fetched_at: '2026-10-14T06:55:00+13:00',
+        days: [],
+        uncovered: [SAT],
+        credit: 'Open-Meteo',
+        count: 1,
+        truncated: false,
+      }),
+      [],
+      { from: SAT, to: SAT },
+    );
     expect(
       codes(check(plan('here_you_go', [absence({ of: 'forecast', from: SAT, to: SAT })]), l)),
     ).toEqual(['absence.unsupported']);
