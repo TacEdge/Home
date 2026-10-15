@@ -17,9 +17,12 @@ import { providerTlsOptions, type ProviderTlsOptions } from './tls';
 // which is left unchanged), reusing `isPublicAddress`.
 //
 // - Destination: `https://api.anthropic.com` exactly (scheme, host, default
-//   port, no user info, no fragment, no query); POST `/v1/messages`, and GET
-//   `/v1/models/{id}` (the manual Models API check, G1). Anything else is
-//   refused before connecting: `refused_destination`.
+//   port, no user info, no fragment, no query); POST `/v1/messages`, POST
+//   `/v1/messages/count_tokens` (the preflight token count before every model
+//   call, G22: owner decision, 2026-10-15; that exact path, under every rule
+//   here, and nothing else of the provider's API), and GET `/v1/models/{id}`
+//   (the manual Models API check, G1). Anything else is refused before
+//   connecting: `refused_destination`.
 // - Addresses: every resolved address checked when connecting, and the
 //   connected socket's address checked again; a non-public one is
 //   `unreachable`.
@@ -132,6 +135,9 @@ export function isProviderFetch(f: unknown): f is ProviderFetch {
   return typeof f === 'function' && minted.has(f);
 }
 
+/** The preflight token count's one path (G22; contract §5.4). */
+export const COUNT_TOKENS_PATH = '/v1/messages/count_tokens';
+
 const MODEL_PATH = /^\/v1\/models\/[a-z0-9][a-z0-9.-]{0,99}$/;
 
 /** The destination rule, exactly (§5.4). Pure; exported for its test. */
@@ -146,7 +152,8 @@ export function approveDestination(url: URL, method: string): boolean {
     url.hash !== ''
   )
     return false;
-  if (method === 'POST') return url.pathname === '/v1/messages';
+  if (method === 'POST')
+    return url.pathname === '/v1/messages' || url.pathname === COUNT_TOKENS_PATH;
   if (method === 'GET') return MODEL_PATH.test(url.pathname);
   return false;
 }

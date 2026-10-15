@@ -122,6 +122,12 @@ export type ProviderRequest = Readonly<{
   /** Never a forced tool: `auto`, or `none` to ask for an answer with what it has. */
   toolChoice: 'auto' | 'none';
   messages: readonly ProviderMessage[];
+  /**
+   * The final answer's JSON schema (structured output, contract §5.1): static,
+   * no personal data. Absent on a tier whose answer comes through the strict
+   * `answer` tool instead (G7's fallback).
+   */
+  outputFormat?: Readonly<Record<string, unknown>>;
 }>;
 
 export type ProviderToolUse = Readonly<{ ref: ToolUseRef; name: string; input: unknown }>;
@@ -138,6 +144,12 @@ export type ProviderResult = Readonly<{
   ms: number;
   /** Whether HOME's one retry was used to get this result. */
   retried: boolean;
+  /**
+   * The preflight count of this request's complete input (G22), made before
+   * the call. The provider's own count at `message_start` (`usage`) stays
+   * the authoritative one: the count is the provider's estimate.
+   */
+  countedInputTokens: number;
 }>;
 
 /** A failed call (after any retry), with what is known of its usage (contract §5.1). */
@@ -150,6 +162,13 @@ export class ProviderError extends Error {
       /** Input from `message_start` and output so far; null when the provider reported nothing. */
       partialUsage: CallUsage | null;
       retried: boolean;
+      /**
+       * Set when the preflight token count (G22) stopped the call before it
+       * was made: `failed` (the count errored, timed out, was refused or
+       * malformed: fail closed) or `over_cap` (counted above 32,000 tokens).
+       * No model call was made, nothing was charged.
+       */
+      preflight?: 'failed' | 'over_cap';
     }>,
   ) {
     super(code);

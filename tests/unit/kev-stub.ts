@@ -15,9 +15,19 @@ export type Handler = (req: IncomingMessage, res: ServerResponse, body: string) 
 
 export type Stub = {
   port: number;
+  /** Requests to POST /v1/messages (and any other path but the count). */
   seen: Seen[];
   /** Handlers for the next requests, in order; a request with none left gets a 500. */
   queue: Handler[];
+  /** Requests to POST /v1/messages/count_tokens (G22), kept apart from `seen`. */
+  counts: Seen[];
+  /**
+   * Handlers for the next count requests, in order; with none left a count
+   * is answered `{"input_tokens": defaultCount}`, so a test about the call
+   * itself need not script its preflight.
+   */
+  countQueue: Handler[];
+  defaultCount: number;
   closed: number;
   close(): Promise<void>;
 };
@@ -27,6 +37,9 @@ export async function startStub(): Promise<Stub> {
     port: 0,
     seen: [],
     queue: [],
+    counts: [],
+    countQueue: [],
+    defaultCount: 1_234,
     closed: 0,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
@@ -35,8 +48,16 @@ export async function startStub(): Promise<Stub> {
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8');
-      stub.seen.push({ method: req.method, url: req.url, headers: req.headers, body });
+      const seen = { method: req.method, url: req.url, headers: req.headers, body };
       res.on('close', () => (stub.closed += 1));
+      if (req.url === '/v1/messages/count_tokens') {
+        stub.counts.push(seen);
+        const c = stub.countQueue.shift();
+        if (c) return c(req, res, body);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ input_tokens: stub.defaultCount }));
+      }
+      stub.seen.push(seen);
       const h = stub.queue.shift();
       if (!h) {
         res.writeHead(500);
@@ -132,5 +153,13 @@ export function status(
     res.end(
       JSON.stringify({ type: 'error', error: { type, message: 'synthetic error body', ...extra } }),
     );
+  };
+}
+
+/** A count response: `{"input_tokens": n}`, or any JSON body as given. */
+export function countJson(body: unknown, statusCode = 200): Handler {
+  return (_req, res) => {
+    res.writeHead(statusCode, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
   };
 }

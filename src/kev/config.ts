@@ -109,6 +109,18 @@ export const TIERS: Readonly<Record<KevTier, TierConfig>> = Object.freeze({
   }),
 });
 
+/**
+ * What one preflight token count costs (G22): nothing. "Token counting is
+ * free to use but subject to requests per minute rate limits" (the
+ * provider's token-counting page, read 2026-10-15; its own limits, separate
+ * from the Messages API's). Kept here so the accounting is explicit: a
+ * count is charged nothing, writes no `kev_usage` row and is not one of an
+ * attempt's five model calls. If the provider ever prices it, this changes
+ * with G2's price check, and settlement must record it before any live call
+ * (tests/unit/kev-money.test.ts holds it at zero until then).
+ */
+export const COUNT_TOKENS_COST_USD_MICROS = 0n;
+
 /** Where inference runs, on every request (D3): `us`, which multiplies every price by 1.1. */
 export const INFERENCE_GEO = 'us';
 /** The `us` multiplier as an exact fraction: 11/10. */

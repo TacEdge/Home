@@ -50,6 +50,9 @@ afterAll(() => stub.close());
 beforeEach(() => {
   stub.seen.length = 0;
   stub.queue.length = 0;
+  stub.counts.length = 0;
+  stub.countQueue.length = 0;
+  stub.defaultCount = 1_234;
 });
 
 function budget(tier: 'fast' | 'deep' = 'fast', deadlineMs = 55_000) {
@@ -111,8 +114,12 @@ describe('N4, G5: every request goes through HOME’s fetch, and streams through
       expect(b.calls[0]?.costUsdMicros).toBe(27_720n); // N12 through the adapter
       expect(globalCalls).toBe(0);
       expect(httpsSpy).not.toHaveBeenCalled();
-      // One request, made by HOME's fetch, reached the stub.
-      expect(httpSpy).toHaveBeenCalledTimes(1);
+      // Two requests, both made by HOME's fetch, reached the stub: the
+      // preflight count (G22) and then the call.
+      expect(httpSpy).toHaveBeenCalledTimes(2);
+      expect(stub.counts).toHaveLength(1);
+      expect(stub.counts[0]).toMatchObject({ method: 'POST', url: '/v1/messages/count_tokens' });
+      expect(result.countedInputTokens).toBe(1_234);
       expect(stub.seen).toHaveLength(1);
       expect(stub.seen[0]).toMatchObject({ method: 'POST', url: '/v1/messages' });
     } finally {
@@ -467,8 +474,13 @@ describe('N6, G6: time and abort', () => {
 
   it('M-2: a call aborted before it ever entered HOME’s fetch left nothing: not recorded, no cost', async () => {
     const ac = new AbortController();
-    ac.abort();
     const b = budget();
+    // Aborted once its count has been answered, as the call itself starts.
+    const begin = b.beginCall.bind(b);
+    b.beginCall = (now: number) => {
+      ac.abort();
+      return begin(now);
+    };
     const e = await failure(provider().run(request(), { budget: b, signal: ac.signal }));
     expect(e.code).toBe('timeout');
     expect(stub.seen).toHaveLength(0);
