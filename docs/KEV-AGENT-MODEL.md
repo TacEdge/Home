@@ -62,6 +62,8 @@ type KevEvent =
 
 *Approved in M8 Package 0 (ADR 0012, owner decision, 2026-10-13):* `KevRequest` gains `now`, from the adapter's time source, and `conversationId` is resolved from the actor, never taken from the client. `KevEvent` gains `working` (fixed progress strings); `detail` becomes structured blocks, each a fact or **Kev's view**, with citations; `error` carries a closed code. `captured` and `proposal` are not emitted until M9. An answer is shown only after code has checked it against the records the tools returned (ADR 0012 §8, §11, §33).
 
+*As built in M8 Package 3 (ADR 0012 §45; in review):* `kev.handle()` is `src/kev/orchestrator.ts`, an async generator. Events, in order: `started` (the person's words are stored), `working` (fixed strings from the tool names), `escalated`, then either `say`, `detail` and `cite` (checked and already stored) or `error` (a closed code and its fixed line), and always `done` last (the outcome, the code's limit sentences, whether Keep in To sort applies, the decline code). `started` and `done` are additions to the approved list, so an adapter knows when the words are kept and when the turn has ended. Nothing the model wrote is emitted before the validator passes it.
+
 ## 4. How a Kev turn works
 
 1. **Request** arrives through a channel adapter as a `KevRequest`.
