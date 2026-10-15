@@ -150,7 +150,7 @@ function exempt(text: string, recorded: Iterable<string>, quotedOk: ReadonlySet<
   let out = normalisePunctuation(text);
   // Quoted segments that are a recorded string, wherever the record came from.
   out = out.replace(/["“”']([^"“”']{1,200})["“”']/g, (m, inner: string) =>
-    quotedOk.has(inner.toLowerCase()) ? ' ⁣ ' : m,
+    quotedOk.has(inner.toLowerCase()) ? ' \u2063 ' : m,
   );
   const list = [...new Set([...recorded].map((r) => normalisePunctuation(r).trim()))]
     .filter((r) => r.length > 0)
@@ -158,7 +158,7 @@ function exempt(text: string, recorded: Iterable<string>, quotedOk: ReadonlySet<
   for (const r of list)
     out = out.replace(
       new RegExp(`(?<![\\p{L}\\p{N}])${escape(r)}(?![\\p{L}\\p{N}])`, 'giu'),
-      ' ⁣ ',
+      ' \u2063 ',
     );
   return out;
 }
