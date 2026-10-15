@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { auditLog } from '@/db/schema';
 import { auditRowColumns, listAudit, recordAudit, type AuditCursor } from '@/trust/audit';
-import { systemActor, type UserActor } from '@/trust/actor';
+import { systemActor, type Actor, type UserActor } from '@/trust/actor';
 import { adminDb, testDb } from './db';
 
 const { db, close } = testDb();
@@ -40,6 +41,7 @@ const sam: UserActor = {
   via: 'ui',
   channel: 'web',
 };
+const alex: UserActor = { ...sam, userId: 'u-alex', email: 'alex@example.test' };
 
 describe('audit_log', () => {
   it('records an entry for a user actor', async () => {
@@ -101,60 +103,148 @@ describe('audit_log', () => {
   });
 
   it('pages completely when timestamps differ only below the millisecond (Postgres keeps microseconds, JavaScript does not)', async () => {
+    // Issue #77: the walk is confined to this test's own rows, between two
+    // fences, so it neither reads nor depends on rows other files leave in the
+    // shared, append-only log. The window is a fresh second in a reserved year
+    // that nothing else writes to (local test databases keep earlier runs).
+    const run = randomUUID().slice(0, 8);
+    const second = (
+      await db.execute(
+        sql`select to_char(coalesce(date_trunc('second', max(at)) + interval '1 second',
+              timestamptz '1990-01-01T00:00:00Z') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') as s
+            from audit_log where at >= timestamptz '1990-01-01T00:00:00Z' and at < timestamptz '1991-01-01T00:00:00Z'`,
+      )
+    ).rows[0]?.s as string;
+    const at = (frac: string) => `${second}.${frac}Z`;
+
     // Twenty rows inside one JavaScript millisecond: distinct microseconds,
     // some shared exactly, inserted out of order. A cursor built from a
-    // JavaScript Date (milliseconds) cannot tell them apart.
+    // JavaScript Date (milliseconds) cannot tell them apart. Some are private
+    // to one adult, so the walk also proves Activity's visibility per reader.
     const micros = [
       901, 17, 450, 450, 999, 0, 233, 233, 233, 612, 88, 777, 1, 998, 500, 500, 321, 654, 42, 865,
     ];
-    const events = micros.map((_, i) => `test.micro.${i}`);
-    await db.execute(
-      sql`insert into audit_log (at, actor_via, event) values ${sql.join(
-        micros.map(
-          (us, i) =>
-            sql`(${`2026-03-02T10:00:00.123${String(us).padStart(3, '0')}Z`}::timestamptz, 'system', ${events[i]})`,
-        ),
-        sql`, `,
-      )}`,
+    const owner = (i: number) => (i % 5 === 1 ? 'u-sam' : i % 5 === 3 ? 'u-alex' : null);
+    const events = micros.map((_, i) => `test.micro.${run}.${i}`);
+    const insert = (rows: { at: string; event: string; owner?: string | null }[]) =>
+      db.execute(
+        sql`insert into audit_log (at, actor_via, event, visibility, visible_to_user_id) values ${sql.join(
+          rows.map(
+            (r) =>
+              sql`(${r.at}::timestamptz, 'system', ${r.event}, ${r.owner ? 'private' : 'household'}, ${r.owner ?? null})`,
+          ),
+          sql`, `,
+        )} returning id`,
+      );
+    // The fences: the walk starts below the top one and stops at the floor.
+    const [top] = (await insert([{ at: at('002000'), event: `test.micro.${run}.top` }])).rows;
+    const [floor] = (await insert([{ at: at('000000'), event: `test.micro.${run}.floor` }])).rows;
+    await insert(
+      micros.map((us, i) => ({
+        at: at(`001${String(us).padStart(3, '0')}`),
+        event: events[i] as string,
+        owner: owner(i),
+      })),
     );
+    const topId = top?.id as string;
+    const floorId = floor?.id as string;
+
     // The one true order, computed by Postgres at full precision.
     const expected = (
       await db.execute(
-        sql`select event from audit_log where event like 'test.micro.%' order by at desc, id desc`,
+        sql`select event from audit_log where event like ${`test.micro.${run}.%`}
+              and event not in (${`test.micro.${run}.top`}, ${`test.micro.${run}.floor`})
+            order by at desc, id desc`,
       )
     ).rows.map((r) => r.event as string);
     expect(expected).toHaveLength(micros.length);
+    const ownerOf = new Map(events.map((e, i) => [e, owner(i)]));
+    const visibleTo = (userId: string | null) =>
+      expected.filter((e) => userId === null || [null, userId].includes(ownerOf.get(e) ?? null));
 
-    // Every page size, including one that ends a page on every row. Paged as
-    // the system actor, which sees every row except Activity about sensitive
-    // context (ADR 0005 §43): this is about pagination, and a user's Activity
-    // rightly omits rows about others' private records (P-1).
-    for (const limit of [1, 2, 3, 4, 5, 7]) {
+    // Walk from the top fence down to the floor fence, one page at a time.
+    const walk = async (actor: Actor, limit: number) => {
       const seen: { id: string; event: string }[] = [];
-      let cursor: AuditCursor | undefined;
-      for (let guard = 0; guard < 10_000; guard++) {
-        const page = await listAudit(systemActor, { limit, before: cursor }, { db });
-        seen.push(...page.rows.map((r) => ({ id: r.id, event: r.event })));
-        if (!page.next) break;
-        cursor = page.next;
+      let cursor: AuditCursor | undefined = { id: topId };
+      let calls = 0;
+      let reachedFloor = false;
+      for (let guard = 0; guard < 1_000 && cursor; guard++) {
+        calls++;
+        const page = await listAudit(actor, { limit, before: cursor }, { db });
+        for (const r of page.rows) {
+          if (r.id === floorId) {
+            reachedFloor = true;
+            break;
+          }
+          seen.push({ id: r.id, event: r.event });
+        }
+        if (reachedFloor) break;
+        cursor = page.next ?? undefined;
       }
-      const micro = seen.map((r) => r.event).filter((e) => e.startsWith('test.micro.'));
-      // Complete and in order: nothing skipped, nothing out of place.
-      expect(micro, `page size ${limit}`).toEqual(expected);
-      // Nothing repeated: no row of the whole log is returned twice.
-      const ids = seen.map((r) => r.id);
-      expect(new Set(ids).size, `page size ${limit}`).toBe(ids.length);
-      // And the walk covered the whole log.
-      const total = (
-        await db.execute(sql`select count(*)::int as n from audit_log a
-          where not (a.subject_type = 'context' and (
-            exists (select 1 from context c where c.id::text = a.subject_id and c.sensitivity = 'sensitive')
-            or (not exists (select 1 from context c where c.id::text = a.subject_id)
-                and exists (select 1 from audit_log p where p.subject_type = 'context'
-                  and p.subject_id = a.subject_id and p.meta ->> 'sensitivity' = 'sensitive'))))`)
-      ).rows[0]?.n;
-      expect(ids.length, `page size ${limit}`).toBe(total);
+      return { seen, calls, reachedFloor };
+    };
+
+    const readers: [string, Actor, string | null][] = [
+      ['system', systemActor, null],
+      ['sam', sam, 'u-sam'],
+      ['alex', alex, 'u-alex'],
+    ];
+    const check = async () => {
+      const results: Record<string, string[]> = {};
+      // Every page size, including one that ends a page on every row.
+      for (const limit of [1, 2, 3, 4, 5, 7]) {
+        for (const [name, actor, userId] of readers) {
+          const label = `${name}, page size ${limit}`;
+          const { seen, calls, reachedFloor } = await walk(actor, limit);
+          const want = visibleTo(userId);
+          expect(reachedFloor, label).toBe(true);
+          // Complete and in order: nothing skipped, nothing out of place,
+          // and nothing from outside the window.
+          expect(
+            seen.map((r) => r.event),
+            label,
+          ).toEqual(want);
+          // Nothing repeated.
+          expect(new Set(seen.map((r) => r.id)).size, label).toBe(seen.length);
+          // The walk is bounded by this test's rows, not by the log's size.
+          expect(calls, label).toBeLessThanOrEqual(Math.ceil((want.length + 1) / limit));
+          results[label] = seen.map((r) => r.id);
+        }
+      }
+      return results;
+    };
+
+    const before = await check();
+    // Cross-adult privacy, stated outright: each adult's private rows reach
+    // only that adult (and the system), never the other adult.
+    const samPrivate = events.filter((e) => ownerOf.get(e) === 'u-sam');
+    const alexPrivate = events.filter((e) => ownerOf.get(e) === 'u-alex');
+    expect(samPrivate.length).toBeGreaterThan(0);
+    expect(alexPrivate.length).toBeGreaterThan(0);
+    expect(visibleTo('u-sam')).not.toContain(alexPrivate[0]);
+    for (const limit of [1, 7]) {
+      const forSam = (await walk(sam, limit)).seen.map((r) => r.event);
+      const forAlex = (await walk(alex, limit)).seen.map((r) => r.event);
+      for (const e of alexPrivate) expect(forSam).not.toContain(e);
+      for (const e of samPrivate) expect(forAlex).not.toContain(e);
+      expect(forSam).toEqual(expect.arrayContaining(samPrivate));
+      expect(forAlex).toEqual(expect.arrayContaining(alexPrivate));
     }
+
+    // Regression: unrelated rows — just above the top fence, older than the
+    // window, and written now as other files write them; household and
+    // private to either adult — leave every walk unchanged. (Nothing is dated
+    // in the future: other files expect their own rows at the top of the log.)
+    const unrelated = Array.from({ length: 60 }, (_, i) => ({
+      at: [at('002001'), at('500000'), '1989-12-31T23:59:59Z'][i % 3] as string,
+      event: `test.unrelated.${run}.${i}`,
+      owner: [null, 'u-sam', 'u-alex'][Math.floor(i / 3) % 3] ?? null,
+    }));
+    await insert(unrelated);
+    for (let i = 0; i < 40; i++)
+      await recordAudit(sam, { event: `test.unrelated.${run}.now.${i}` }, { db });
+    const after = await check();
+    expect(after).toEqual(before);
   });
 
   it('a cursor naming no row returns an empty page rather than restarting', async () => {

@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, eq, exists, getTableName, not, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, getTableName, not, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import {
   auditLog,
@@ -102,22 +102,52 @@ function snapshotVisibleTo(actor: Actor & { kind: 'user' }): SQL {
   ) as SQL;
 }
 
-/** Some earlier row about the same subject recorded it as sensitive. */
-const everSensitive = sql`exists (select 1 from ${auditLog} prior
-  where prior.subject_type = ${auditLog.subjectType} and prior.subject_id = ${auditLog.subjectId}
-    and prior.meta ->> 'sensitivity' = 'sensitive')`;
+// Issue #77: every test below is an uncorrelated `in (select …)`, which
+// Postgres runs, and costs, as one hashed lookup per query. The correlated
+// `exists (select 1 from t where t.id::text = audit_log.subject_id …)` it
+// replaced was costed as a scan of the subject table (and, for `everSensitive`,
+// of the whole log) for every audit row, so the estimate grew with the log
+// until it crossed Postgres's JIT thresholds and one page of Activity spent
+// seconds compiling. tests/integration/activity-query.test.ts holds the old
+// predicate and proves the two list the same rows, in the same order.
+
+/**
+ * The row's subject_id as a uuid, or null when it cannot name a registered
+ * record. Every registered table's id is a uuid, and `id::text` is always the
+ * lowercase, hyphenated form, so `id::text = subject_id` holds exactly when
+ * subject_id has that form and names the same uuid. The guard turns any other
+ * text into null before the cast, so the cast never sees text it would reject.
+ */
+const subjectUuid = sql`(case when ${auditLog.subjectId} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then ${auditLog.subjectId}::uuid end)`;
+
+/** The row names a record of `table` (one `where` admits, if given): true or false, never null. */
+function namesRowOf(table: PgTable & { id: PgColumn }, where?: SQL): SQL {
+  const ids = where
+    ? sql`select ${table.id} from ${table} where ${where}`
+    : sql`select ${table.id} from ${table}`;
+  return sql`(${subjectUuid} is not null and ${subjectUuid} in (${ids}))`;
+}
+
+/**
+ * Some row about the same subject recorded it as sensitive. Null subject ids
+ * are left out of the list, so the test is true or false, never null.
+ */
+const everSensitive = (type: string): SQL =>
+  sql`(${auditLog.subjectId} is not null and ${auditLog.subjectId} in (select prior.subject_id from ${auditLog} prior
+    where prior.subject_type = ${type} and prior.subject_id is not null
+      and prior.meta ->> 'sensitivity' = 'sensitive'))`;
 
 /** Rows about a sensitive record (now, or ever, once it is gone): never listed by default. */
 function aboutSensitive(): SQL {
   const parts = Object.entries(auditSubjects)
     .filter(([, s]) => s.sensitivity)
     .map(([type, s]) => {
-      const same = sql`${s.table.id}::text = ${auditLog.subjectId}`;
-      const sensitiveNow = exists(
-        sql`(select 1 from ${s.table} where ${same} and ${s.sensitivity} = 'sensitive')`,
-      );
-      const gone = not(exists(sql`(select 1 from ${s.table} where ${same})`));
-      return and(eq(auditLog.subjectType, type), or(sensitiveNow, and(gone, everSensitive))) as SQL;
+      const sensitiveNow = namesRowOf(s.table, sql`${s.sensitivity} = 'sensitive'`);
+      const gone = not(namesRowOf(s.table));
+      return and(
+        eq(auditLog.subjectType, type),
+        or(sensitiveNow, and(gone, everSensitive(type))),
+      ) as SQL;
     });
   return parts.length ? (or(...parts) as SQL) : sql`false`;
 }
@@ -142,13 +172,11 @@ export function auditVisibleTo(actor: Actor): SQL {
     ),
   ) as SQL;
   const domain = Object.entries(auditSubjects).map(([type, s]) => {
-    // Text comparison: subject_id is free text, so a cast could fail.
-    const same = sql`${s.table.id}::text = ${auditLog.subjectId}`;
     const rule = s.visible
       ? s.visible(actor)
       : visibleTo(actor, s.table as PgTable & VisibilityColumns);
-    const canSeeNow = exists(sql`(select 1 from ${s.table} where ${same} and ${rule})`);
-    const gone = not(exists(sql`(select 1 from ${s.table} where ${same})`));
+    const canSeeNow = namesRowOf(s.table, rule);
+    const gone = not(namesRowOf(s.table));
     return and(eq(auditLog.subjectType, type), or(canSeeNow, and(gone, snapshot))) as SQL;
   });
   return and(or(and(notADomainSubject, snapshot), ...domain), notSensitive) as SQL;

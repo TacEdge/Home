@@ -109,7 +109,7 @@ Do not add dependencies casually. Prefer the platform and what's already here. A
 2. Read the relevant docs and existing code; match its patterns.
 3. Keep changes small and focused. One concern per PR.
 4. Write tests with the change. Engines and visibility rules need thorough unit tests; UI flows need a Playwright happy path when they matter.
-5. Before finishing: `pnpm lint`, `pnpm typecheck`, `pnpm test` (and evals when Kev changed) must pass. `pnpm verify:focused` is the routine check while working; the full `pnpm verify` is required before a PR (`docs/runbooks/LOCAL-DEV.md`).
+5. Verify by risk, not by habit (`docs/runbooks/LOCAL-DEV.md`, "Verification policy"). While working: `pnpm verify:focused` or the changed files' own tests, with lint and typecheck. Before a PR: `pnpm lint`, `pnpm typecheck`, the focused tests for what changed, `pnpm build` where relevant, the Kev evals when Kev changed, and `node scripts/ci-select.mts <paths>` for the risk tier. CI owns the full regression whenever the classifier requires it; unmapped or high-risk changes escalate (it fails closed). Don't routinely duplicate full local verification and CI. A full local suite needs a documented reason (such as reproducing a specific CI failure) and runs under `timeout 20m`; a timeout is INCOMPLETE, never PASS. Before interrupting a run, inspect its process and progress. Never weaken required CI or branch protection to gain speed.
 6. Update docs when behaviour, schema or architecture changes. Record significant decisions as ADRs in `docs/decisions/`.
 7. Don't build anything on the "Not yet" list in `docs/ROADMAP.md`. Don't add speculative abstractions for future domains.
 
