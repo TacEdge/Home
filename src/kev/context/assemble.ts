@@ -37,7 +37,8 @@ import {
 // The volatile bundle, built by code as the requesting adult, last before the
 // question: the weekday, date, time and zone; the reader (their linked
 // person's id and name); the people the reader can see (name, role,
-// relationship, age, in household; never a date of birth); the reader's
+// relationship, age, in household; never a date of birth), with how many
+// there are and whether the list is cut; the reader's
 // Today (the headline and today's items, as get_today returns them, without
 // insights); freshness (how many visible calendars are healthy, stale,
 // failed or never refreshed, and the forecast's fetch time); the To sort
@@ -81,6 +82,10 @@ export const bundleSchema = z
           .strict(),
       )
       .max(MAX_ITEMS),
+    /** How many people the reader can see, before any cut: the model can tell a full list from a cut one. */
+    people_count: z.number().int().nonnegative(),
+    /** Whether `people` is cut (`people_count` > the people listed). Always present. */
+    people_truncated: z.boolean(),
     today: todaySchema,
     freshness: z
       .object({
@@ -147,6 +152,8 @@ export async function assembleBundle(
         age: ageOn(p.dateOfBirth, read.date),
         in_household: p.inHousehold,
       })),
+      people_count: people.length,
+      people_truncated: people.length > shown.length,
       today: today.data,
       freshness: {
         calendars: {

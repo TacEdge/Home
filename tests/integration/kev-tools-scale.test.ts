@@ -175,6 +175,49 @@ afterAll(async () => {
   await admin.close();
 });
 
+describe('the bundle’s people: counted before the cut, cut at 50, within budget', () => {
+  /** Sam's visible people made up to `total` with household people; Alex's private ones never count. */
+  async function peopleUpTo(total: number) {
+    await admin.db.execute(sql`delete from person where name like 'bp %'`);
+    const base = 6; // Sam, Alex, Milo, Isla, Nana Jo and Sam's own private canary.
+    await admin.db.execute(sql`
+      insert into person (created_by, created_via, visibility, name, role, in_household)
+      select ${f.h.sam.userId}, 'ui', 'household', 'bp ' || lpad(n::text, 3, '0'), 'other', false
+      from generate_series(1, ${total - base}) as n`);
+    // The other adult's private people: the reader's count must not move.
+    await admin.db.execute(sql`
+      insert into person (created_by, created_via, visibility, name, role, in_household)
+      select ${f.h.alex.userId}, 'ui', 'private', 'bp alex ' || n, 'other', false
+      from generate_series(1, 25) as n`);
+    return assembleBundle({ actor: f.kev.sam, now: NOW, timeZone: ZONE, deps });
+  }
+
+  afterAll(async () => {
+    await admin.db.execute(sql`delete from person where name like 'bp %'`);
+  });
+
+  it('fewer than, exactly and one more than 50; and 300: the count is the reader’s, the flag exact', async () => {
+    const fixture = await assembleBundle({ actor: f.kev.sam, now: NOW, timeZone: ZONE, deps });
+    expect(fixture.bundle).toMatchObject({ people_count: 6, people_truncated: false });
+    expect(fixture.bundle.people).toHaveLength(6);
+    for (const [total, listed, cut] of [
+      [49, 49, false],
+      [50, 50, false],
+      [51, 50, true],
+      [300, 50, true],
+    ] as const) {
+      const b = await peopleUpTo(total);
+      expect(b.bundle.people_count, String(total)).toBe(total);
+      expect(b.bundle.people, String(total)).toHaveLength(listed);
+      expect(b.bundle.people_truncated, String(total)).toBe(cut);
+      expect(Buffer.byteLength(b.text), String(total)).toBeLessThanOrEqual(12 * 1024);
+      expect(b.text).not.toContain('bp alex');
+      // Every listed person is in the ledger's refs.
+      for (const p of b.bundle.people) expect(b.refs).toContainEqual(p.ref);
+    }
+  });
+});
+
 describe('T21: cost per tool, at the fixture’s size and at scale', () => {
   it('queries per call are equal at both sizes; every result stays within 50 items and 12 KiB', async () => {
     const small = await measure('fixture (contract §15.6)');
