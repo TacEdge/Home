@@ -726,6 +726,55 @@ export async function getSpendReport(actor: Actor, deps: Deps = {}): Promise<Spe
 }
 
 // ---------------------------------------------------------------------------
+// The model's window: a read, not a write.
+
+export type WindowRow = Readonly<{ role: 'user' | 'kev'; content: unknown; createdAt: Date }>;
+
+/** The most messages the window read returns: ten exchanges, two messages each, with room to spare. */
+const WINDOW_ROWS = 40;
+
+/**
+ * The adult's own messages for the model's window (contract §7.2, O3): their
+ * active conversation's messages created in the last `hours` hours (an
+ * instant bound on the database's clock, so a night that changes the clock
+ * is measured in real hours, C16) and never expired (90 days, C17), oldest
+ * first, at most 40. Kev only, as the adult: the conversation is always
+ * the actor's own. Reads `message` and `conversation`; writes nothing.
+ * The window's pairing and its exchange and token limits are the
+ * orchestrator's (src/kev/context/window.ts).
+ */
+export async function listConversationWindow(
+  actor: UserActor,
+  opts: { hours: number },
+  deps: Deps = {},
+): Promise<WindowRow[]> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  if (actor.via !== 'kev') throw new NotPermittedError('kev_bookkeeping_only');
+  if (!Number.isInteger(opts.hours) || opts.hours < 1 || opts.hours > 24)
+    throw new RangeError('hours');
+  const db = deps.db ?? getDb();
+  const rows = await db
+    .select({ role: message.role, content: message.content, createdAt: message.createdAt })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .where(
+      and(
+        eq(conversation.userId, actor.userId),
+        isNull(conversation.archivedAt),
+        sql`${message.createdAt} > now() - make_interval(hours => ${opts.hours})`,
+        sql`${message.createdAt} >= now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`,
+      ),
+    )
+    .orderBy(desc(message.createdAt), desc(message.id))
+    .limit(WINDOW_ROWS);
+  return rows.reverse().map((r) => ({
+    role: r.role as 'user' | 'kev',
+    content: r.content,
+    createdAt: r.createdAt,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // 5. purgeExpired and 6. clearConversation: the adult's own messages.
 
 const expired = sql`${message.createdAt} < now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`;

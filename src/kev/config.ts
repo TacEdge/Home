@@ -121,6 +121,20 @@ export const TIERS: Readonly<Record<KevTier, TierConfig>> = Object.freeze({
  */
 export const COUNT_TOKENS_COST_USD_MICROS = 0n;
 
+/**
+ * How each tier returns its final answer (contract §5.1; gate G7, NOT
+ * VERIFIED): `format`, structured output (`output_config.format` with
+ * KevAnswer's schema), the contract's design; or `tool`, a strict `answer`
+ * tool, the documented fallback if G7 finds structured output does not
+ * compose with tool use on that tier. Both are built and tested with the
+ * scripted provider; G7's live result (stage B) decides, by changing this
+ * line, before the first live orchestrated turn.
+ */
+export const ANSWER_PATH: Readonly<Record<KevTier, 'format' | 'tool'>> = Object.freeze({
+  fast: 'format',
+  deep: 'format',
+});
+
 /** Where inference runs, on every request (D3): `us`, which multiplies every price by 1.1. */
 export const INFERENCE_GEO = 'us';
 /** The `us` multiplier as an exact fraction: 11/10. */

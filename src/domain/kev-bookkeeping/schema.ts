@@ -129,9 +129,17 @@ const traceArg = z.union([
   z.boolean(),
 ]);
 
+/**
+ * What a trace entry's `tool` may name: Kev's tools, or `unknown` for a
+ * name the model asked for that is not in the registry (S7: refused,
+ * counted, and recorded with `code: 'bad_input'` and no arguments; the
+ * name itself is model text and is never stored). Application schema only.
+ */
+export const TRACE_TOOLS = [...TOOL_NAMES, 'unknown'] as const;
+
 export const traceEntrySchema = z
   .object({
-    tool: z.enum(TOOL_NAMES),
+    tool: z.enum(TRACE_TOOLS),
     ok: z.boolean(),
     code: z.enum(TOOL_ERROR_CODES).optional(),
     args: z.record(z.string().regex(/^[a-z_]{1,40}$/), traceArg),

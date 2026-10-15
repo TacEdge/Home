@@ -8,6 +8,7 @@ import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { recordId } from '../common/inputs';
 import { auditedWrite, type Deps, type DomainAudit } from '../common/write';
+import { MESSAGE_RETENTION_DAYS } from '../kev-bookkeeping/constants';
 import { addMessageInput, type AddMessageInput } from './schema';
 
 // Conversations and messages (FAMILY-DATA-MODEL §3, M2 contract §5.6). Kev
@@ -141,7 +142,11 @@ export async function addMessage(
   });
 }
 
-/** A conversation's messages, oldest first. Only its owner sees them. */
+/**
+ * A conversation's messages, oldest first. Only its owner sees them, and
+ * never one past its 90 days (M8 contract §7.2, C17): expiry is exact at
+ * every read (the screen, the export), whether or not a cleanup has run yet.
+ */
 export async function listMessages(
   actor: UserActor,
   conversationId: string,
@@ -153,7 +158,12 @@ export async function listMessages(
     .select({ message })
     .from(message)
     .innerJoin(conversation, eq(conversation.id, message.conversationId))
-    .where(own(actor, conversationId, opts.includeArchived ? 'include' : 'exclude'))
+    .where(
+      and(
+        own(actor, conversationId, opts.includeArchived ? 'include' : 'exclude'),
+        sql`${message.createdAt} >= now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`,
+      ),
+    )
     .orderBy(asc(message.createdAt), asc(message.id));
   return rows.map((r) => r.message);
 }
