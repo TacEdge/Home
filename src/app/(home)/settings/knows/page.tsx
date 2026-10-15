@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { todayInHomeZone } from '@/app/_agenda/load';
+import { todayInHomeZone } from '@/domain/agenda/load';
 import { listContext } from '@/domain/context/service';
 import { listPeople } from '@/domain/people/service';
 import { listProjects } from '@/domain/projects/service';

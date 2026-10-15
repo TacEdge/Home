@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { todayInHomeZone } from '@/app/_agenda/load';
+import { todayInHomeZone } from '@/domain/agenda/load';
 import { ActionForm } from '@/app/_forms/action-form';
 import { ConfirmAction } from '@/app/_forms/confirm-action';
 import { NotesSection } from '@/app/_notes/notes-section';

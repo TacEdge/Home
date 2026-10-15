@@ -26,7 +26,7 @@ import { createTask } from '@/domain/tasks/service';
 import { addDays, isoDateInZone } from '@/lib/dates';
 import { listAudit } from '@/trust/audit';
 import type { UserActor } from '@/trust/actor';
-import { todayInput } from '@/app/_agenda/today-input';
+import { todayInput } from '@/domain/agenda/today-input';
 import { adminDb, testDb } from './db';
 import { clearDomainRows, ensureFixtureUsers, type Household } from './fixtures';
 

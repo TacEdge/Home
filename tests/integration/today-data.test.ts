@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { todayInput } from '@/app/_agenda/today-input';
+import { todayInput } from '@/domain/agenda/today-input';
 import { connectCalendar, listCalendars } from '@/domain/calendar/service';
 import { listCaptures, captureVerbatim } from '@/domain/captures/service';
 import { agenda } from '@/domain/engines/agenda';
