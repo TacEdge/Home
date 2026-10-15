@@ -20,6 +20,7 @@ import {
   toolDefinitions,
 } from '@/kev/tools/registry';
 import {
+  ContextRefusal,
   homeInstant,
   MAX_ITEMS,
   REF_TYPES,
@@ -127,15 +128,56 @@ describe('T23: the registry', () => {
       email: SAM.email,
       channel: 'web' as const,
     };
-    expect(() => createToolRunner({ ...base, actor: { ...user, via: 'ui' } })).toThrow(
-      RegistryError,
+    const refusal = (make: () => unknown) => {
+      try {
+        make();
+      } catch (e) {
+        // A closed code and nothing else: no record, value or detail in its message.
+        expect(e).toBeInstanceOf(ContextRefusal);
+        expect((e as ContextRefusal).message).toBe((e as ContextRefusal).code);
+        return (e as ContextRefusal).code;
+      }
+      return 'made';
+    };
+    expect(refusal(() => createToolRunner({ ...base, actor: { ...user, via: 'ui' } }))).toBe(
+      'not_kev_actor',
     );
-    expect(() => createToolRunner({ ...base, actor: { ...user, via: 'sync' } })).toThrow(
-      RegistryError,
+    expect(refusal(() => createToolRunner({ ...base, actor: { ...user, via: 'sync' } }))).toBe(
+      'not_kev_actor',
     );
-    expect(() =>
-      createToolRunner({ ...base, actor: { kind: 'system', via: 'system' } as never }),
-    ).toThrow(RegistryError);
+    expect(
+      refusal(() =>
+        createToolRunner({ ...base, actor: { kind: 'system', via: 'system' } as never }),
+      ),
+    ).toBe('not_kev_actor');
+    expect(
+      refusal(() => createToolRunner({ ...base, actor: { kind: 'user', via: 'kev' } as never })),
+    ).toBe('made');
+    expect(refusal(() => createToolRunner({ ...base, actor: null as never }))).toBe(
+      'not_kev_actor',
+    );
+  });
+
+  it('a runner exists only in the home zone the shared agenda loader reads with', () => {
+    const base = { now: NOW, attemptId: UUID, deps: { db: untouchable } };
+    const actor = {
+      kind: 'user' as const,
+      userId: 'u-sam',
+      email: SAM.email,
+      via: 'kev' as const,
+      channel: 'web' as const,
+    };
+    for (const timeZone of ['Europe/London', 'UTC', 'Pacific/Chatham', '', 'pacific/auckland']) {
+      let code = 'made';
+      try {
+        createToolRunner({ ...base, actor, timeZone });
+      } catch (e) {
+        expect(e).toBeInstanceOf(ContextRefusal);
+        code = (e as ContextRefusal).code;
+      }
+      expect(code, timeZone).toBe('zone_mismatch');
+    }
+    expect(() => createToolRunner({ ...base, actor, timeZone: ZONE })).not.toThrow();
   });
 });
 

@@ -11,6 +11,8 @@ import { personRef } from '../tools/present';
 import { toolDefinitions } from '../tools/registry';
 import { readToday } from '../tools/today-read';
 import {
+  assertKevContext,
+  ContextRefusal,
   dateSchema,
   homeInstant,
   instantSchema,
@@ -105,11 +107,15 @@ const LIMITS = [MAX_ITEMS, 30, 20, 10, 5, 2, 0];
  * The reader's volatile bundle: the object, its JSON (what the model is
  * sent), and the refs of every record in it (the turn's ledger starts with
  * these, §8.3). Deterministic: the same adult, records and `now` give the
- * same bytes.
+ * same bytes. The same guard as the tool runner (`assertKevContext`): only a
+ * user via Kev, only in the home zone. Fails closed with a `ContextRefusal`
+ * (`not_kev_actor`, `zone_mismatch`, or `bundle_too_large` when even the
+ * smallest cut does not fit), before or instead of anything it would send.
  */
 export async function assembleBundle(
   ctx: ToolContext & { focus?: 'today' },
 ): Promise<{ bundle: Bundle; text: string; refs: Ref[] }> {
+  assertKevContext(ctx);
   const read = await readToday(ctx);
   const tz = ctx.timeZone;
   const people = [...read.agenda.people.values()];
@@ -161,5 +167,5 @@ export async function assembleBundle(
     if (Buffer.byteLength(text, 'utf8') <= MAX_RESULT_BYTES)
       return { bundle, text, refs: uniqueRefs(refs) };
   }
-  throw new Error('the bundle does not fit');
+  throw new ContextRefusal('bundle_too_large');
 }

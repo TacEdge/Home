@@ -9,6 +9,7 @@ import { archiveProject, createProject, updateProject } from '@/domain/projects/
 import { archiveTask, createTask } from '@/domain/tasks/service';
 import { assembleBundle } from '@/kev/context/assemble';
 import { createToolRunner, REGISTRY, type ToolCallOutcome } from '@/kev/tools/registry';
+import { ContextRefusal } from '@/kev/tools/types';
 import type { UserActor } from '@/trust/actor';
 import { CANARY, CANARY_MARK, FAMILY_PEOPLE, SENSITIVE_MARK } from '../fixtures/family';
 import { ALEX, SAM } from '../fixtures/users';
@@ -1157,6 +1158,62 @@ describe('the volatile bundle (§7.3)', () => {
     expect(alex.bundle.reader?.ref.id).toBe(f.id.alex);
     expect(alex.text).not.toContain(CANARY_MARK.sam);
     expect(a.text).not.toContain(CANARY_MARK.alex);
+  });
+
+  it('is built only for a user via Kev, in the home zone: anything else fails closed with a code, before any read', async () => {
+    const refused = async (make: () => Promise<unknown>) => {
+      const before = queries;
+      const code = await make().then(
+        () => 'built',
+        (e: unknown) => {
+          expect(e).toBeInstanceOf(ContextRefusal);
+          expect((e as ContextRefusal).message).toBe((e as ContextRefusal).code);
+          return (e as ContextRefusal).code;
+        },
+      );
+      if (code !== 'built') expect(queries, code).toBe(before);
+      return code;
+    };
+    const sam = f.h.sam;
+    for (const actor of [
+      { ...sam, via: 'ui' },
+      { ...sam, via: 'sync' },
+      { kind: 'system', via: 'system' },
+      null,
+    ])
+      expect(
+        await refused(() =>
+          assembleBundle({ actor: actor as never, now: NOW, timeZone: ZONE, deps }),
+        ),
+        JSON.stringify(actor),
+      ).toBe('not_kev_actor');
+    for (const timeZone of ['Europe/London', 'UTC', 'Pacific/Chatham'])
+      expect(
+        await refused(() => assembleBundle({ actor: f.kev.sam, now: NOW, timeZone, deps })),
+        timeZone,
+      ).toBe('zone_mismatch');
+    expect(
+      await refused(() => assembleBundle({ actor: f.kev.sam, now: NOW, timeZone: ZONE, deps })),
+    ).toBe('built');
+    // The runner shares the guard.
+    expect(() =>
+      createToolRunner({
+        actor: f.kev.sam,
+        now: NOW,
+        timeZone: 'Europe/London',
+        deps,
+        attemptId: crypto.randomUUID(),
+      }),
+    ).toThrow(ContextRefusal);
+    expect(() =>
+      createToolRunner({
+        actor: { ...sam, via: 'ui' } as never,
+        now: NOW,
+        timeZone: ZONE,
+        deps,
+        attemptId: crypto.randomUUID(),
+      }),
+    ).toThrow(ContextRefusal);
   });
 });
 

@@ -18,6 +18,7 @@ import { getToday } from './get-today';
 import { getWeather } from './get-weather';
 import { search } from './search';
 import {
+  assertKevContext,
   MAX_ITEMS,
   MAX_RESULT_BYTES,
   refSchema,
@@ -205,12 +206,11 @@ function codeOf(e: unknown): ToolErrorCode {
 /**
  * A runner for one attempt, bound to the requesting adult. The actor comes
  * from the server's session, never from model input; it must be a user
- * acting through Kev.
+ * acting through Kev, in the home zone (`assertKevContext`): otherwise no
+ * runner is made, and a `ContextRefusal` with its closed code is thrown.
  */
 export function createToolRunner(ctx: ToolContext & { attemptId: string }): ToolRunner {
-  const actor = ctx.actor as { kind?: string; via?: string } | null;
-  if (actor?.kind !== 'user' || actor.via !== 'kev')
-    throw new RegistryError('Kev tools run only as a user via Kev');
+  assertKevContext(ctx);
   const bound: ToolContext = Object.freeze({
     actor: ctx.actor,
     now: ctx.now,

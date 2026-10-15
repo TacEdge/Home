@@ -2,6 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import type { Deps } from '@/domain/common/write';
 import { addDays, isoDateInZone, offsetAt, wallClockOf, type IsoDate } from '@/lib/dates';
+import { env } from '@/lib/env';
 import type { UserActor } from '@/trust/actor';
 
 // What every Kev tool shares (M8 contract §4.4, §6.1, §6.3, §9.1–§9.4; ADR
@@ -69,6 +70,36 @@ export type ToolContext = Readonly<{
   timeZone: string;
   deps?: Deps;
 }>;
+
+// ---------------------------------------------------------------------------
+// Who Kev's tools and bundle run for, and in which zone (contract §4.4, §7.3;
+// ADR 0012 §44). Shared by the runner and the context assembly, so the two
+// can never disagree.
+
+/** Why the server refused to run Kev's tools or build the bundle: a closed code, never a message. */
+export const CONTEXT_REFUSAL_CODES = ['not_kev_actor', 'zone_mismatch', 'bundle_too_large'] as const;
+export type ContextRefusalCode = (typeof CONTEXT_REFUSAL_CODES)[number];
+
+/** A closed refusal: its message is its code and nothing else (no record, query or value). */
+export class ContextRefusal extends Error {
+  constructor(readonly code: ContextRefusalCode) {
+    super(code);
+    this.name = 'ContextRefusal';
+  }
+}
+
+/**
+ * The server's context, checked before anything is read: the actor must be
+ * a user acting through Kev (never the system, the UI or sync; never an
+ * identity from model input), and the zone must be the home zone the shared
+ * agenda loader reads with (`HOME_TIMEZONE`), so a tool never presents in
+ * one zone what was read in another. Throws a `ContextRefusal` otherwise.
+ */
+export function assertKevContext(ctx: { actor: unknown; timeZone: unknown }): void {
+  const actor = ctx.actor as { kind?: unknown; via?: unknown } | null | undefined;
+  if (actor?.kind !== 'user' || actor.via !== 'kev') throw new ContextRefusal('not_kev_actor');
+  if (ctx.timeZone !== env.HOME_TIMEZONE) throw new ContextRefusal('zone_mismatch');
+}
 
 /** A structural summary of a call's arguments: dates, scopes, ids, counts; never free text (§7.6). */
 export type TraceArgs = Record<string, string | number | boolean>;
