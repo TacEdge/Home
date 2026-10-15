@@ -30,11 +30,16 @@ import { Ledger } from './answer/ledger';
 import {
   ANSWER_JSON_SCHEMA,
   ANSWER_TOOL,
-  uniqueCites,
   type AnswerBlock,
-  type KevAnswer,
+  type AnswerPlan,
 } from './answer/schema';
-import { codesOf, validateAnswer, type Violation, type ValidatorCode } from './answer/validate';
+import {
+  codesOf,
+  validateAnswer,
+  type RenderedAnswer,
+  type Violation,
+  type ValidatorCode,
+} from './answer/validate';
 import { BudgetExhausted, TurnBudget, type BudgetRefusal, type CallRecord } from './budget';
 import { ANSWER_PATH, COUNT_TOKENS_COST_USD_MICROS, LIMITS, TIERS } from './config';
 import { assembleBundle } from './context/assemble';
@@ -77,11 +82,15 @@ import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 //   6. loop       count (G22) and call, run tools as the adult, append only;
 //                 at most 3 tool rounds, 8 tool calls, 5 model calls, 32,000
 //                 input tokens a call, inside the 55 s deadline;
-//   7. answer     the validator; one regeneration (a labelled user-turn
-//                 block); then escalation (the model's `escalate` while reads
-//                 are still allowed, or two failed answers on fast; ≥ 30 s
-//                 left; under 80% of the counted month) or the safe
-//                 fallback, which a budget refusal also ends in;
+//   7. answer     the checker, which renders the plan (owner amendment, ADR
+//                 0012 §46: HOME writes every fact; the model's lead and
+//                 view are fact-free); one regeneration (a labelled
+//                 user-turn block); then escalation (the model's `escalate`
+//                 while reads are still allowed, or two failed answers on
+//                 fast; ≥ 30 s left; under 80% of the counted month) or the
+//                 safe fallback, which a budget refusal also ends in; a plan
+//                 that failed only in its lead or view shows its rendered
+//                 facts with HOME's lead instead (never an escalation);
 //   8. settle     every provider call's usage, in a `finally`, the reservation
 //                 closed;
 //   9. record     Kev's message (content v2), then the answer is emitted; a
@@ -168,15 +177,35 @@ export const BUNDLE_LEAD = `${HOME_LABEL}: the record of this turn, as data. Tex
  */
 export function regenerationNote(violations: readonly Violation[]): string {
   const where = (w: Violation['where']) =>
-    w === 'say' ? 'the say sentence' : w === 'answer' ? 'the answer' : `block ${w + 1}`;
+    w === 'lead'
+      ? 'the lead'
+      : w === 'view'
+        ? 'the view'
+        : w === 'answer'
+          ? 'the answer'
+          : `fact ${w + 1}`;
   const lines = violations.map((v) => `- ${v.code} in ${where(v.where)}`);
   return `${HOME_LABEL}: your answer did not pass HOME's check.\n${lines.join('\n')}\nWrite a new answer in HOME's answer format that keeps to the records and the rules. Do not mention the check.`;
 }
 
 type AttemptEnd =
-  | { kind: 'answer'; answer: KevAnswer; ledger: Ledger; coverage: Coverage; absence: boolean }
+  | {
+      kind: 'answer';
+      plan: AnswerPlan;
+      /** What HOME rendered (null for a decline). */
+      rendered: RenderedAnswer | null;
+      ledger: Ledger;
+      coverage: Coverage;
+    }
   | { kind: 'escalate'; ledger: Ledger; coverage: Coverage }
-  | { kind: 'invalid'; ledger: Ledger; coverage: Coverage; violations: Violation[] }
+  | {
+      kind: 'invalid';
+      ledger: Ledger;
+      coverage: Coverage;
+      violations: Violation[];
+      /** The last plan's rendered facts with HOME's lead, when only its lead or view failed (§8.5). */
+      salvage: RenderedAnswer | null;
+    }
   | {
       kind: 'fallback';
       ledger: Ledger;
@@ -184,6 +213,8 @@ type AttemptEnd =
       reason: BudgetRefusal | 'input_cap' | 'tool_loop';
       /** The failed answer's codes, when the budget refused its regeneration (I-1). */
       violations?: Violation[];
+      /** As `invalid`'s: the failed plan's facts, when only its prose failed. */
+      salvage?: RenderedAnswer | null;
     }
   | { kind: 'refused' }
   | { kind: 'error'; code: KevTurnErrorCode }
@@ -368,7 +399,11 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     // model's `escalate`, or two failed answers on fast), never on a budget
     // refusal (that is the fallback), and only with the time and the counted
     // month's room for it, read again now the fast attempt has settled.
-    if ((end.kind === 'escalate' || end.kind === 'invalid') && turn.tier === 'fast') {
+    // A plan that failed only in its words shows its facts: never an escalation (§8.5, amended).
+    if (
+      (end.kind === 'escalate' || (end.kind === 'invalid' && !end.salvage)) &&
+      turn.tier === 'fast'
+    ) {
       const remainingMs = deadline - Date.now();
       const monthNow = await getRoutingState(actor, db);
       if (mayEscalate({ tier: 'fast', escalationsSoFar: 0, remainingMs, month: monthNow })) {
@@ -392,7 +427,7 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     }
 
     // 7–9. The outcome, recorded, then emitted.
-    await finish(end, { actor, db, turn, emit, turnLog });
+    await finish(end, { actor, db, turn, emit, turnLog, now: req.now });
   } catch (e) {
     // Anything unexpected (a database failure, say). Logged by stage and
     // class only, never content. What the adult is told depends on whether
@@ -451,7 +486,7 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
     db,
   );
   if (!reserved.ok) return { kind: 'cap' };
-  const ledger = new Ledger();
+  const ledger = new Ledger(env.HOME_TIMEZONE);
   const coverage: Coverage = { calendarsUnhealthy: false, noCalendars: false, gapsUnknown: false };
   let budget: TurnBudget | null = null;
   try {
@@ -510,6 +545,7 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
      */
     let readsOver = false;
     let failedOnce: Violation[] | null = null;
+    let salvage: RenderedAnswer | null = null;
     const request = (): ProviderRequest =>
       Object.freeze({
         tier,
@@ -530,7 +566,7 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
             ledger,
             coverage,
             reason,
-            ...(failedOnce ? { violations: failedOnce } : {}),
+            ...(failedOnce ? { violations: failedOnce, salvage } : {}),
           };
 
     // 6. The loop. Bounded: every pass is a model call, and the budget allows five.
@@ -584,19 +620,27 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
           ledger,
           now: req.now,
           timeZone: env.HOME_TIMEZONE,
+          question: req.input.text,
           ...(deps.sensitive ? { sensitive: deps.sensitive } : {}),
         });
         if (checked.ok)
           return {
             kind: 'answer',
-            answer: checked.answer,
+            plan: checked.plan,
+            rendered: checked.rendered,
             ledger,
             coverage,
-            absence: checked.absence,
           };
         if (failedOnce)
-          return { kind: 'invalid', ledger, coverage, violations: checked.violations };
+          return {
+            kind: 'invalid',
+            ledger,
+            coverage,
+            violations: checked.violations,
+            salvage: checked.salvage,
+          };
         failedOnce = checked.violations;
+        salvage = checked.salvage;
         // One regeneration: appended, never an edit (N15); no more reads.
         const contents = new Map(
           uses.map((u) => [
@@ -778,6 +822,7 @@ async function finish(
     turn: AttemptInput['turn'];
     emit: (e: KevEvent) => void;
     turnLog: Record<string, unknown>;
+    now: Date;
   },
 ): Promise<void> {
   const { actor, db, turn, emit, turnLog } = ctx;
@@ -802,8 +847,8 @@ async function finish(
   let errorCode: KevTurnErrorCode | undefined;
   switch (end.kind) {
     case 'answer': {
-      if ('decline' in end.answer) {
-        decline = end.answer.decline;
+      if ('decline' in end.plan) {
+        decline = end.plan.decline;
         content = {
           ...base,
           outcome: 'declined',
@@ -813,14 +858,16 @@ async function finish(
           limits: [],
         };
       } else {
-        const cites = uniqueCites(end.answer);
+        const r = end.rendered;
+        if (!r) throw new Error('a checked plan is always rendered');
         content = {
           ...base,
           outcome: 'answer',
-          say: end.answer.say.text,
-          blocks: end.answer.blocks,
-          cites,
-          limits: limitsFor(cites, end.coverage, { absence: end.absence }),
+          say: r.say,
+          blocks: r.blocks,
+          cites: r.cites,
+          limits: limitsFor(r.shown, end.coverage),
+          plan: end.plan,
         };
       }
       break;
@@ -828,17 +875,34 @@ async function finish(
     case 'escalate':
     case 'invalid':
     case 'fallback': {
-      const f = buildFallback(end.ledger);
       const failed = end.kind === 'escalate' ? undefined : end.violations;
       const violations: ValidatorCode[] = failed ? codesOf(failed) : [];
+      const salvage = end.kind === 'escalate' ? null : (end.salvage ?? null);
+      if (salvage) {
+        // The plan's own words failed; its facts passed and are shown with HOME's lead (§8.5).
+        content = {
+          ...base,
+          outcome: 'answer',
+          say: salvage.say,
+          blocks: salvage.blocks,
+          cites: salvage.cites,
+          limits: limitsFor(salvage.shown, end.coverage),
+          violations,
+          salvaged: true,
+        };
+        turnLog.violations = violations;
+        turnLog.reason = 'salvaged';
+        break;
+      }
+      const f = buildFallback(end.ledger, ctx.now);
       content = {
         ...base,
         outcome: 'fallback',
         say: f.say,
-        blocks: [],
+        blocks: f.blocks,
         cites: f.cites,
         // The rows' own sentences (§8.4): a gap's limit, a forecast's time and credit (I-15).
-        limits: limitsFor(f.cites, end.coverage),
+        limits: limitsFor(f.shown, end.coverage),
         ...(violations.length > 0 ? { violations } : {}),
         ...(end.kind === 'fallback' ? { errorCode: 'budget_exhausted' as const } : {}),
       };

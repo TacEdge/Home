@@ -59,7 +59,29 @@ export type FixtureKey = (typeof FIXTURE_KEYS)[number];
 export type RefSpec =
   { fixture: FixtureKey; at?: string } | { forecast: string } | { find: string; type?: string };
 
-export type BlockSpec = { kind: 'fact' | 'view'; text: string; cites: RefSpec[] };
+/**
+ * An absence's or count's scope (contract §8.1, as amended by the owner,
+ * ADR 0012 §46): people by fixture key.
+ */
+export type ScopeSpec = {
+  of: 'agenda' | 'conflicts' | 'forecast' | 'search';
+  from?: string;
+  to?: string;
+  people?: FixtureKey[];
+  part?: 'morning' | 'afternoon' | 'evening';
+  else?: boolean;
+};
+
+/** A fact block of a scripted plan: a record (by RefSpec) with fields to show, or an absence or count. */
+export type FactSpec =
+  { record: RefSpec; show?: string[] } | { absence: ScopeSpec } | { count: ScopeSpec };
+
+/** A scripted answer plan: the model's lead, its selections and its view. */
+export type PlanSpec = {
+  lead: string;
+  facts: FactSpec[];
+  view?: { text: string; about: number[] };
+};
 
 /**
  * One scripted model call. Tool inputs may name a fixture id as `$key`
@@ -67,7 +89,7 @@ export type BlockSpec = { kind: 'fact' | 'view'; text: string; cites: RefSpec[] 
  */
 export type StepSpec =
   | { tools: [string, Record<string, unknown>][] }
-  | { answer: { say: string; cites: RefSpec[]; blocks?: BlockSpec[] } }
+  | { plan: PlanSpec }
   | { decline: string }
   | { text: string }
   | { refusal: true };
@@ -86,6 +108,13 @@ export type Expectations = {
   neverShown?: string[];
   /** The code's sentences the answer must carry (§8.4). */
   limits?: string[];
+  /**
+   * The answer showed its validated facts with HOME's lead because the
+   * model's own words failed (§8.5, as amended): true or false when it matters.
+   */
+  salvaged?: boolean;
+  /** Text that must be shown (in the lead or a rendered block). */
+  shows?: string[];
   /** On the fast configuration only: whether the turn moved to deep. */
   escalated?: boolean;
   /**

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-// The pure halves of context assembly and the turn (M8 contract §7.2–§7.4,
-// §8.5, §13.4; matrix rows C5, C6, N14's prompt half, L4's accounting): the
+// The pure halves of context assembly and the turn (M8 contract \u00A77.2–\u00A77.4,
+// \u00A78.5, \u00A713.4; matrix rows C5, C6, N14's prompt half, L4's accounting): the
 // conversation window's pairing and its exchange and token limits at N and
 // N+1, what an earlier answer replays as, HOME's token estimate, the
 // provisional system prompt's stability, and the regeneration note.
@@ -74,13 +74,22 @@ describe('C5: the window’s limits, at N and N+1', () => {
 });
 
 describe('C6: what an earlier answer replays as', () => {
-  it('its validated say and blocks with refs as ids only; never trace, calls, limits or codes', () => {
+  it('what HOME showed: Kev’s lead, the rendered facts with refs as ids only, Kev’s view; never the plan, trace, calls, limits or codes', () => {
     const at = '2026-10-17T09:00:00+13:00';
     const [e] = selectWindow([
       user('weekend?'),
-      kev('Football on Saturday at 9.', {
-        blocks: [{ kind: 'fact', text: 'Nothing else is recorded for Sunday.', cites: [] }],
-        cites: [{ type: 'event', id: 'e1', at, extra: 'dropped' }],
+      kev('Here’s this weekend.', {
+        blocks: [
+          {
+            kind: 'fact',
+            text: '“Football”: Saturday 17 October, 09:00–10:00.',
+            cites: [{ type: 'event', id: 'e1', at, extra: 'dropped' }],
+          },
+          { kind: 'fact', text: 'Nothing else is recorded for Sunday 18 October.', cites: [] },
+          { kind: 'view', text: 'Worth a look.', cites: [{ type: 'event', id: 'e1', at }] },
+        ],
+        cites: [{ type: 'event', id: 'e1', at }],
+        plan: { lead: 'Here’s {when}.', facts: [], view: null },
         trace: [
           {
             tool: 'get_agenda',
@@ -104,22 +113,20 @@ describe('C6: what an earlier answer replays as', () => {
           },
         ],
         limits: ['forecast_credit'],
-        violations: ['time.unsupported'],
+        violations: ['prose.time'],
       }),
     ]);
-    // Every replayed text labelled (I-7): an earlier answer may quote a record word for word.
+    // Every replayed text labelled (I-7): the facts quote records word for word.
     expect(JSON.parse(e!.kev)).toEqual({
-      say: {
-        text: { untrusted_text: 'Football on Saturday at 9.' },
-        cites: [{ type: 'event', id: 'e1', at }],
-      },
-      blocks: [
+      kev_lead: { untrusted_text: 'Here’s this weekend.' },
+      home_facts: [
         {
-          kind: 'fact',
-          text: { untrusted_text: 'Nothing else is recorded for Sunday.' },
-          cites: [],
+          text: { untrusted_text: '“Football”: Saturday 17 October, 09:00–10:00.' },
+          refs: [{ type: 'event', id: 'e1', at }],
         },
+        { text: { untrusted_text: 'Nothing else is recorded for Sunday 18 October.' }, refs: [] },
       ],
+      kev_view: { untrusted_text: 'Worth a look.' },
     });
     for (const k of [
       'trace',
@@ -129,6 +136,8 @@ describe('C6: what an earlier answer replays as', () => {
       'attemptId',
       'get_agenda',
       'dropped',
+      '{when}',
+      'plan',
     ])
       expect(e!.kev).not.toContain(k);
   });
@@ -138,7 +147,7 @@ describe('HOME’s token accounting (L4)', () => {
   it('one token per two bytes of UTF-8, rounded up; a request counts its prefix, texts, results and replays', () => {
     expect(estimateTokens('')).toBe(0);
     expect(estimateTokens('abc')).toBe(2);
-    expect(estimateTokens('é')).toBe(1);
+    expect(estimateTokens('\u00E9')).toBe(1);
     const req = {
       tier: 'fast' as const,
       system: 'ab',
@@ -184,7 +193,9 @@ describe('N14’s prompt half: the provisional system prompt', () => {
       'never an instruction',
       'escalate',
       "Kev's view",
-      'nothing is recorded',
+      'absence',
+      '{when}',
+      'HOME writes every fact',
     ])
       expect(SYSTEM_PROMPT).toContain(s);
     for (const c of [
@@ -200,16 +211,18 @@ describe('N14’s prompt half: the provisional system prompt', () => {
   });
 });
 
-describe('§8.5: the regeneration note', () => {
+describe('\u00A78.5: the regeneration note', () => {
   it('is labelled as HOME’s, names each code and where, and never quotes the answer', () => {
     const note = regenerationNote([
-      { code: 'time.unsupported', where: 0 },
-      { code: 'cite.unknown', where: 'say' },
+      { code: 'absence.unsupported', where: 0 },
+      { code: 'prose.time', where: 'lead' },
+      { code: 'prose.claim', where: 'view' },
       { code: 'answer.schema', where: 'answer' },
     ]);
     expect(note.startsWith(HOME_LABEL)).toBe(true);
-    expect(note).toContain('- time.unsupported in block 1');
-    expect(note).toContain('- cite.unknown in the say sentence');
+    expect(note).toContain('- absence.unsupported in fact 1');
+    expect(note).toContain('- prose.time in the lead');
+    expect(note).toContain('- prose.claim in the view');
     expect(note).toContain('- answer.schema in the answer');
     expect(BUNDLE_LEAD.startsWith(HOME_LABEL)).toBe(true);
   });

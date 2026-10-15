@@ -8,10 +8,11 @@ import { estimateTokens } from './tokens';
 // (the bookkeeping read applies that bound, in instants, on the database's
 // clock, together with the 90-day expiry), at most 10 of them and at most
 // 6,000 tokens by HOME's estimate, the oldest dropped first, whole. Each
-// earlier Kev message is replayed as its stored, validated `say` and blocks,
-// each text labelled `untrusted_text` (I-7), with its citation refs as ids
-// only (type, id, `at`): never a tool result, trace, usage, thinking or
-// anything provider-shaped. No summary, ever (D12).
+// earlier Kev message is replayed as what HOME showed: Kev's lead, the fact
+// blocks HOME rendered and Kev's view, each text labelled `untrusted_text`
+// (I-7), with the refs as ids only (type, id, `at`): never a tool result,
+// trace, usage, plan, thinking or anything provider-shaped. No summary,
+// ever (D12).
 
 export type StoredMessage = Readonly<{ role: 'user' | 'kev'; content: unknown }>;
 
@@ -39,34 +40,37 @@ function userText(content: unknown): string | null {
 const labelled = (t: string) => ({ untrusted_text: t });
 
 /**
- * Kev's reply as replayed: the validated `say` and blocks, with refs as ids
- * only, in the answer format's shape. Nothing else of the stored content
- * (trace, calls, limits, codes) is ever replayed. Every replayed text is
- * labelled `untrusted_text` (Package 3 review, I-7): an earlier answer may
- * quote a record's title or name word for word, and such text, written by a
+ * Kev's reply as replayed (owner amendment, ADR 0012 §46): what HOME showed,
+ * in three labelled parts: Kev's lead (`kev_lead`), the fact blocks HOME
+ * rendered from records (`home_facts`, each with the refs it rested on, as
+ * ids only) and Kev's view (`kev_view`). Nothing else of the stored content
+ * (the plan, trace, calls, limits, codes) is ever replayed. Every replayed
+ * text is labelled `untrusted_text` (Package 3 review, I-7): the facts quote
+ * records' titles and names word for word, and such text, written by a
  * person or a calendar, must reach the next turn as data, never as the
  * assistant's own words. The label is structural, whatever the text says.
+ * The refs are not citable: a record must be read again (C7).
  */
 function kevText(content: unknown): string | null {
   const c = content as Record<string, unknown> | null;
   if (!c) return null;
   if (c.v === 2 && typeof c.say === 'string') {
-    const blocks = Array.isArray(c.blocks) ? c.blocks : [];
-    const cites = Array.isArray(c.cites) ? c.cites : [];
+    const blocks = (Array.isArray(c.blocks) ? c.blocks : [])
+      .map((b) => b as Record<string, unknown>)
+      .filter((b) => typeof b.text === 'string');
+    const refsOf = (b: Record<string, unknown>) =>
+      (Array.isArray(b.cites) ? b.cites : []).map(refOnly).filter(Boolean);
+    const view = blocks.find((b) => b.kind === 'view');
     return JSON.stringify({
-      say: { text: labelled(c.say), cites: cites.map(refOnly).filter(Boolean) },
-      blocks: blocks
-        .map((b) => b as Record<string, unknown>)
-        .filter((b) => (b.kind === 'fact' || b.kind === 'view') && typeof b.text === 'string')
-        .map((b) => ({
-          kind: b.kind,
-          text: labelled(b.text as string),
-          cites: (Array.isArray(b.cites) ? b.cites : []).map(refOnly).filter(Boolean),
-        })),
+      kev_lead: labelled(c.say),
+      home_facts: blocks
+        .filter((b) => b.kind === 'fact')
+        .map((b) => ({ text: labelled(b.text as string), refs: refsOf(b) })),
+      kev_view: view ? labelled(view.text as string) : null,
     });
   }
   if (c.v === 1 && typeof c.text === 'string')
-    return JSON.stringify({ say: { text: labelled(c.text), cites: [] }, blocks: [] });
+    return JSON.stringify({ kev_lead: labelled(c.text), home_facts: [], kev_view: null });
   return null;
 }
 

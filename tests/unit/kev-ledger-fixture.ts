@@ -1,12 +1,18 @@
 import { bundleSchema } from '@/kev/context/assemble';
 import { Ledger } from '@/kev/answer/ledger';
 import { getAgenda } from '@/kev/tools/get-agenda';
+import { getCalendarHealth } from '@/kev/tools/get-calendar-health';
+import { getContext } from '@/kev/tools/get-context';
+import { getInsights } from '@/kev/tools/get-insights';
+import { getProjects } from '@/kev/tools/get-projects';
+import { getToday } from '@/kev/tools/get-today';
+import { search } from '@/kev/tools/search';
 import { getConflicts } from '@/kev/tools/get-conflicts';
 import { getGaps } from '@/kev/tools/get-gaps';
 import { getPeople } from '@/kev/tools/get-people';
 import { getTasks } from '@/kev/tools/get-tasks';
 import { getWeather } from '@/kev/tools/get-weather';
-import type { Ref } from '@/kev/tools/types';
+import type { Ref, ToolName } from '@/kev/tools/types';
 
 // The validator's fixture ledger (M8 contract §15.6's synthetic family, on
 // Wednesday 14 October 2026, 07:03, Pacific/Auckland), built from tool
@@ -25,8 +31,19 @@ export const E = {
   board: id(12),
   interviews: id(13),
   injected: id(14),
+  dentistToday: id(15),
+  teacherOnly: id(16),
+  party: id(17),
+  lunch: id(18),
+  kapaHaka: id(19),
+  dentistTue: id(21),
+  dstEvent: id(22),
+  overnight: id(23),
 };
-export const T = { paint: id(20) };
+export const T = { paint: id(20), plumber: id(24) };
+export const PR = { fence: id(40) };
+export const NOTE = { colour: id(41) };
+export const CTX = { dinosaurs: id(42) };
 export const u = (s: string) => ({ untrusted_text: s });
 export const person = (pid: string): Ref => ({ type: 'person', id: pid });
 export const swim: Ref = { type: 'event', id: E.swimming, at: '2026-10-14T15:30:00+13:00' };
@@ -207,16 +224,16 @@ export const reads = {
           status: 'open',
           estimate_minutes: 180,
           needs: ['dry_weather', 'daylight'],
-          due: null,
+          due: '2026-11-01',
           scheduled: null,
           assignee: { ref: person(P.sam), name: u('Sam') },
-          project: null,
+          project: { ref: { type: 'project', id: PR.fence }, title: u('Back fence') },
         },
       ],
       count: 1,
       truncated: false,
     }),
-    refs: [paint, person(P.sam)],
+    refs: [paint, person(P.sam), { type: 'project', id: PR.fence } as Ref],
   },
   saturdayGaps: {
     tool: 'get_gaps' as const,
@@ -314,11 +331,17 @@ export const reads = {
   },
 };
 
-export type Read = (typeof reads)[keyof typeof reads];
+/** A read as the ledger takes it: a tool's name, its input, its parsed output and refs. */
+export type Read = {
+  tool: Exclude<ToolName, 'escalate'>;
+  input: unknown;
+  data: unknown;
+  refs: readonly Ref[];
+};
 
 /** The fixture ledger: the bundle, then the reads asked for (default: all of them). */
 export function fixtureLedger(only?: readonly Read[]): Ledger {
-  const l = new Ledger();
+  const l = new Ledger(ZONE);
   l.addBundle(bundle, bundleRefs);
   for (const r of only ?? Object.values(reads)) l.addResult(r.tool, r.data, r.refs, r.input);
   return l;
@@ -362,3 +385,407 @@ export function withEvent(
   );
   return l;
 }
+
+// ---------------------------------------------------------------------------
+// The final review's fixture (its findings file): the same family, with a
+// busier week. Today also has a dentist appointment at 10:00 and a
+// teacher-only day; Saturday a birthday party; Sunday lunch at Nana Jo's;
+// Thursday kapa haka; next week's read is truncated, with the dentist on
+// Tuesday 20 October (Isla attending, Alex responsible). Every output is
+// parsed with its tool's own schema, the bundle with `bundleSchema`.
+
+export const dentistToday: Ref = {
+  type: 'event',
+  id: E.dentistToday,
+  at: '2026-10-14T10:00:00+13:00',
+};
+export const teacherOnly: Ref = {
+  type: 'event',
+  id: E.teacherOnly,
+  at: '2026-10-14T00:00:00+13:00',
+};
+export const party: Ref = { type: 'event', id: E.party, at: '2026-10-17T14:00:00+13:00' };
+export const lunch: Ref = { type: 'event', id: E.lunch, at: '2026-10-18T12:30:00+13:00' };
+export const kapaHaka: Ref = { type: 'event', id: E.kapaHaka, at: '2026-10-15T16:00:00+13:00' };
+export const dentistTue: Ref = { type: 'event', id: E.dentistTue, at: '2026-10-20T09:00:00+13:00' };
+export const fence: Ref = { type: 'project', id: PR.fence };
+export const note: Ref = { type: 'note', id: NOTE.colour };
+export const dinosaurs: Ref = { type: 'context', id: CTX.dinosaurs };
+export const insight: Ref = { type: 'insight', id: 'birthday.upcoming:nana' };
+
+const on = (pid: string, name: string, role: 'attending' | 'responsible') => ({
+  ref: person(pid),
+  name: u(name),
+  role,
+});
+export const timedItem = (
+  ref: Ref,
+  title: string,
+  end: string,
+  people: ReturnType<typeof on>[] = [],
+) => ({
+  type: 'event' as const,
+  ref,
+  title: u(title),
+  all_day: false,
+  start: ref.at ?? '',
+  end,
+  kind: null,
+  people,
+});
+export const allDayItem = (ref: Ref, title: string, people: ReturnType<typeof on>[] = []) => ({
+  type: 'event' as const,
+  ref,
+  title: u(title),
+  all_day: true,
+  kind: null,
+  people,
+});
+const dentistTodayItem = timedItem(dentistToday, 'Dentist', '2026-10-14T10:30:00+13:00', [
+  on(P.isla, 'Isla', 'attending'),
+]);
+const teacherOnlyItem = allDayItem(teacherOnly, 'Teacher-only day', [
+  on(P.milo, 'Milo', 'attending'),
+]);
+
+/** Today with three things: the dentist at 10:00, the teacher-only day and swimming. */
+export const busyBundle = bundleSchema.parse({
+  ...bundle,
+  today: {
+    ...bundle.today,
+    headline: u('Three things today.'),
+    people: [
+      { ref: person(P.isla), name: u('Isla'), items: [dentistTodayItem] },
+      { ref: person(P.milo), name: u('Milo'), items: [teacherOnlyItem, swimItem] },
+    ],
+    count: 3,
+  },
+});
+export const busyBundleRefs: Ref[] = [...bundleRefs, dentistToday, teacherOnly];
+
+const agenda = (
+  from: string,
+  to: string,
+  days: { date: string; items: unknown[] }[],
+  truncated = false,
+) => ({
+  tool: 'get_agenda' as const,
+  input: { from, to },
+  data: getAgenda.output.parse({
+    from,
+    to,
+    days,
+    count: days.reduce((n, d) => n + d.items.length, 0),
+    truncated,
+  }),
+  refs: [] as Ref[],
+});
+
+export const busy = {
+  weekend: agenda('2026-10-17', '2026-10-18', [
+    {
+      date: '2026-10-17',
+      items: [
+        timedItem(foot, 'Football', '2026-10-17T10:00:00+13:00', [on(P.milo, 'Milo', 'attending')]),
+        timedItem(party, 'Birthday party', '2026-10-17T16:00:00+13:00', [
+          on(P.isla, 'Isla', 'attending'),
+          on(P.milo, 'Milo', 'attending'),
+          on(P.alex, 'Alex', 'responsible'),
+        ]),
+      ],
+    },
+    {
+      date: '2026-10-18',
+      items: [
+        timedItem(lunch, 'Lunch at Nana Jo\u2019s', '2026-10-18T14:00:00+13:00', [
+          on(P.sam, 'Sam', 'attending'),
+          on(P.alex, 'Alex', 'attending'),
+        ]),
+      ],
+    },
+  ]),
+  thursday: agenda('2026-10-15', '2026-10-15', [
+    {
+      date: '2026-10-15',
+      items: [
+        timedItem(kapaHaka, 'Kapa haka', '2026-10-15T17:00:00+13:00', [
+          on(P.milo, 'Milo', 'attending'),
+        ]),
+        timedItem(board, 'Board meeting', '2026-10-15T19:30:00+13:00', [
+          on(P.sam, 'Sam', 'attending'),
+        ]),
+        timedItem(interviews, 'Parent interviews', '2026-10-15T18:30:00+13:00', [
+          on(P.sam, 'Sam', 'attending'),
+        ]),
+      ],
+    },
+  ]),
+  /** Next week, cut: it covers nothing. */
+  nextWeekCut: agenda(
+    '2026-10-19',
+    '2026-10-25',
+    [
+      {
+        date: '2026-10-20',
+        items: [
+          timedItem(dentistTue, 'Dentist', '2026-10-20T09:30:00+13:00', [
+            on(P.isla, 'Isla', 'attending'),
+            on(P.alex, 'Alex', 'responsible'),
+          ]),
+        ],
+      },
+    ],
+    true,
+  ),
+  /** Sunday alone, for Isla and Milo (a person-filtered read). */
+  sundayKids: {
+    ...agenda('2026-10-18', '2026-10-18', [{ date: '2026-10-18', items: [] }]),
+    input: { from: '2026-10-18', to: '2026-10-18', person_ids: [P.isla, P.milo] },
+  },
+};
+
+/** The final review's ledger: the busy bundle, the base reads and the busy ones. */
+export function busyLedger(extra: readonly Read[] = []): Ledger {
+  const l = new Ledger(ZONE);
+  l.addBundle(busyBundle, busyBundleRefs);
+  for (const r of [
+    reads.thursdayConflicts,
+    reads.nextWeekConflicts,
+    reads.tasks,
+    reads.saturdayGaps,
+    reads.weekendWeather,
+    reads.nana,
+    busy.weekend,
+    busy.thursday,
+    busy.nextWeekCut,
+    ...extra,
+  ])
+    l.addResult(r.tool, r.data, r.refs, r.input);
+  return l;
+}
+
+/** More reads, each through its tool's own schema: get_today, search, insights, context, projects, calendars, recurring, DST. */
+export const more = {
+  today: {
+    tool: 'get_today' as const,
+    input: {},
+    data: getToday.output.parse({ ...busyBundle.today, insights: [] }),
+    refs: [] as Ref[],
+  },
+  searchDentist: {
+    tool: 'search' as const,
+    input: { query: 'dentist' },
+    data: search.output.parse({ results: [], returned: 0, truncated: false }),
+    refs: [] as Ref[],
+  },
+  searchFence: {
+    tool: 'search' as const,
+    input: { query: 'fence' },
+    data: search.output.parse({
+      results: [
+        { ref: fence, type: 'project', title: u('Back fence') },
+        { ref: paint, type: 'task', title: u('Paint the back fence') },
+      ],
+      returned: 2,
+      truncated: false,
+    }),
+    refs: [fence, paint],
+  },
+  insights: {
+    tool: 'get_insights' as const,
+    input: { surface: 'forward_week' },
+    data: getInsights.output.parse({
+      surface: 'forward_week',
+      insights: [
+        {
+          ref: insight,
+          key: 'birthday.upcoming:nana',
+          kind: 'preparation',
+          rule: 'birthday.upcoming',
+          when: '2026-10-20',
+          text: u('Nana Jo\u2019s birthday is on Tuesday.'),
+          shown_on: 'list',
+          refs: [person(P.nana)],
+        },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    refs: [insight, person(P.nana)],
+  },
+  context: {
+    tool: 'get_context' as const,
+    input: { subject_type: 'person', subject_id: P.milo },
+    data: getContext.output.parse({
+      context: [
+        {
+          ref: dinosaurs,
+          subject: { type: 'person', ref: person(P.milo) },
+          category: 'interest',
+          content: u('Enjoys dinosaurs at the moment.'),
+          last_confirmed: '2026-10-06',
+          stale: false,
+        },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    refs: [dinosaurs, person(P.milo)],
+  },
+  project: {
+    tool: 'get_projects' as const,
+    input: { project_id: PR.fence },
+    data: getProjects.output.parse({
+      project: {
+        ref: fence,
+        title: u('Back fence'),
+        status: 'active',
+        target_date: '2026-11-01',
+        summary: null,
+        tasks: [
+          {
+            ref: paint,
+            title: u('Paint the back fence'),
+            status: 'open',
+            estimate_minutes: 180,
+            needs: ['dry_weather', 'daylight'],
+            due: '2026-11-01',
+            scheduled: null,
+            assignee: { ref: person(P.sam), name: u('Sam') },
+            project: { ref: fence, title: u('Back fence') },
+          },
+        ],
+        notes: [{ ref: note, body: u('Same green as the shed.') }],
+        notes_count: 1,
+      },
+      count: 3,
+      truncated: false,
+    }),
+    refs: [fence, paint, person(P.sam), note],
+  },
+  calendars: {
+    tool: 'get_calendar_health' as const,
+    input: {},
+    data: getCalendarHealth.output.parse({
+      calendars: [
+        {
+          ref: calendar,
+          label: u('Family calendar'),
+          last_success: '2026-10-14T06:58:00+13:00',
+          status: 'healthy',
+        },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    refs: [calendar],
+  },
+  milo: {
+    tool: 'get_people' as const,
+    input: { person_id: P.milo },
+    data: getPeople.output.parse({
+      people: [
+        {
+          ref: person(P.milo),
+          name: u('Milo'),
+          role: 'child',
+          in_household: true,
+          age: 9,
+          next_birthday: { date: '2027-03-02', age: 10 },
+          regular_week: [
+            {
+              weekday: 'Wednesday',
+              time: '15:30',
+              cadence: 'weekly',
+              ref: { type: 'event', id: E.swimming },
+              title: u('Swimming'),
+            },
+            {
+              weekday: 'Saturday',
+              time: '09:00',
+              cadence: 'weekly',
+              ref: { type: 'event', id: E.football },
+              title: u('Football'),
+            },
+          ],
+          stage_note: null,
+        },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    refs: [person(P.milo)],
+  },
+  alexTasks: {
+    tool: 'get_tasks' as const,
+    input: { assignee: P.alex },
+    data: getTasks.output.parse({
+      tasks: [
+        {
+          ref: { type: 'task', id: T.plumber },
+          title: u('Call the plumber'),
+          status: 'open',
+          estimate_minutes: 15,
+          needs: [],
+          due: '2026-10-15',
+          scheduled: null,
+          assignee: { ref: person(P.alex), name: u('Alex') },
+          project: null,
+        },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    refs: [{ type: 'task', id: T.plumber } as Ref, person(P.alex)],
+  },
+  /** The forecast asked for Saturday 24 October: beyond it. */
+  weather24: {
+    tool: 'get_weather' as const,
+    input: { from: '2026-10-24', to: '2026-10-24' },
+    data: getWeather.output.parse({
+      configured: true,
+      freshness: 'fresh',
+      fetched_at: '2026-10-14T06:55:00+13:00',
+      days: [],
+      uncovered: ['2026-10-24'],
+      credit: 'Open-Meteo',
+      count: 1,
+      truncated: false,
+    }),
+    refs: [] as Ref[],
+  },
+  /** No forecast set up at all. */
+  weatherNone: {
+    tool: 'get_weather' as const,
+    input: { from: '2026-10-17', to: '2026-10-18' },
+    data: getWeather.output.parse({ configured: false }),
+    refs: [] as Ref[],
+  },
+  /** The night daylight saving ends (Sunday 5 April 2027): an event at 02:30, the second time. */
+  dst: agenda('2027-04-04', '2027-04-04', [
+    {
+      date: '2027-04-04',
+      items: [
+        timedItem(
+          { type: 'event', id: E.dstEvent, at: '2027-04-04T02:30:00+12:00' },
+          'Night shift',
+          '2027-04-04T03:30:00+12:00',
+          [on(P.alex, 'Alex', 'attending')],
+        ),
+      ],
+    },
+  ]),
+  overnight: agenda('2026-10-16', '2026-10-16', [
+    {
+      date: '2026-10-16',
+      items: [
+        timedItem(
+          { type: 'event', id: E.overnight, at: '2026-10-16T22:00:00+13:00' },
+          'Sleepover',
+          '2026-10-17T09:00:00+13:00',
+          [on(P.milo, 'Milo', 'attending')],
+        ),
+      ],
+    },
+  ]),
+};

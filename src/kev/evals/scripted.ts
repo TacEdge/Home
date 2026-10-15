@@ -2,7 +2,7 @@ import 'server-only';
 import type { ScriptEntry, ScriptStep } from '../providers/scripted';
 import type { NeutralToolResult, ProviderRequest } from '../providers/types';
 import type { Ref } from '../tools/types';
-import type { FixtureKey, RefSpec, StepSpec, TurnSpec } from './types';
+import type { FactSpec, FixtureKey, RefSpec, ScopeSpec, StepSpec, TurnSpec } from './types';
 
 // Layer 2's half of a scenario (M8 contract §12.1): its symbolic script made
 // into the scripted provider's steps, with fixture ids and records found in
@@ -76,7 +76,7 @@ export function resolveRef(spec: RefSpec, ids: FixtureIds, req?: ProviderRequest
   if ('forecast' in spec) return { type: 'forecast', id: `forecast:${spec.forecast}` };
   const found = req ? findRef(allResults(req), spec.find, spec.type) : null;
   // A record the script expected and the reads did not return: cited as is,
-  // so the validator (cite.unknown) shows the scenario is wrong.
+  // so the checker (cite.unknown) shows the scenario is wrong.
   return found ?? { type: (spec.type ?? 'event') as Ref['type'], id: 'not-returned' };
 }
 
@@ -100,21 +100,34 @@ function step(spec: StepSpec, ids: FixtureIds): ScriptEntry {
   if ('decline' in spec)
     return {
       kind: 'answer',
-      text: [JSON.stringify({ say: null, blocks: [], decline: spec.decline })],
+      text: [JSON.stringify({ lead: null, facts: [], view: null, decline: spec.decline })],
     };
   if ('text' in spec) return { kind: 'answer', text: [spec.text] };
   if ('refusal' in spec) return { kind: 'refusal' };
-  const a = spec.answer;
+  const p = spec.plan;
+  const scope = (sc: ScopeSpec) => ({
+    of: sc.of,
+    from: sc.from ?? null,
+    to: sc.to ?? null,
+    people: (sc.people ?? []).map((k) => ids[k]),
+    part: sc.part ?? null,
+    else: sc.else ?? false,
+  });
+  const fact = (f: FactSpec, req: ProviderRequest) => {
+    if ('record' in f) {
+      const r = resolveRef(f.record, ids, req);
+      return { kind: r.type, ref: wire(r), show: f.show ?? [], scope: null };
+    }
+    if ('absence' in f) return { kind: 'absence', ref: null, show: [], scope: scope(f.absence) };
+    return { kind: 'count', ref: null, show: [], scope: scope(f.count) };
+  };
   return (req: ProviderRequest): ScriptStep => ({
     kind: 'answer',
     text: [
       JSON.stringify({
-        say: { text: a.say, cites: a.cites.map((c) => wire(resolveRef(c, ids, req))) },
-        blocks: (a.blocks ?? []).map((b) => ({
-          kind: b.kind,
-          text: b.text,
-          cites: b.cites.map((c) => wire(resolveRef(c, ids, req))),
-        })),
+        lead: p.lead,
+        facts: p.facts.map((f) => fact(f, req)),
+        view: p.view ?? null,
         decline: null,
       }),
     ],

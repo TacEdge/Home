@@ -1,56 +1,176 @@
 import 'server-only';
 import { z } from 'zod';
-import { REF_TYPES, refSchema, type Ref } from '../tools/types';
+import { REF_TYPES, refSchema, type Ref, type RefType } from '../tools/types';
 import { DECLINE_CODES, type DeclineCode } from './language';
 
-// The structured answer (M8 contract §4.4, §8.1; T22's answer half). What
-// the model must return at the end of an attempt: either an answer (one
-// speakable `say` sentence with its citations, and at most six blocks, each
-// a `fact` or Kev's `view`, each with its citations) or a closed decline
-// code, which code renders from §3.2's templates.
+// The answer plan (M8 contract §4.4, §8.1; owner amendment of 2026-10-15,
+// ADR 0012 §46): what the model must return at the end of an attempt. The
+// model no longer writes facts. It selects records and organises them:
+// - `lead`: one short conversational sentence, fact-free (checked in
+//   ./prose.ts); it may hold `{when}` once, which code fills;
+// - `facts`: at most ten typed selections, never display text: a record
+//   (its type, its ref exactly as a read returned it, and which of its own
+//   fields to show), or an `absence` or `count` over a mandatory scope;
+// - `view`: Kev's view, fact-free, about some of the blocks (by index);
+// or a closed decline code, which code renders from §3.2's templates.
+// HOME's renderer (./render.ts) writes every fact from the cited record.
 //
 // Two shapes of one thing:
-// - `kevAnswerSchema` (Zod) is the contract's `KevAnswer`, with every limit,
-//   checked on every answer before the validator runs (rule 1, `answer.schema`);
+// - `answerPlanSchema` (Zod) is the contract's `AnswerPlan`, strict, with
+//   every limit, checked on every plan before anything else (`answer.schema`);
 // - `ANSWER_JSON_SCHEMA` is what the provider is given (structured output,
 //   §5.1, or the strict `answer` tool, G7's fallback): one flat object whose
-//   every field is required, the union expressed by nulls, because strict
+//   every field is required, unions expressed by nulls, because strict
 //   schemas need `required` and `additionalProperties: false` throughout.
-//   Static, byte-stable, with no record value in it (T22): only HOME's closed
-//   sets (ref types, decline codes, block kinds). Lengths and counts are
-//   left to the Zod schema (structured-output schemas do not take them all).
+//   Static, byte-stable, with no record value in it (T22): only HOME's
+//   closed sets. Lengths and counts are the Zod schema's alone.
 
-/** `say`: one sentence, at most 160 characters (§8.1). */
-export const SAY_MAX_CHARS = 160;
-/** A block: at most 400 characters; at most six blocks (§8.1). */
-export const BLOCK_MAX_CHARS = 400;
-export const MAX_BLOCKS = 6;
-/** Citations per sentence or block; the answer's union is at most 50 (content v2). */
-export const MAX_CITES_PER_PART = 20;
+/** The lead: one sentence, at most 120 characters. */
+export const LEAD_MAX_CHARS = 120;
+/** Kev's view: at most 300 characters. */
+export const VIEW_MAX_CHARS = 300;
+/** At most ten fact blocks. */
+export const MAX_FACTS = 10;
+/** The answer's citations, all blocks together (content v2). */
 export const MAX_CITES = 50;
+/** The one placeholder a lead may hold: the days the plan's blocks are on, filled by code. */
+export const WHEN = '{when}';
 
-const cites = z.array(refSchema).max(MAX_CITES_PER_PART);
+/** The fields a record block may ask for, by the record's type (contract §8.1). */
+export const FIELDS_BY_KIND = Object.freeze({
+  event: ['people'],
+  task: ['status', 'due', 'scheduled', 'estimate', 'needs', 'assignee', 'project'],
+  project: ['status', 'target', 'open_tasks', 'summary'],
+  note: [],
+  person: ['age', 'birthday', 'relationship', 'regular_week', 'stage_note'],
+  conflict: [],
+  insight: [],
+  gap: ['neighbours', 'forecast'],
+  forecast: ['phrase', 'temperature', 'gust', 'parts'],
+  calendar: [],
+  context: [],
+} as const satisfies Record<RefType, readonly string[]>);
 
-export const answerBlockSchema = z
+/** Every field, once, in a fixed order (the provider's enum). */
+export const SHOW_FIELDS = [
+  'people',
+  'status',
+  'due',
+  'scheduled',
+  'estimate',
+  'needs',
+  'assignee',
+  'project',
+  'target',
+  'open_tasks',
+  'summary',
+  'age',
+  'birthday',
+  'relationship',
+  'regular_week',
+  'stage_note',
+  'neighbours',
+  'forecast',
+  'phrase',
+  'temperature',
+  'gust',
+  'parts',
+] as const;
+export type ShowField = (typeof SHOW_FIELDS)[number];
+
+/** What a record block shows when `show` is empty. */
+export const DEFAULT_SHOW: Readonly<Record<RefType, readonly ShowField[]>> = Object.freeze({
+  event: ['people'],
+  task: ['status', 'due'],
+  project: ['status', 'target'],
+  note: [],
+  person: ['age'],
+  conflict: [],
+  insight: [],
+  gap: ['neighbours'],
+  forecast: ['phrase', 'temperature', 'gust'],
+  calendar: [],
+  context: [],
+});
+
+export const SCOPE_KINDS = ['agenda', 'conflicts', 'forecast', 'search'] as const;
+export type ScopeKind = (typeof SCOPE_KINDS)[number];
+export const DAY_PARTS = ['morning', 'afternoon', 'evening'] as const;
+export const SUMMARY_KINDS = ['absence', 'count'] as const;
+export const FACT_KINDS = [...REF_TYPES, ...SUMMARY_KINDS] as const;
+
+const isoDate = z.iso.date();
+
+export const scopeSchema = z
   .object({
-    kind: z.enum(['fact', 'view']),
-    text: z.string().min(1).max(BLOCK_MAX_CHARS),
-    cites,
+    of: z.enum(SCOPE_KINDS),
+    from: isoDate.nullable(),
+    to: isoDate.nullable(),
+    /** Person ids the reader can see; none means everyone the reader can see. */
+    people: z.array(z.string().min(1).max(200)).max(6),
+    part: z.enum(DAY_PARTS).nullable(),
+    /** "Nothing else": every record in scope must be shown in the plan's other blocks. */
+    else: z.boolean(),
   })
   .strict();
-export type AnswerBlock = z.output<typeof answerBlockSchema>;
+export type Scope = z.output<typeof scopeSchema>;
 
-export const kevAnswerSchema = z.union([
+export const recordBlockSchema = z
+  .object({
+    kind: z.enum(REF_TYPES),
+    ref: refSchema,
+    show: z.array(z.enum(SHOW_FIELDS)).max(SHOW_FIELDS.length),
+  })
+  .strict()
+  .refine(
+    (b) => b.show.every((f) => (FIELDS_BY_KIND[b.kind] as readonly string[]).includes(f)),
+    'a field its kind does not offer',
+  );
+export type RecordBlock = z.output<typeof recordBlockSchema>;
+
+export const summaryBlockSchema = z
+  .object({ kind: z.enum(SUMMARY_KINDS), scope: scopeSchema })
+  .strict();
+export type SummaryBlock = z.output<typeof summaryBlockSchema>;
+
+export type FactBlock = RecordBlock | SummaryBlock;
+export const isSummary = (b: FactBlock): b is SummaryBlock =>
+  b.kind === 'absence' || b.kind === 'count';
+
+export const viewSchema = z
+  .object({
+    text: z.string().min(1).max(VIEW_MAX_CHARS),
+    about: z
+      .array(
+        z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_FACTS - 1),
+      )
+      .min(1)
+      .max(MAX_FACTS),
+  })
+  .strict();
+
+export const answerPlanSchema = z.union([
   z
     .object({
-      say: z.object({ text: z.string().min(1).max(SAY_MAX_CHARS), cites }).strict(),
-      blocks: z.array(answerBlockSchema).max(MAX_BLOCKS),
+      lead: z.string().min(1).max(LEAD_MAX_CHARS),
+      facts: z.array(z.union([recordBlockSchema, summaryBlockSchema])).max(MAX_FACTS),
+      view: viewSchema.nullable(),
     })
     .strict(),
   z.object({ decline: z.enum(DECLINE_CODES) }).strict(),
 ]);
-export type KevAnswer = z.output<typeof kevAnswerSchema>;
-export type AnswerOf = Extract<KevAnswer, { say: unknown }>;
+export type AnswerPlan = z.output<typeof answerPlanSchema>;
+export type PlanOf = Extract<AnswerPlan, { lead: unknown }>;
+
+/** What HOME rendered for the adult (content v2's blocks; the `detail` event). */
+export type AnswerBlock = { kind: 'fact' | 'view'; text: string; cites: Ref[] };
+
+// ---------------------------------------------------------------------------
+// The provider's view.
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const refJson = {
@@ -63,34 +183,51 @@ const refJson = {
   required: ['type', 'id', 'at'],
   additionalProperties: false,
 };
-const citesJson = { type: 'array', items: refJson };
+const scopeJson = {
+  type: 'object',
+  properties: {
+    of: { type: 'string', enum: [...SCOPE_KINDS] },
+    from: nullable({ type: 'string' }),
+    to: nullable({ type: 'string' }),
+    people: { type: 'array', items: { type: 'string' } },
+    part: nullable({ type: 'string', enum: [...DAY_PARTS] }),
+    else: { type: 'boolean' },
+  },
+  required: ['of', 'from', 'to', 'people', 'part', 'else'],
+  additionalProperties: false,
+};
 
-/** The provider's view of the answer (structured output or the `answer` tool's input). */
+/** The provider's view of the plan (structured output or the `answer` tool's input). */
 export const ANSWER_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
   type: 'object',
   properties: {
-    say: nullable({
-      type: 'object',
-      properties: { text: { type: 'string' }, cites: citesJson },
-      required: ['text', 'cites'],
-      additionalProperties: false,
-    }),
-    blocks: {
+    lead: nullable({ type: 'string' }),
+    facts: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          kind: { type: 'string', enum: ['fact', 'view'] },
-          text: { type: 'string' },
-          cites: citesJson,
+          kind: { type: 'string', enum: [...FACT_KINDS] },
+          ref: nullable(refJson),
+          show: { type: 'array', items: { type: 'string', enum: [...SHOW_FIELDS] } },
+          scope: nullable(scopeJson),
         },
-        required: ['kind', 'text', 'cites'],
+        required: ['kind', 'ref', 'show', 'scope'],
         additionalProperties: false,
       },
     },
+    view: nullable({
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        about: { type: 'array', items: { type: 'integer' } },
+      },
+      required: ['text', 'about'],
+      additionalProperties: false,
+    }),
     decline: nullable({ type: 'string', enum: [...DECLINE_CODES] }),
   },
-  required: ['say', 'blocks', 'decline'],
+  required: ['lead', 'facts', 'view', 'decline'],
   additionalProperties: false,
 });
 
@@ -98,7 +235,7 @@ export const ANSWER_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.free
 export const ANSWER_TOOL = Object.freeze({
   name: 'answer',
   description:
-    'Give your final answer to the adult, in HOME’s answer format. Call it once, after any reads, and on its own.',
+    'Give your final answer to the adult as HOME’s answer plan. Call it once, after any reads, and on its own.',
   inputSchema: ANSWER_JSON_SCHEMA,
 });
 
@@ -109,13 +246,29 @@ function normaliseRef(r: unknown): unknown {
   return at === null || at === undefined ? rest : { ...rest, at };
 }
 
+/** A wire fact block (every field present, nulls for the side not taken) in the contract's shape. */
+function shapeFact(b: unknown): unknown {
+  if (typeof b !== 'object' || b === null || Array.isArray(b)) return b;
+  const o = b as Record<string, unknown>;
+  const extra = Object.keys(o).filter((k) => !['kind', 'ref', 'show', 'scope'].includes(k));
+  if (extra.length > 0) return { ...o, __extra: true };
+  if (o.kind === 'absence' || o.kind === 'count') {
+    // A summary carries no ref and shows no field.
+    if (o.ref !== null && o.ref !== undefined) return { ...o, __extra: true };
+    if (Array.isArray(o.show) && o.show.length > 0) return { ...o, __extra: true };
+    return { kind: o.kind, scope: o.scope };
+  }
+  if (o.scope !== null && o.scope !== undefined) return { ...o, __extra: true };
+  return { kind: o.kind, ref: normaliseRef(o.ref), show: o.show ?? [] };
+}
+
 /**
- * The model's final output as a `KevAnswer`, or null (rule 1). Accepts the
- * provider's flat shape (nulls for the side not taken) and the contract's
- * union; a JSON string or an already-parsed object (the `answer` tool's
- * input). Anything else, extra keys included, is null.
+ * The model's final output as an `AnswerPlan`, or null (`answer.schema`).
+ * Accepts the provider's flat shape (nulls for the side not taken) and the
+ * contract's union; a JSON string or an already-parsed object (the `answer`
+ * tool's input). Anything else, extra keys included, is null.
  */
-export function parseAnswer(raw: unknown): KevAnswer | null {
+export function parsePlan(raw: unknown): AnswerPlan | null {
   let value: unknown = raw;
   if (typeof raw === 'string') {
     try {
@@ -126,51 +279,26 @@ export function parseAnswer(raw: unknown): KevAnswer | null {
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
+  if (Object.keys(v).some((k) => !['lead', 'facts', 'view', 'decline'].includes(k))) return null;
   let shaped: unknown;
-  if ('decline' in v && v.decline !== null && v.decline !== undefined) {
-    // A decline carries nothing else (the flat shape's other fields empty).
-    const sayEmpty = v.say === null || v.say === undefined;
-    const blocksEmpty =
-      v.blocks === undefined || (Array.isArray(v.blocks) && v.blocks.length === 0);
-    if (!sayEmpty || !blocksEmpty) return null;
+  if (v.decline !== null && v.decline !== undefined) {
+    // A decline carries nothing else.
+    const empty =
+      (v.lead === null || v.lead === undefined) &&
+      (v.view === null || v.view === undefined) &&
+      (v.facts === undefined || (Array.isArray(v.facts) && v.facts.length === 0));
+    if (!empty) return null;
     shaped = { decline: v.decline };
   } else {
-    if (typeof v.say !== 'object' || v.say === null) return null;
-    const extra = Object.keys(v).filter((k) => !['say', 'blocks', 'decline'].includes(k));
-    if (extra.length > 0) return null;
-    const say = v.say as Record<string, unknown>;
+    if (typeof v.lead !== 'string') return null;
     shaped = {
-      say: { ...say, cites: Array.isArray(say.cites) ? say.cites.map(normaliseRef) : say.cites },
-      blocks: Array.isArray(v.blocks)
-        ? v.blocks.map((b) =>
-            typeof b === 'object' && b !== null && Array.isArray((b as { cites?: unknown }).cites)
-              ? { ...b, cites: (b as { cites: unknown[] }).cites.map(normaliseRef) }
-              : b,
-          )
-        : v.blocks,
+      lead: v.lead,
+      facts: Array.isArray(v.facts) ? v.facts.map(shapeFact) : v.facts,
+      view: v.view ?? null,
     };
   }
-  const parsed = kevAnswerSchema.safeParse(shaped);
-  if (!parsed.success) return null;
-  if ('say' in parsed.data && uniqueCites(parsed.data).length > MAX_CITES) return null;
-  return parsed.data;
-}
-
-const refKey = (r: Ref) => `${r.type}|${r.id}|${r.at ?? ''}`;
-
-/** Every citation of an answer, each once, in order (say first). */
-export function uniqueCites(answer: AnswerOf): Ref[] {
-  const seen = new Set<string>();
-  const out: Ref[] = [];
-  for (const r of [...answer.say.cites, ...answer.blocks.flatMap((b) => b.cites)]) {
-    const k = refKey(r);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(
-      r.at === undefined ? { type: r.type, id: r.id } : { type: r.type, id: r.id, at: r.at },
-    );
-  }
-  return out;
+  const parsed = answerPlanSchema.safeParse(shaped);
+  return parsed.success ? parsed.data : null;
 }
 
 export type { DeclineCode };

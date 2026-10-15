@@ -185,6 +185,7 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
       cites?: { type: string; id: string; at?: string }[];
       trace?: { tool: string }[];
       limits?: string[];
+      salvaged?: true;
     };
     expect(last.done.outcome, JSON.stringify(content)).toBe(e.outcome);
     if (e.decline) expect(last.done.decline).toBe(e.decline);
@@ -196,8 +197,18 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
       expect(content.cites ?? []).not.toContainEqual(resolveRef(r, ids));
     for (const l of e.limits ?? []) expect(content.limits).toContain(l);
     if (e.escalated !== undefined && tier === 'fast') expect(last.done.escalated).toBe(e.escalated);
+    // What the adult sees: the events (the lead, the rendered blocks, the citations) and the stored message.
     const shown = JSON.stringify(last.events) + JSON.stringify(stored?.content ?? null);
     for (const n of e.neverShown ?? []) expect(shown, n).not.toContain(n);
+    const shownTexts = last.events.flatMap((x) =>
+      x.type === 'say' ? [x.text] : x.type === 'detail' ? x.blocks.map((b) => b.text) : [],
+    );
+    for (const n of e.shows ?? [])
+      expect(
+        shownTexts.some((t) => t.includes(n)),
+        `${n} in ${JSON.stringify(shownTexts)}`,
+      ).toBe(true);
+    if (e.salvaged !== undefined) expect(content.salvaged === true).toBe(e.salvaged);
     // Structural, every scenario: nothing of the other adult's or sensitive, anywhere.
     const requests = all.flatMap((t) => t.provider.requests.map(requestBytes)).join('\n');
     for (const n of [`ni-${other}-`, CANARY_MARK[other], SENSITIVE_MARK]) {
@@ -220,7 +231,7 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
         t.replace(/"untrusted_text":"(?:[^"\\]|\\.)*"/g, '"untrusted_text":"[labelled]"'),
       );
       for (const t of unlabelled) expect(t, n).not.toContain(n);
-      const replays = texts.filter((t) => t.includes('"say":{"text":{"untrusted_text"'));
+      const replays = texts.filter((t) => t.includes('"home_facts":[{"text":{"untrusted_text"'));
       expect(replays.join(''), 'the earlier answer is replayed, labelled').toContain(n);
     }
     // No model text is shown that the validator did not pass: an answer's

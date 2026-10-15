@@ -1,171 +1,125 @@
 import 'server-only';
-import { addDays, type IsoDate } from '@/lib/dates';
+import { addDays, isoDateInZone, type IsoDate } from '@/lib/dates';
 import { refSchema, type Ref, type ToolName } from '../tools/types';
 
-// The turn's ledger (M8 contract §4.4 `LedgerEntry`, §6.1, §8.3): every
-// record this attempt's tool results and the bundle returned, each as a
-// `Ref` with the facts its result carried. The validator accepts only
-// citations in the ledger (rule 2), and checks an answer's times, dates,
-// numbers, names and people against the facts of the records each clause
-// is about (rules 4–6). One ledger per attempt: an escalated turn's deep
-// attempt starts a new one, so nothing the fast attempt read can be cited
-// (C15); a record an earlier turn mentioned must be fetched again to be
-// cited (C7).
+// The attempt's ledger (M8 contract §4.4 `LedgerEntry`, §6.1, §8.3; owner
+// amendment ADR 0012 §46): every record the bundle and this attempt's
+// successful tool results carry, each kept as the object that carried it,
+// so HOME's renderer can write a fact block from that record's own fields
+// and nothing else. One ledger per attempt: an escalated turn's deep
+// attempt starts a new one, so nothing the fast attempt read can be shown
+// (C15); a record an earlier turn mentioned must be read again (C7).
 //
-// A record's facts (corrected in the Package 3 review, B-2): only its own.
-// - Its own fields, as the tool sent them: times, dates, parts of the day,
-//   numbers, durations, words and texts, read from the object that carries
-//   it as `ref` (an occurrence's start and end, a task's estimate, a gap's
-//   bounds, a forecast day's figures, a person's age and next birthday),
-//   plus its ref's own `at`.
-// - A nested record (a person on an event, a task's assignee, a gap's
-//   neighbour, an item in a Today person group) gives its parent only its
-//   identity: its recorded name or title, and for a person their role. Its
-//   own times are not the parent's, with one exception: a conflict's
-//   commitments, whose times define the overlap the conflict is (§6.2).
-// - The day an agenda or Today item is listed under is the item's date (a
-//   birthday has no other).
-// - A result's top-level values are given to no record, except an explicit
-//   allow-list decided from the tools' output schemas: the forecast's
-//   `fetched_at` and `credit`, given to its forecast days. No other tool has
-//   a top-level value that is a fact of every record in it: `from`/`to` are
-//   the range asked for, `count`/`truncated` describe the list, `scope`,
-//   `min_minutes` and `needs` echo the question.
-// - A ref listed under an object's `refs` (an insight's facts) carries that
-//   object's facts.
-// Facts are read from the tool's output exactly as the model was sent it:
-// nothing is re-derived here.
+// What an entry knows, all from the object that carried its ref:
+// - `record`: that object as the tool sent it (null for a ref listed only
+//   under an object's `refs`, such as an insight's facts: such a record can
+//   be cited by the insight, never rendered on its own);
+// - `shape`: which of the tools' output shapes it is (an agenda item, a
+//   conflict's commitment, a person on an event …), so the renderer reads
+//   the right fields and refuses the wrong ones (a person on an event
+//   carries a role on that event, never their own facts);
+// - `dates`, `people`, `span`: when it is recorded, who is on it (null when
+//   the object does not say) and its timed span, for absence and counts;
+// - `context`: the few result-level values that are facts of every record
+//   in the result, by an explicit allow-list decided from the output
+//   schemas: a forecast day's fetch time, freshness and credit; a gap's
+//   scope and the coverage of the read that found it. Nothing else at the
+//   top level of a result (its `from`/`to`, `count`, `truncated`) is a fact
+//   of its records.
 //
-// Coverage (I-8, M-4): which days a read establishes "nothing is recorded"
-// for, and of what kind: the bundle's Today and get_today cover today's
-// agenda; get_agenda covers its range's agenda (only for the people asked
-// for, when it was filtered); get_conflicts covers its range's overlaps. A
-// truncated result covers nothing. The forecast, gaps and every other read
-// cover nothing.
+// Coverage (kept from the Package 3 review, I-8 and M-4): which days a
+// complete read establishes "nothing is recorded" for, of what kind and for
+// whom: the bundle's Today and get_today cover today's agenda; get_agenda
+// its range's agenda (only for the people asked for, when it was filtered);
+// get_conflicts its range's overlaps; get_weather the asked days it has no
+// forecast for (all of them when none is set up); a search what it searched
+// for. A truncated read covers nothing. A forecast, gaps or conflicts read is
+// never agenda coverage.
 
 export type DayPart = 'morning' | 'afternoon' | 'evening';
-/** How a person is on a record: their recorded role, `assignee`, `self` (the person record itself) or `on`. */
-export type PersonRole = 'attending' | 'responsible' | 'assignee' | 'self' | 'on';
+export type LedgerSource = ToolName | 'bundle';
 
-export type LedgerFacts = {
-  /** Wall-clock times in the home zone, `HH:MM`, as the outputs wrote them. */
-  times: Set<string>;
-  dates: Set<IsoDate>;
-  /** Weekdays the record names outright (a regular week's), lower-case. */
-  weekdays: Set<string>;
-  numbers: Set<number>;
-  /** Minutes: estimates, minimum lengths, and every start–end span. */
-  durations: Set<number>;
-  parts: Set<DayPart>;
-  /** Lower-cased words of every string the record carried, nested identities included. */
-  words: Set<string>;
-  /** Recorded strings (titles, names, sentences), nested identities included, as sent. */
-  texts: Set<string>;
-  /** The record's own title or name (its identity), as sent. */
-  ownTexts: Set<string>;
-  /** The people on the record, by lower-cased name, with how they are on it. */
-  people: Map<string, Set<PersonRole>>;
-  /** Numbers by what they are: `age`, `birthday_age`, `low_c`, `high_c`, `max_gust_kmh`, `estimate_minutes`. */
-  keyed: Map<string, Set<number>>;
+export type Shape =
+  | 'agenda_event'
+  | 'commitment'
+  | 'regular'
+  | 'title_only'
+  | 'task'
+  | 'task_due'
+  | 'task_scheduled'
+  | 'todo'
+  | 'project_list'
+  | 'project_full'
+  | 'project_target'
+  | 'note'
+  | 'bundle_person'
+  | 'people_person'
+  | 'birthday'
+  | 'person_on'
+  | 'named'
+  | 'conflict'
+  | 'insight'
+  | 'gap'
+  | 'forecast'
+  | 'calendar'
+  | 'context'
+  | 'ref_only';
+
+export type EntryContext = {
+  /** A gap's read: whose stretches (`household` or a person id) and how complete its calendars were. */
+  gapScope?: 'household' | string;
+  gapCoverage?: 'recorded' | 'partial' | 'unknown';
+  /** A forecast day's read: when it was fetched, how fresh, and whose forecast. */
+  fetchedAt?: string | null;
+  freshness?: string;
+  credit?: string;
 };
 
-export type LedgerSource = ToolName | 'bundle';
 export type LedgerEntry = {
   ref: Ref;
   source: LedgerSource;
-  facts: LedgerFacts;
-  /** The day the record was listed under (an agenda or Today day), if any. */
+  /** Which read (bundle or tool result, numbered in order) returned it. */
+  read: number;
+  record: Readonly<Record<string, unknown>> | null;
+  shape: Shape;
+  /** The day an agenda or Today list put it under, if any. */
   day?: IsoDate;
-  /** The agenda item kind it was listed as (`event`, `birthday`, `task_due` …), if any. */
-  item?: string;
+  context: EntryContext;
+  /** The home dates it is recorded on (its occurrence, due date, target, birthday …). */
+  dates: ReadonlySet<IsoDate>;
+  /** The visible people on it, or null when the object does not say. */
+  people: ReadonlySet<string> | null;
+  /** Its timed span (epoch ms), or null when it has no time of day. */
+  span: { from: number; to: number } | null;
 };
 
 export type CoverageKind = 'agenda' | 'conflicts' | 'forecast' | 'search';
 export type CoverageSpan = {
   kind: CoverageKind;
+  /** The read that established it. */
+  read: number;
   /** The days covered (for `forecast`: the days the forecast does not cover). */
   days: ReadonlySet<IsoDate>;
   /** The person ids the read was limited to, or null for everyone the reader can see. */
   persons: ReadonlySet<string> | null;
-  /** A search's query words. */
-  query?: ReadonlySet<string>;
+  /** `forecast`: whether a forecast is set up at all. */
+  configured?: boolean;
+  /** `search`: what was searched for, trimmed. */
+  query?: string;
 };
 
-const INSTANT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const CLOCK = /^(\d{2}):(\d{2})$/;
-const PARTS: readonly string[] = ['morning', 'afternoon', 'evening'];
-const WEEKDAY_NAMES: readonly string[] = [
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-  'sunday',
-];
-/** Keys whose values are identifiers, never facts a sentence may state. */
-const ID_KEYS = new Set(['id', 'key', 'rule']);
-/** Numbers that are what they are named. */
-const KEYED = new Set(['low_c', 'high_c', 'max_gust_kmh', 'estimate_minutes']);
-/** The only top-level values that are facts of the records in a result (B-2), by tool. */
-const TOP_FACTS: Partial<
-  Record<ToolName, { keys: readonly string[]; to: readonly Ref['type'][] }>
-> = {
-  get_weather: { keys: ['fetched_at', 'credit'], to: ['forecast'] },
-};
-
-export const emptyFacts = (): LedgerFacts => ({
-  times: new Set(),
-  dates: new Set(),
-  weekdays: new Set(),
-  numbers: new Set(),
-  durations: new Set(),
-  parts: new Set(),
-  words: new Set(),
-  texts: new Set(),
-  ownTexts: new Set(),
-  people: new Map(),
-  keyed: new Map(),
-});
-
-export const partOf = (hour: number): DayPart =>
-  hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-
-/** NFKC, apostrophes and dashes as one form, and runs of white space as one space. */
-export function normaliseText(s: string): string {
-  return s
-    .normalize('NFKC')
-    .replace(/[‘’ʼ`´]/g, "'")
-    .replace(/[‐‑‒–—]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** Words of a string: letters and digits, lower-cased; apostrophes and possessives dropped. */
-export function wordsOf(s: string): string[] {
-  return (
-    normaliseText(s)
-      .toLowerCase()
-      .replace(/'s\b/g, '')
-      .match(/[\p{L}\p{M}\p{N}]+/gu) ?? []
-  );
-}
-
-function addInstant(f: LedgerFacts, s: string): boolean {
-  const m = INSTANT.exec(s);
-  if (!m) return false;
-  f.dates.add(m[1] as IsoDate);
-  f.times.add(`${m[2]}:${m[3]}`);
-  f.parts.add(partOf(Number(m[2])));
-  return true;
-}
-
-const minutesBetween = (a: string, b: string): number | null => {
-  const x = Date.parse(a);
-  const y = Date.parse(b);
-  return Number.isFinite(x) && Number.isFinite(y) && y > x ? Math.round((y - x) / 60_000) : null;
-};
+/** Keys of recorded text whose words are a record's own (titles, names, labels, notes …). */
+const RECORD_TEXT_KEYS = new Set([
+  'title',
+  'name',
+  'label',
+  'body',
+  'content',
+  'summary',
+  'stage_note',
+  'relationship',
+]);
 
 const isRef = (v: unknown): v is Ref => refSchema.safeParse(v).success;
 const refOf = (v: unknown): Ref | null => {
@@ -173,6 +127,7 @@ const refOf = (v: unknown): Ref | null => {
   const r = (v as { ref?: unknown }).ref;
   return isRef(r) ? r : null;
 };
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 const untrustedOf = (v: unknown): string | null =>
   typeof v === 'object' &&
   v !== null &&
@@ -180,186 +135,8 @@ const untrustedOf = (v: unknown): string | null =>
     ? (v as { untrusted_text: string }).untrusted_text
     : null;
 
-function addText(f: LedgerFacts, s: string, own: boolean): void {
-  const t = normaliseText(s);
-  f.texts.add(t);
-  if (own) f.ownTexts.add(t);
-  for (const w of wordsOf(t)) f.words.add(w);
-}
-
-function addPerson(f: LedgerFacts, name: string, role: PersonRole): void {
-  const k = normaliseText(name).toLowerCase();
-  const roles = f.people.get(k) ?? new Set<PersonRole>();
-  roles.add(role);
-  f.people.set(k, roles);
-}
-
-function addKeyed(f: LedgerFacts, key: string, n: number): void {
-  const s = f.keyed.get(key) ?? new Set<number>();
-  s.add(n);
-  f.keyed.set(key, s);
-}
-
-/** A nested record's identity, given to its parent: its name or title, and a person's role. */
-function addIdentity(
-  f: LedgerFacts,
-  nested: Record<string, unknown>,
-  ref: Ref,
-  key: string,
-  nameOf: (id: string) => string | null,
-): void {
-  // A person given by ref alone (a context's subject) is named from the bundle.
-  const name = untrustedOf(nested.name) ?? (ref.type === 'person' ? nameOf(ref.id) : null);
-  const title = untrustedOf(nested.title);
-  for (const t of [name, title]) if (t !== null) addText(f, t, false);
-  if (ref.type === 'person' && name !== null) {
-    const role = nested.role;
-    addPerson(
-      f,
-      name,
-      role === 'attending' || role === 'responsible'
-        ? role
-        : key === 'assignee'
-          ? 'assignee'
-          : 'on',
-    );
-  }
-}
-
-/**
- * Collects a record's own facts into `f` (see the header). `record` is the
- * object that carries the ref; `refType` its type, for the conflict rule.
- */
-function collectOwn(
-  record: Record<string, unknown>,
-  refType: Ref['type'],
-  f: LedgerFacts,
-  nameOf: (id: string) => string | null,
-): void {
-  const isBirthday = record.type === 'birthday';
-  /** `container`: the key the enclosing object or array sits under (`#record` for the record's own fields). */
-  const visit = (
-    node: unknown,
-    key: string | undefined,
-    depth: number,
-    container: string,
-  ): void => {
-    if (node === null || node === undefined || typeof node === 'boolean') return;
-    if (typeof node === 'string') {
-      if (key !== undefined && ID_KEYS.has(key)) return;
-      if (addInstant(f, node)) return;
-      if (DATE.test(node)) {
-        f.dates.add(node as IsoDate);
-        return;
-      }
-      const clock = CLOCK.exec(node);
-      if (clock && key === 'time') {
-        f.times.add(node);
-        f.parts.add(partOf(Number(clock[1])));
-        return;
-      }
-      if (PARTS.includes(node)) f.parts.add(node as DayPart);
-      if (key === 'weekday' && WEEKDAY_NAMES.includes(node)) f.weekdays.add(node);
-      for (const w of wordsOf(node)) f.words.add(w);
-      return;
-    }
-    if (typeof node === 'number') {
-      if (!Number.isFinite(node)) return;
-      f.numbers.add(node);
-      if (key && /minutes?$/.test(key)) f.durations.add(node);
-      if (key && KEYED.has(key)) addKeyed(f, key, node);
-      if (key === 'age')
-        addKeyed(
-          f,
-          container === 'next_birthday' || (container === '#record' && isBirthday)
-            ? 'birthday_age'
-            : 'age',
-          node,
-        );
-      return;
-    }
-    if (Array.isArray(node)) {
-      // How many there are is a fact of the record ("two timed events").
-      if (node.length > 0) f.numbers.add(node.length);
-      for (const v of node) visit(v, undefined, depth + 1, key ?? container);
-      return;
-    }
-    if (typeof node !== 'object') return;
-    const o = node as Record<string, unknown>;
-    const text = untrustedOf(o);
-    if (text !== null) {
-      addText(f, text, container === '#record' && (key === 'title' || key === 'name'));
-      return;
-    }
-    const nested = depth > 0 ? refOf(o) : null;
-    if (nested) {
-      const where = key ?? container;
-      addIdentity(f, o, nested, where, nameOf);
-      // A conflict's commitments define its overlap: their times are its own (§6.2).
-      if (refType === 'conflict' && where === 'commitments') {
-        for (const k of ['start', 'end'] as const)
-          if (typeof o[k] === 'string') addInstant(f, o[k] as string);
-        const m =
-          typeof o.start === 'string' && typeof o.end === 'string'
-            ? minutesBetween(o.start, o.end)
-            : null;
-        if (m !== null) f.durations.add(m);
-        // The conflict's person is on each commitment in its role.
-        if (o.role === 'attending' || o.role === 'responsible')
-          for (const roles of f.people.values()) if (roles.has('on')) roles.add(o.role);
-      }
-      return;
-    }
-    for (const [a, b] of [
-      ['start', 'end'],
-      ['from', 'to'],
-    ] as const) {
-      const x = o[a];
-      const y = o[b];
-      if (typeof x === 'string' && typeof y === 'string') {
-        const m = minutesBetween(x, y);
-        if (m !== null) f.durations.add(m);
-      }
-    }
-    const inner = depth === 0 ? '#record' : (key ?? container);
-    for (const [k, v] of Object.entries(o)) {
-      if (depth === 0 && k === 'ref') continue;
-      visit(v, k, depth + 1, inner);
-    }
-  };
-  visit(record, undefined, 0, '#record');
-  // The person record itself: its own name.
-  if (refType === 'person') {
-    const name = untrustedOf(record.name);
-    if (name !== null) addPerson(f, name, 'self');
-  }
-}
-
-function mergeInto(into: LedgerFacts, from: LedgerFacts): void {
-  for (const k of [
-    'times',
-    'dates',
-    'weekdays',
-    'numbers',
-    'durations',
-    'parts',
-    'words',
-    'texts',
-    'ownTexts',
-  ] as const)
-    for (const v of from[k] as Set<unknown>) (into[k] as Set<unknown>).add(v);
-  for (const [n, roles] of from.people) {
-    const s = into.people.get(n) ?? new Set<PersonRole>();
-    for (const r of roles) s.add(r);
-    into.people.set(n, s);
-  }
-  for (const [k, ns] of from.keyed) for (const n of ns) addKeyed(into, k, n);
-}
-
-const keyOf = (r: Pick<Ref, 'type' | 'id'>) => `${r.type}|${r.id}`;
-
 /** The dates `from`…`to` inclusive (at most 92). */
-function daysFrom(from: string, to: string): Set<IsoDate> {
+export function daysFrom(from: string, to: string): Set<IsoDate> {
   const out = new Set<IsoDate>();
   if (!DATE.test(from) || !DATE.test(to) || to < from) return out;
   let d = from as IsoDate;
@@ -370,23 +147,85 @@ function daysFrom(from: string, to: string): Set<IsoDate> {
   return out;
 }
 
+/** The shape of an object carrying a ref, from its own keys and where it sat. */
+function shapeOf(o: Record<string, unknown>, ref: Ref, parentKey: string | undefined): Shape {
+  const has = (k: string) => Object.hasOwn(o, k);
+  switch (o.type) {
+    case 'event':
+      if (ref.type === 'event' && has('all_day')) return 'agenda_event';
+      break;
+    case 'birthday':
+      if (ref.type === 'person') return 'birthday';
+      break;
+    case 'task_due':
+      if (ref.type === 'task') return 'task_due';
+      break;
+    case 'task_scheduled':
+      if (ref.type === 'task') return 'task_scheduled';
+      break;
+    case 'project_target':
+      if (ref.type === 'project') return 'project_target';
+      break;
+  }
+  switch (ref.type) {
+    case 'event':
+      if (parentKey === 'commitments') return 'commitment';
+      if (has('weekday') && has('cadence')) return 'regular';
+      return has('title') ? 'title_only' : 'ref_only';
+    case 'task':
+      if (has('status')) return 'task';
+      if (has('rule')) return 'todo';
+      return has('title') ? 'title_only' : 'ref_only';
+    case 'project':
+      if (has('summary') && has('tasks')) return 'project_full';
+      if (has('open_tasks')) return 'project_list';
+      return has('title') ? 'title_only' : 'ref_only';
+    case 'note':
+      return has('body') ? 'note' : 'ref_only';
+    case 'person':
+      if (has('in_household') && has('relationship')) return 'bundle_person';
+      if (has('next_birthday')) return 'people_person';
+      if (o.role === 'attending' || o.role === 'responsible') return 'person_on';
+      return has('name') || has('title') ? 'named' : 'ref_only';
+    case 'conflict':
+      return has('commitments') ? 'conflict' : 'ref_only';
+    case 'insight':
+      return has('rule') && has('text') ? 'insight' : 'ref_only';
+    case 'gap':
+      return has('from') && has('to') && has('date') ? 'gap' : 'ref_only';
+    case 'forecast':
+      return has('phrase') ? 'forecast' : 'ref_only';
+    case 'calendar':
+      return has('status') && has('label') ? 'calendar' : 'ref_only';
+    case 'context':
+      return has('content') && has('category') ? 'context' : 'ref_only';
+  }
+  return 'ref_only';
+}
+
 export class Ledger {
   readonly #entries: LedgerEntry[] = [];
   readonly #byKey = new Map<string, LedgerEntry[]>();
   readonly #coverage: CoverageSpan[] = [];
-  /** The visible people's names by person id (from the bundle). */
-  readonly #namesById = new Map<string, string>();
   /** Refs the tools (not the bundle) returned, in order, each once. */
   readonly #toolRefs: Ref[] = [];
   readonly #toolRefKeys = new Set<string>();
-  /** Words of the people the reader can see (the bundle), for rule 6. */
-  readonly peopleWords = new Set<string>();
-  /** Their names as recorded (exempt from the lists, rule 7). */
-  readonly peopleNames = new Set<string>();
-  /** The people the reader can see: lower-cased name → person id. */
-  readonly peopleIds = new Map<string, string>();
-  /** The reader's own recorded name (lower-cased), when a person is linked to them. */
-  reader: string | null = null;
+  #reads = 0;
+  readonly #timeZone: string;
+  /** The visible people's names by person id (from the bundle and the reads). */
+  readonly namesById = new Map<string, string>();
+  /** Every recorded title, name, label, note and context text in the ledger, as sent. */
+  readonly recordTexts = new Set<string>();
+  /** The reader's own person id, when a person is linked to them. */
+  readerId: string | null = null;
+
+  constructor(timeZone: string) {
+    this.#timeZone = timeZone;
+  }
+
+  get timeZone(): string {
+    return this.#timeZone;
+  }
 
   get size(): number {
     return this.#entries.length;
@@ -400,15 +239,131 @@ export class Ledger {
     return this.#coverage;
   }
 
-  #add(ref: Ref, source: LedgerSource, facts: LedgerFacts, day?: IsoDate, item?: string): void {
-    if (ref.at) addInstant(facts, ref.at);
-    if (day) facts.dates.add(day);
+  #dateOf(instant: string | undefined): IsoDate | null {
+    if (!instant) return null;
+    const t = Date.parse(instant);
+    return Number.isFinite(t) ? isoDateInZone(new Date(t), this.#timeZone) : null;
+  }
+
+  /** The dates, people and span an object records (see the header). */
+  #facts(
+    o: Record<string, unknown> | null,
+    ref: Ref,
+    shape: Shape,
+    day: IsoDate | undefined,
+  ): Pick<LedgerEntry, 'dates' | 'people' | 'span'> {
+    const dates = new Set<IsoDate>();
+    const add = (d: unknown) => {
+      if (typeof d === 'string' && DATE.test(d)) dates.add(d as IsoDate);
+    };
+    const addInstant = (s: unknown) => {
+      const d = this.#dateOf(str(s));
+      if (d) dates.add(d);
+    };
+    if (day) dates.add(day);
+    if (ref.at) addInstant(ref.at);
+    let people: Set<string> | null = null;
+    let span: LedgerEntry['span'] = null;
+    const spanOf = (a: unknown, b: unknown) => {
+      const x = Date.parse(str(a) ?? '');
+      const y = Date.parse(str(b) ?? '');
+      return Number.isFinite(x) ? { from: x, to: Number.isFinite(y) && y > x ? y : x } : null;
+    };
+    if (o) {
+      switch (shape) {
+        case 'agenda_event': {
+          if (o.all_day !== true) {
+            addInstant(o.start);
+            addInstant(o.end);
+            span = spanOf(o.start, o.end);
+          }
+          people = new Set(
+            (Array.isArray(o.people) ? o.people : [])
+              .map((p) => refOf(p)?.id)
+              .filter((x): x is string => typeof x === 'string'),
+          );
+          break;
+        }
+        case 'commitment':
+          addInstant(o.start);
+          addInstant(o.end);
+          span = spanOf(o.start, o.end);
+          break;
+        case 'task': {
+          add(o.due);
+          const s = o.scheduled as { start?: unknown; end?: unknown } | null;
+          if (s) {
+            addInstant(s.start);
+            span = spanOf(s.start, s.end);
+          }
+          const a = refOf(o.assignee);
+          people = new Set(a ? [a.id] : []);
+          break;
+        }
+        case 'task_due':
+          add(o.due);
+          break;
+        case 'task_scheduled':
+          addInstant(o.start);
+          span = spanOf(o.start, o.end);
+          break;
+        case 'todo':
+          add(o.due);
+          addInstant(o.scheduled_start);
+          if (o.scheduled_start) span = spanOf(o.scheduled_start, o.scheduled_start);
+          break;
+        case 'project_list':
+        case 'project_full':
+          add(o.target_date);
+          people = new Set();
+          break;
+        case 'project_target':
+          add(o.date);
+          people = new Set();
+          break;
+        case 'birthday':
+          people = new Set([ref.id]);
+          break;
+        case 'people_person': {
+          const nb = o.next_birthday as { date?: unknown } | null;
+          if (nb) add(nb.date);
+          people = new Set([ref.id]);
+          break;
+        }
+        case 'conflict':
+          add(o.when);
+          break;
+        case 'gap':
+        case 'forecast':
+          add(o.date);
+          break;
+        case 'insight':
+          add(o.when);
+          break;
+        default:
+          break;
+      }
+    }
+    return { dates, people, span };
+  }
+
+  #add(
+    ref: Ref,
+    source: LedgerSource,
+    record: Record<string, unknown> | null,
+    shape: Shape,
+    context: EntryContext,
+    day?: IsoDate,
+  ): void {
     const entry: LedgerEntry = {
       ref: ref.at === undefined ? { type: ref.type, id: ref.id } : { ...ref },
       source,
-      facts,
+      read: this.#reads,
+      record: record ? Object.freeze({ ...record }) : null,
+      shape,
       ...(day ? { day } : {}),
-      ...(item ? { item } : {}),
+      context,
+      ...this.#facts(record, ref, shape, day),
     };
     this.#entries.push(entry);
     const k = keyOf(ref);
@@ -424,58 +379,67 @@ export class Ledger {
     }
   }
 
-  /**
-   * Walks a result: every object carrying a ref is an entry with its own
-   * facts (and the allow-listed top-level facts for its type); refs under
-   * `refs` carry their enclosing object's facts; agenda days and Today give
-   * their items the day.
-   */
-  #walk(
-    node: unknown,
-    source: LedgerSource,
-    top: { facts: LedgerFacts; to: readonly Ref['type'][] } | null,
-    enclosing: LedgerFacts | null,
-    day: IsoDate | undefined,
-  ): void {
+  /** Recorded text and people's names, for the prose check (./prose.ts). */
+  #texts(node: unknown, key: string | undefined): void {
     if (Array.isArray(node)) {
-      for (const v of node) this.#walk(v, source, top, enclosing, day);
+      for (const v of node) this.#texts(v, key);
       return;
     }
     if (typeof node !== 'object' || node === null) return;
     const o = node as Record<string, unknown>;
-    let here = enclosing;
+    const t = untrustedOf(o);
+    if (t !== null) {
+      if (key !== undefined && RECORD_TEXT_KEYS.has(key)) this.recordTexts.add(t);
+      return;
+    }
+    const ref = refOf(o);
+    const name = untrustedOf(o.name);
+    if (ref?.type === 'person' && name !== null && !this.namesById.has(ref.id))
+      this.namesById.set(ref.id, name);
+    for (const [k, v] of Object.entries(o)) this.#texts(v, k);
+  }
+
+  /**
+   * Walks a result: every object carrying a ref is an entry; refs under
+   * `refs` are ref-only entries; agenda days and Today give their items the
+   * day. `context` is the result's allow-listed values for its records.
+   */
+  #walk(
+    node: unknown,
+    source: LedgerSource,
+    context: (ref: Ref) => EntryContext,
+    day: IsoDate | undefined,
+    parentKey: string | undefined,
+    todayDate: IsoDate | undefined,
+  ): void {
+    if (Array.isArray(node)) {
+      for (const v of node) this.#walk(v, source, context, day, parentKey, todayDate);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    const o = node as Record<string, unknown>;
+    if (untrustedOf(o) !== null) return;
     const ref = refOf(o);
     if (ref) {
-      const facts = emptyFacts();
-      if (top && top.to.includes(ref.type)) mergeInto(facts, top.facts);
-      collectOwn(o, ref.type, facts, (pid) => this.#namesById.get(pid) ?? null);
-      // An item's day is its own only when it is an agenda item (not a Today person group).
-      const item = typeof o.type === 'string' ? o.type : undefined;
-      this.#add(ref, source, facts, item ? day : undefined, item);
-      here = facts;
+      const shape = shapeOf(o, ref, parentKey);
+      const isItem = typeof o.type === 'string';
+      // Today's To do: a task due or scheduled today is today's.
+      const todoToday =
+        shape === 'todo' &&
+        (o.rule === 'todo.due_today' || o.rule === 'todo.scheduled_today') &&
+        todayDate !== undefined;
+      const itemDay = isItem ? day : todoToday ? todayDate : undefined;
+      this.#add(ref, source, o, shape, context(ref), itemDay);
     }
-    // A day of the agenda lists its items under it; Today lists its people
-    // groups and "also today" under its date (not its evening's tomorrow).
     const ownDate =
       typeof o.date === 'string' && DATE.test(o.date) ? (o.date as IsoDate) : undefined;
     const isAgendaDay = !ref && ownDate !== undefined && Array.isArray(o.items);
     const isToday = !ref && ownDate !== undefined && 'headline' in o && 'state' in o;
+    const today = isToday ? ownDate : todayDate;
     for (const [k, v] of Object.entries(o)) {
       if (k === 'ref') continue;
       if (k === 'refs' && Array.isArray(v)) {
-        // The people an insight stands on are on it (named from the bundle).
-        if (here)
-          for (const r of v)
-            if (isRef(r) && r.type === 'person') {
-              const n = this.#namesById.get(r.id);
-              if (n) addPerson(here, n, 'on');
-            }
-        for (const r of v)
-          if (isRef(r)) {
-            const facts = emptyFacts();
-            if (here) mergeInto(facts, here);
-            this.#add(r, source, facts);
-          }
+        for (const r of v) if (isRef(r)) this.#add(r, source, null, 'ref_only', {});
         continue;
       }
       const childDay = isAgendaDay
@@ -489,119 +453,107 @@ export class Ledger {
           : ref
             ? undefined
             : day;
-      this.#walk(v, source, top, here, childDay);
+      this.#walk(v, source, context, childDay, k, today);
     }
   }
 
   /**
    * A tool's successful result: its data as sent, and every ref it
-   * returned; `input` is the call's validated input (for a filtered
-   * agenda's people). Records the read's coverage (above).
+   * returned; `input` is the call's validated input (a filtered agenda's
+   * people, the forecast's asked days, a search's query). Records the
+   * read's coverage (above).
    */
   addResult(source: ToolName, data: unknown, refs: readonly Ref[], input?: unknown): void {
-    const allow = TOP_FACTS[source];
-    let top: { facts: LedgerFacts; to: readonly Ref['type'][] } | null = null;
-    if (allow && typeof data === 'object' && data !== null && !Array.isArray(data)) {
-      const facts = emptyFacts();
-      const d = data as Record<string, unknown>;
-      for (const k of allow.keys) {
-        const v = d[k];
-        if (typeof v === 'string') {
-          if (!addInstant(facts, v)) for (const w of wordsOf(v)) facts.words.add(w);
-          if (!INSTANT.test(v)) facts.texts.add(normaliseText(v));
-        }
-      }
-      top = { facts, to: allow.to };
+    this.#reads++;
+    const d = (typeof data === 'object' && data !== null ? data : {}) as Record<string, unknown>;
+    let context: (ref: Ref) => EntryContext = () => ({});
+    if (source === 'get_weather') {
+      const c: EntryContext = {
+        fetchedAt: str(d.fetched_at) ?? null,
+        ...(str(d.freshness) ? { freshness: str(d.freshness)! } : {}),
+        ...(str(d.credit) ? { credit: str(d.credit)! } : {}),
+      };
+      context = (r) => (r.type === 'forecast' ? c : {});
+    } else if (source === 'get_gaps') {
+      const scope = d.scope === 'household' ? 'household' : refOf(d.scope)?.id;
+      const status = (d.coverage as { status?: unknown } | undefined)?.status;
+      const c: EntryContext = {
+        ...(scope ? { gapScope: scope } : {}),
+        ...(status === 'recorded' || status === 'partial' || status === 'unknown'
+          ? { gapCoverage: status }
+          : {}),
+      };
+      context = (r) => (r.type === 'gap' ? c : {});
     }
-    this.#walk(data, source, top, null, undefined);
+    this.#texts(data, undefined);
+    this.#walk(data, source, context, undefined, undefined, undefined);
     // Every returned ref is citable, even one the walk did not meet.
-    for (const r of refs) if (!this.has(r)) this.#add(r, source, emptyFacts());
-    this.#coverFrom(source, data, input);
+    for (const r of refs) if (!this.has(r)) this.#add(r, source, null, 'ref_only', {});
+    this.#coverFrom(source, d, input);
   }
 
-  #coverFrom(source: LedgerSource, data: unknown, input: unknown): void {
-    if (typeof data !== 'object' || data === null) return;
-    const d = data as { from?: unknown; to?: unknown; date?: unknown; truncated?: unknown };
-    const unconfigured =
-      source === 'get_weather' && (data as { configured?: unknown }).configured === false;
+  #cover(span: Omit<CoverageSpan, 'read'>): void {
+    this.#coverage.push({ ...span, read: this.#reads });
+  }
+
+  #coverFrom(source: LedgerSource, d: Record<string, unknown>, input: unknown): void {
+    const unconfigured = source === 'get_weather' && d.configured === false;
     if (d.truncated !== false && !unconfigured) return;
-    if (source === 'get_agenda' && typeof d.from === 'string' && typeof d.to === 'string') {
+    const from = str(d.from);
+    const to = str(d.to);
+    if (source === 'get_agenda' && from && to) {
       const ids = (input as { person_ids?: unknown } | undefined)?.person_ids;
       const persons = Array.isArray(ids)
         ? new Set(ids.filter((x): x is string => typeof x === 'string'))
         : null;
-      this.#coverage.push({ kind: 'agenda', days: daysFrom(d.from, d.to), persons });
-    } else if (
-      source === 'get_conflicts' &&
-      typeof d.from === 'string' &&
-      typeof d.to === 'string'
-    ) {
-      this.#coverage.push({ kind: 'conflicts', days: daysFrom(d.from, d.to), persons: null });
+      this.#cover({ kind: 'agenda', days: daysFrom(from, to), persons });
+    } else if (source === 'get_conflicts' && from && to) {
+      this.#cover({ kind: 'conflicts', days: daysFrom(from, to), persons: null });
     } else if (source === 'get_today' && typeof d.date === 'string' && DATE.test(d.date)) {
-      this.#coverage.push({ kind: 'agenda', days: new Set([d.date as IsoDate]), persons: null });
+      this.#cover({ kind: 'agenda', days: new Set([d.date as IsoDate]), persons: null });
     } else if (source === 'get_weather') {
       // What the forecast does not have: the asked days it does not cover, or all of them with none set up.
-      const w = data as { configured?: unknown; uncovered?: unknown };
       const asked = input as { from?: unknown; to?: unknown } | undefined;
       const days =
-        w.configured === false && typeof asked?.from === 'string' && typeof asked.to === 'string'
+        unconfigured && typeof asked?.from === 'string' && typeof asked.to === 'string'
           ? daysFrom(asked.from, asked.to)
           : new Set(
-              (Array.isArray(w.uncovered) ? w.uncovered : []).filter(
+              (Array.isArray(d.uncovered) ? d.uncovered : []).filter(
                 (x): x is IsoDate => typeof x === 'string' && DATE.test(x),
               ),
             );
-      this.#coverage.push({ kind: 'forecast', days, persons: null });
+      this.#cover({ kind: 'forecast', days, persons: null, configured: !unconfigured });
     } else if (source === 'search') {
       const q = (input as { query?: unknown } | undefined)?.query;
       if (typeof q === 'string')
-        this.#coverage.push({
-          kind: 'search',
-          days: new Set(),
-          persons: null,
-          query: new Set(wordsOf(q)),
-        });
+        this.#cover({ kind: 'search', days: new Set(), persons: null, query: q.trim() });
     }
   }
 
-  /** The query words of every complete search this attempt made. */
-  searchQueries(): ReadonlySet<string>[] {
-    return this.#coverage.filter((c) => c.kind === 'search' && c.query).map((c) => c.query!);
-  }
-
-  /** The bundle: its records start the ledger; its people are names the answer may use; its Today covers today. */
+  /** The bundle: its records start the ledger; its people are named; its Today covers today. */
   addBundle(bundle: unknown, refs: readonly Ref[]): void {
+    this.#reads++;
     const b = bundle as {
       people?: { ref?: unknown; name?: { untrusted_text?: string } }[];
       reader?: { ref?: unknown; name?: { untrusted_text?: string } } | null;
       today?: { date?: unknown; truncated?: unknown };
     };
-    for (const p of [...(b.people ?? []), ...(b.reader ? [b.reader] : [])]) {
+    for (const p of [...(b.reader ? [b.reader] : []), ...(b.people ?? [])]) {
       const n = p.name?.untrusted_text;
-      if (typeof n !== 'string') continue;
-      const name = normaliseText(n);
-      this.peopleNames.add(name);
-      if (isRef(p.ref) && p.ref.type === 'person') {
-        this.peopleIds.set(name.toLowerCase(), p.ref.id);
-        this.#namesById.set(p.ref.id, name);
-      }
-      for (const w of wordsOf(name)) this.peopleWords.add(w);
+      if (typeof n === 'string' && isRef(p.ref) && p.ref.type === 'person')
+        this.namesById.set(p.ref.id, n);
     }
-    const r = b.reader?.name?.untrusted_text;
-    if (typeof r === 'string') this.reader = normaliseText(r).toLowerCase();
-    this.#walk(bundle, 'bundle', null, null, undefined);
-    for (const ref of refs) if (!this.has(ref)) this.#add(ref, 'bundle', emptyFacts());
+    if (b.reader && isRef(b.reader.ref)) this.readerId = b.reader.ref.id;
+    this.#texts(bundle, undefined);
+    this.#walk(bundle, 'bundle', () => ({}), undefined, undefined, undefined);
+    for (const ref of refs) if (!this.has(ref)) this.#add(ref, 'bundle', null, 'ref_only', {});
     if (
       b.today &&
       typeof b.today.date === 'string' &&
       DATE.test(b.today.date) &&
       b.today.truncated === false
     )
-      this.#coverage.push({
-        kind: 'agenda',
-        days: new Set([b.today.date as IsoDate]),
-        persons: null,
-      });
+      this.#cover({ kind: 'agenda', days: new Set([b.today.date as IsoDate]), persons: null });
   }
 
   /** Whether a complete read of this kind covered the day, for this person (or for everyone). */
@@ -614,15 +566,7 @@ export class Ledger {
     );
   }
 
-  /** Every day a complete read of this kind covered (for everyone). */
-  coveredDays(kind: CoverageKind): Set<IsoDate> {
-    const out = new Set<IsoDate>();
-    for (const c of this.#coverage)
-      if (c.kind === kind && c.persons === null) for (const d of c.days) out.add(d);
-    return out;
-  }
-
-  /** The entries a citation resolves to: its type and id, and its `at` when it gives one. */
+  /** The entries a ref resolves to: its type and id, and its `at` when it gives one. */
   resolve(ref: Ref): LedgerEntry[] {
     const list = this.#byKey.get(keyOf(ref)) ?? [];
     return ref.at === undefined ? list : list.filter((e) => e.ref.at === ref.at);
@@ -632,22 +576,22 @@ export class Ledger {
     return this.resolve(ref).length > 0;
   }
 
-  /** The facts of everything the citations resolve to, merged. */
-  factsOf(refs: readonly Ref[]): LedgerFacts {
-    const f = emptyFacts();
-    for (const r of refs) for (const e of this.resolve(r)) mergeInto(f, e.facts);
-    return f;
+  /** The visible people on a record, from whichever of its entries says (null if none does). */
+  peopleOf(e: LedgerEntry): ReadonlySet<string> | null {
+    if (e.people) return e.people;
+    for (const o of this.resolve(e.ref)) if (o.people) return o.people;
+    return null;
   }
 
   /** The refs the tools returned this attempt, in order, each once (the fallback's rows). */
   toolRefs(): readonly Ref[] {
     return this.#toolRefs;
   }
-
-  /** Where each cited ref came from. */
-  sourcesOf(refs: readonly Ref[]): Set<LedgerSource> {
-    const s = new Set<LedgerSource>();
-    for (const r of refs) for (const e of this.resolve(r)) s.add(e.source);
-    return s;
-  }
 }
+
+export const keyOf = (r: Pick<Ref, 'type' | 'id'>) => `${r.type}|${r.id}`;
+export const fullKeyOf = (r: Ref) => `${r.type}|${r.id}|${r.at ?? ''}`;
+
+/** The part of the day an hour is in: before 12, before 17, then evening. */
+export const partOf = (hour: number): DayPart =>
+  hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';

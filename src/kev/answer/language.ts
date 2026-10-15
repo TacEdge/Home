@@ -89,6 +89,13 @@ export const KEEPABLE_ERRORS: ReadonlySet<KevTurnErrorCode> = new Set([
   'bad_response',
 ]);
 
+/**
+ * The lead HOME shows when the model's own words failed the check but the
+ * facts it chose passed (§8.5, owner amendment ADR 0012 §46): the rendered
+ * facts, with this lead and no view.
+ */
+export const SALVAGE_LEAD = 'Here’s what HOME has.';
+
 /** The safe fallback (§8.5): the first sentence alone when the ledger is empty. */
 export const FALLBACK_LEAD = 'I can’t answer that reliably right now.';
 export const FALLBACK_WITH_ROWS = `${FALLBACK_LEAD} Here’s what HOME has that I looked at.`;
@@ -273,6 +280,7 @@ export function fixedCopy(): string[] {
     ...Object.values(ERROR_TEXT),
     FALLBACK_LEAD,
     FALLBACK_WITH_ROWS,
+    SALVAGE_LEAD,
     ...Object.values(LIMIT_TEXT),
     ...Object.values(WORKING_TEXT),
     ESCALATED_TEXT,
