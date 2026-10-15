@@ -2,7 +2,7 @@
 
 Status: **Approved by the owner on 2026-10-13**: D1–D22 as written in §19.2, the owner decisions O1–O6 and the evaluation allocation (O7, §12.4), recorded in §19.2 and in ADR 0012 §39–§41. The approval takes effect when PR #81 (Package 0) merges.
 
-- **Progress:** Package 0 merged (PR #81). Package 1a merged (PR #82) and migration 0009 run in Preview and Production (evidence: DEPLOY.md §E, before item 23). Package 1b merged (PR #83; model gateway, security and budget controls; ADR 0012 §43; the gate register is in §5.7; the owner's final decisions of 2026-10-15 on the preflight token count, G22, and the spend-status boundary are recorded in §2.2, §13.4 and §13.6). Package 2 merged (PR #84; authorised read tools and context; ADR 0012 §44; as-built notes in §2.2 and §6.6). **Package 3 in review** (orchestrator, conversation and answer checker; ADR 0012 §45; as-built notes in §2.2 and the gate register's Package 3 update, §5.7). Nothing else built: no route calls `kev.handle()`; the retention route exists but nothing schedules it (G18); no provider account, key, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere, and Kev is off everywhere deployed. The only new dependency is `@anthropic-ai/sdk` 0.129.0 (Package 1b).
+- **Progress:** Package 0 merged (PR #81). Package 1a merged (PR #82) and migration 0009 run in Preview and Production (evidence: DEPLOY.md §E, before item 23). Package 1b merged (PR #83; model gateway, security and budget controls; ADR 0012 §43; the gate register is in §5.7; the owner's final decisions of 2026-10-15 on the preflight token count, G22, and the spend-status boundary are recorded in §2.2, §13.4 and §13.6). Package 2 merged (PR #84; authorised read tools and context; ADR 0012 §44; as-built notes in §2.2 and §6.6). **Package 3 in review** (orchestrator, conversation and answer checker; ADR 0012 §45; answers restructured by the owner's amendment of 2026-10-15, ADR 0012 §46: the model selects records and HOME renders every fact, §8; as-built notes in §2.2 and the gate register's Package 3 update, §5.7). Nothing else built: no route calls `kev.handle()`; the retention route exists but nothing schedules it (G18); no provider account, key, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere, and Kev is off everywhere deployed. The only new dependency is `@anthropic-ai/sdk` 0.129.0 (Package 1b).
 
 The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev-intelligence.md`).
 
@@ -329,6 +329,8 @@ Fixture: Wednesday 14 October 2026, 07:03, Pacific/Auckland; the records in §15
 | **"Why did HOME flag this overlap?"** (asked by Sam about Thursday) | Retrieval with explanation | `get_conflicts` | "Because you're on both the board meeting and parent interviews on Thursday, from 6 to 6:30." / The rule in plain words: one person attending or responsible for two timed events that overlap. | Both events and the overlap's times | Only conflicts the engine found for Sam | No such conflict: "HOME hasn't marked an overlap there." Kev never states a conflict the engine did not return (V8). | T4, V8 |
 | **"Help me think through our weekend."** | Reasoning over retrieval | `get_agenda`, `get_gaps` (household), `get_weather`, `get_tasks` | "Saturday after football and all of Sunday have nothing recorded, and the fence is waiting." / Facts: the stretches, the forecast, the task's recorded needs. **Kev's view:** "Saturday's stretch matches what the fence task records: dry, daylight and more than three hours." Then the code's limit sentence. | Every stretch, the forecast, the task | Gaps from Sam's view only; the limit sentence always shown | No calendar: no stretches (coverage `unknown`), said plainly. Kev never says anyone is free or names "the best" time (D8). | T11, V9, V10, E2 |
 
+*Owner amendment (2026-10-15, ADR 0012 §46):* the answers above are what the adult reads; under §8 they are built from an answer plan. The lead is Kev's fact-free words and every fact is rendered by code. "What's happening today?" is the lead "Here's {when}." (shown "Here's today."), Swimming's block ("“Swimming” today, 15:30–16:15. Milo attending, Sam responsible.") and an `absence` block with `else` over today ("Nothing else is recorded for today."); "Why did HOME flag this overlap?" is a lead and the conflict's block, rendered from the conflict's own data.
+
 Other intents in scope, on the same rules:
 
 - **"What's on tomorrow / on Thursday / this week?"** `get_agenda` over the range.
@@ -483,10 +485,18 @@ type Ref = { type: RefType; id: string; at?: string };   // `at`: an occurrence'
 type RefType = 'event' | 'task' | 'project' | 'note' | 'person' | 'conflict' | 'insight'
              | 'gap' | 'forecast' | 'calendar' | 'context';
 
-type KevAnswer =                          // what the model must return (§8.1)
-  | { say: { text: string; cites: Ref[] }; blocks: AnswerBlock[] }   // say ≤ 160 chars; ≤ 6 blocks
+// Owner amendment (2026-10-15, ADR 0012 §46): the model returns an answer plan, not prose facts.
+type AnswerPlan =                         // what the model must return (§8.1)
+  | { lead: string;                       // ≤ 120 chars, fact-free; may hold "{when}" once (code fills it)
+      facts: FactBlock[];                 // ≤ 10, in order; selections, never display text
+      view: { text: string; about: number[] } | null }   // ≤ 300 chars, fact-free; about: indices into facts
   | { decline: DeclineCode };             // rendered by code from a fixed template (§3.2)
-type AnswerBlock = { kind: 'fact' | 'view'; text: string; cites: Ref[] };   // each ≤ 400 chars
+type FactBlock =
+  | { kind: RefType; ref: Ref; show: Field[] }           // one record, the fields its type offers
+  | { kind: 'absence' | 'count'; scope: Scope };         // over complete reads only (§8.3)
+type Scope = { of: 'agenda' | 'conflicts' | 'forecast' | 'search'; from: IsoDate | null; to: IsoDate | null;
+               people: string[]; part: 'morning' | 'afternoon' | 'evening' | null; else: boolean };
+type AnswerBlock = { kind: 'fact' | 'view'; text: string; cites: Ref[] };   // what HOME rendered (§8.1)
 
 type ToolResult<T> = { ok: true; data: T; refs: Ref[] } | { ok: false; code: ToolErrorCode };
 type LedgerEntry = { ref: Ref; tool: ToolName; facts: LedgerFacts };  // times, dates, names, kinds
@@ -498,7 +508,7 @@ type TurnBudget = {                       // one per attempt; enforced before ev
 };
 ```
 
-`AnswerBlock.text` is plain text: no markup, links or ids. Links come only from `cites`, resolved by HOME to its own routes.
+`AnswerBlock.text` is plain text: no markup, links or ids. Links come only from `cites`, resolved by HOME to its own routes. *Owner amendment (ADR 0012 §46):* a `fact` block's text is written by HOME's renderer from the cited record's own fields; only the lead and the view are the model's words.
 
 ### 4.5 Seams for later
 
@@ -1013,53 +1023,51 @@ type CallUsage = {
 
 ## 8. Grounding and answer checking
 
-### 8.1 The answer format
+*Owner amendment (2026-10-15, Option 1, structural narrowing; ADR 0012 §46).* §8.1–§8.3 below replace the design in which the model wrote factual sentences and a validator tried to verify them by word matching (as first built, and as corrected in the Package 3 review: ADR 0012 §45, now superseded). Three review rounds showed that design kept accepting false facts. The model now **selects** records and writes only **fact-free** conversational text; **HOME's code renders every fact**. The architecture has four parts:
 
-The model's final output must parse as `KevAnswer` (§4.4): either an answer or a decline code, which code renders from §3.2's templates. An answer has:
+- **A. Authoritative facts:** the records this attempt's authorised reads returned (the bundle and the tool results, in the attempt's ledger), and what each complete read covered.
+- **B. Selection and organisation (the model):** which records, which of each record's own fields, which statements of absence or counts over which scope, in what order.
+- **C. Interpretation (the model):** a lead sentence and, optionally, Kev's view; conversational, bounded and fact-free. The view refers to fact blocks by index instead of restating them.
+- **D. Rendering (HOME's code):** every fact on screen is produced by code from a cited record's own fields, or, for absence and counts, from the ledger's complete reads.
 
-- **`say`:** one sentence, at most 160 characters, speakable, with its citations.
-- **`blocks`:** at most six, each at most 400 characters, each `fact` or `view`, each with its citations.
+It adds no capability and makes M8 no bigger: the same read tools, no write, no memory, no migration.
 
-HOME renders it: `say` in Kev's type (BRAND.md: Bricolage Grotesque 500, 22 px); `fact` blocks as body text; `view` blocks under a quiet **Kev's view** label; then the cited records as rows linking to their pages; then the code's sentences (§8.4); then "What's this based on?" (§11.2).
+### 8.1 The answer format: the answer plan
+
+The model's final output must parse as `AnswerPlan` (§4.4), strictly (closed enums, bounded strings and arrays, no extra keys): either a plan or a decline code, which code renders from §3.2's templates. A plan has:
+
+- **`lead`:** one short conversational sentence, at most 120 characters, fact-free (§8.3); it may hold the placeholder `{when}` once, which code fills with the days the plan's blocks are on ("today", "this weekend", "Saturday 17 October").
+- **`facts`:** at most ten blocks, in order. A **record block** names one record (`kind`, its type; `ref`, exactly as a tool or the bundle returned it this attempt; `show`, a closed list of the fields that type offers: an event's people; a task's status, due date, schedule, estimate, recorded needs, assignee and project; a project's status, target, open tasks and summary; a person's age, birthday, relationship, regular week and stage note; a forecast day's phrase, temperatures, gust and parts of the day; a gap's neighbours and forecast band; conflicts, insights, notes, calendars and context render whole). An **`absence`** or **`count`** block states, over a mandatory scope, that nothing (or nothing else) is recorded, or how many things are: the kind of read (`agenda`, `conflicts`, `forecast`, `search`), the days (`from`–`to`), the people (ids the reader can see; none means everyone the reader can see), the part of the day, and `else`.
+- **`view`** (optional): Kev's view, at most 300 characters, fact-free, with `about`, the indices of the fact blocks it is about; its citations are those blocks' refs.
+
+HOME renders it: the lead in Kev's type (BRAND.md: Bricolage Grotesque 500, 22 px), `{when}` filled; each fact block as body text written by the renderer (`src/kev/answer/render.ts`); the view under a quiet **Kev's view** label; then the cited records as rows linking to their pages; then the code's sentences (§8.4); then "What's this based on?" (§11.2).
 
 ### 8.2 Facts and Kev's view
 
-- **A `fact` block restates what tools returned.** Every time, date, number, name and conflict in it must come from its citations.
-- **A `view` block is Kev's interpretation** over cited facts: a comparison, an order, a connection between a waiting task and a stretch, a question back. It is always labelled, is never the `say` sentence, and passes the same checks: it may not introduce a time, date, name, number or record that its citations do not carry. This is ADR 0008's layer 4, "always labelled as Kev's".
-- **Kev may discuss a plan, never present one as made.** "If the fence is on your mind, Saturday's stretch matches what it records." is a view. "You're doing the fence on Saturday." is refused unless a cited record says so (V11).
+- **A fact is rendered, never written by the model.** The renderer reads only the cited record's own fields, from the object that carried that ref in this attempt's reads: dates and times in the home zone from the record's own instants (an all-day event never gets a time; DST-correct by construction); the people and roles recorded on that record (a person record never attaches to an event; a conflict's commitments render from the conflict's own data); task and project status as recorded (open is never "done"); a forecast day's phrase and figures from that day's record; a gap in M7's "Nothing is recorded …" wording; a calendar's health in M4's terms. One record's time cannot be rendered for another: there is no field in the plan that carries a time. Titles, names and labels appear only as quoted recorded text (a name that looks like a plain name appears unquoted), sanitised (no control or format characters), and are never interpreted: a title saying "CANCELLED", "free" or "moved to 4pm" is shown as the title, nothing more. M5–M7's own copy and formatters are reused (the home-zone clock and long date, M7's band words, temperatures and "nothing is recorded" clause), with a parity test where the screen's copy lives in `src/app`.
+- **Kev's view is interpretation** over the facts shown (a comparison, an order, a connection between a waiting task and a stretch, a question back), always labelled by code, never the lead, and fact-free: any detail it relies on is in the referenced blocks' rendered text.
+- **Kev may discuss a plan, never present one as made.** A plan as made can only be a record block.
 
-### 8.3 The validator
+### 8.3 The checker
 
-`src/kev/answer/validate.ts`: pure, deterministic, run on every answer before anything is shown or stored as an answer. Inputs: the answer, the turn's ledger, the bundle, `now`, the zone.
+`src/kev/answer/validate.ts`: pure, deterministic, run on every plan before anything is rendered, shown or stored as an answer. Inputs: the plan, the attempt's ledger (the bundle and the tool results, with what each complete read covered), `now`, the zone, the adult's question (for one rule) and, in tests, sensitive strings.
 
-| # | Rule (code) | Check | Fails when |
-|---|---|---|---|
-| 1 | `answer.schema` | The answer parses as `KevAnswer` | Not JSON, wrong shape, limits exceeded, or the turn ended without an answer |
-| 2 | `cite.unknown` | Every citation is in the ledger | A ref no tool returned in this attempt, or not in the bundle |
-| 3 | `cite.missing` | Every `fact` block and the `say` sentence cite at least one ref, unless they state an absence the tools established ("Nothing else is recorded for today.") | A factual sentence with nothing behind it |
-| 4 | `time.unsupported` | Every time, date, weekday, part of day and duration in a block equals a value its citations carry (a start, end, date, an estimate, a gap's bounds, a forecast's time), or a relation to `now` ("today", "tomorrow", "this weekend") | "Swimming at 4" when the cited occurrence starts at 15:30 |
-| 5 | `number.unsupported` | Every number (counts, ages, temperatures, minutes) matches its citations or a count of them | "Three things on Saturday" when two are cited |
-| 6 | `name.unknown` | Every capitalised name is a person in the bundle, a word in a cited title, or HOME's own words | A person or place no record holds |
-| 7 | `phrase.forbidden` | No phrase from the M5 (§8.1), M6 (§5.5) and M7 (§5.8) lists or Kev's list (§8.6), as whole words, case-insensitive; quoted titles and names exempt | "free", "best", "busy", "should", "you could" |
-| 8 | `conflict.unsupported` | "overlap", "conflict", "clash" or "at the same time" appear only with a cited conflict from `get_conflicts` | Kev calls two events an overlap the engine did not |
-| 9 | `availability.claim` | No statement that a person is free, available, able, around or away, in any wording the lists catch, nor "nothing on" about a person | Layer 3 |
-| 10 | `gap.unqualified` | A gap is described only as "nothing is recorded" (with its scope) | A gap described as open time for someone |
-| 11 | `commitment.unrecorded` | "booked", "is on for", "planned for", "you're doing", "is set for", "you'll be" only with a cited record at that time | A plan presented as made |
-| 12 | `authority.claim` | No claim to have done, saved, sent, booked, scheduled, remembered or reminded, or that Kev will | "I've added it." |
-| 13 | `markup` | No URL, email address, HTML, Markdown link or image, code block or record id in any text | A link or id the model wrote |
-| 14 | `view.in_say` | `say` is a fact, never a view | Interpretation as the lead sentence |
-| 15 | `tone.filler` | No "Great question", "Certainly", "Absolutely", "I'd be happy to", "Is there anything else" | Corporate filler (KEV-AGENT-MODEL §4) |
-| 16 | `sensitive.leak` | No string from a sensitive context record reaches the answer (defence in depth; such records never reach Kev, D7) | Never expected; a test plants one |
+| Check | Code | Fails when |
+|---|---|---|
+| The plan parses strictly | `answer.schema` | Not JSON, wrong shape, an unknown key, a field a kind does not offer, limits exceeded, or no answer |
+| Every ref is a member of this attempt's ledger | `cite.unknown` | A ref no tool returned this attempt and the bundle does not hold (an earlier turn's ref included, C7) |
+| The block's kind is the record's type, and the record can be rendered from what was read | `fact.kind` | `kind: 'event'` on a task; a record known only by a ref list (an insight's facts) |
+| Every field asked for is carried by the record the renderer uses | `fact.field` | People asked of an event known only as a conflict's commitment |
+| An absence or count holds | `absence.unsupported` | A day not covered by a complete, untruncated read of its kind (the agenda: the bundle's Today, `get_today`, `get_agenda`, a person-filtered read only for those people; overlaps: `get_conflicts`; the forecast: `get_weather`'s uncovered days; a search: what it searched for), a scope for another day than the reads covered, a record of its kind in scope that the ledger holds (left uncited with `else`), or `else` while one is not shown. A forecast, gaps or conflicts read is never agenda coverage |
+| The view refers to blocks that exist | `view.about` | No index, or an index past the facts |
+| The lead and view are fact-free | `prose.time`, `prose.number`, `prose.person`, `prose.record`, `prose.claim`, `availability.claim`, `conflict.unsupported`, `authority.claim` | (After NFKC normalisation, word-edge quotes and hyphens removed.) A clock, date, day, part-of-day or month word, or `{when}` with nothing dated / a digit or number word / a person's name, a relationship word, a third-person pronoun or a group of people / a word of any recorded title, name, label or note, a weather or place word / status, completion, commitment, exclusivity or negation ("cancelled", "done", "booked", "only", "just", "all", "nothing", "else", "not"), or "Yep" with no record shown or on a question about availability / free, available, busy, around, away and the like / an overlap word / a claim by Kev to have done or to do something |
+| The lists and tone (§8.6) | `phrase.forbidden`, `tone.filler` | A listed phrase in the lead or view (rendered copy is code, tested against the lists) |
+| Safe text | `text.unsafe`, `markup` | Any character outside printable ASCII, typographic quotes and dashes, and macron vowels (control and format characters, combining marks, other scripts' digits and look-alike letters) / a link, address, markup or id |
+| No sensitive string | `sensitive.leak` | A planted sensitive string in the lead, the view or any rendered fact |
 
-*As built, corrected in the Package 3 review (owner-approved, 2026-10-15; ADR 0012 §45).* The review found answers the rules above passed with invented facts; the validator now reads every part clause by clause, and three codes are added to content v2's closed set (application schema, no migration):
-
-- **Rule 0, `text.unsafe`** (new): before any rule, control and format characters (U+200B, U+2063, U+00AD, bidi controls …) are refused, the text NFKC-normalised, and a word mixing scripts, or a non-Latin word no cited record carries, refused. Names with diacritics (Zoë, Māori macrons) pass.
-- **Rule 3, statements of absence** (`absence.unsupported`, new): an absence is a whole clause matching a template ("Nothing (else) is recorded …", "No overlaps are recorded …", "HOME hasn't marked …", "HOME doesn't have a forecast …", "HOME doesn't have a dentist appointment recorded" after a search for it) whose scope holds only days, parts of the day, the reader's people and HOME's words. Its days (resolved from `now` in the home zone; none named means every day a read of its kind covered) must each be covered by a complete, untruncated read of the right kind for the people it names: the agenda (the bundle's Today, `get_today`, `get_agenda`, a person-filtered one only for those people) for "nothing is recorded", `get_conflicts` for "no overlaps", `get_weather`'s uncovered days for "no forecast", a search for what it names; a forecast, conflicts or gaps read is never agenda coverage. The ledger must hold no record of that kind on those days (for those people, in that part of the day) left uncited when it says "else", or at all when it does not. Every other clause is a claim and needs citations; a view too, when it names a person, a record, a time, a date or a number.
-- **Rules 4–6, bound to the records a clause is about:** the cited records it names (by title or name words, or by the words for their kind: "the forecast", "the overlap", "the stretch"), or the part's citations when it names none; "A at 9 and B at 3:30", each half naming its own record, is checked a half at a time. A record's facts are its own (B-2): no result's `from`/`to` is a fact of its records (only the forecast's `fetched_at` and credit, by an explicit allow-list), a nested record gives its parent only its identity (a conflict's commitments excepted), and an agenda day dates its items. Today, tonight, tomorrow, this weekend, this and next week are resolved from `now` and must be the cited records' days; recurrence ("every week") needs a record that says so; an age turned, a low, a high and a gust must be that figure. NZ forms pass: 3.30, half three, three-thirty, Sat 9am, Wed 14 Oct, contractions.
-- **People** (`person.unsupported`, new): every person named, and every relationship word (grandad, nana, mum, coach …) not part of a visible person's name, must be on the records the clause is about; "responsible" and "attending" must be the role recorded for the person they are said of ("you" being the reader).
-- **Rule 7:** only a quoted segment that is word for word a cited record's title or name, and a visible person's name, are exempt, and from this rule only: every other rule reads the whole sentence, quote included.
-- **Rule 9** also catches availability in other words ("to himself", "is empty", "can make", "has no plans", "so Alex can do it then"); **rule 11** requires a plan stated as made ("you're doing", "Sam paints", "is booked") to be a cited timed record with the people the clause names; **rule 12** catches Kev's completed actions first ("I've gone ahead and booked it", "I have now added …", "Done, that's in To sort"); **rule 13** catches bare domains and Markdown emphasis; **rule 14** catches view words in `say` ("which seems tight").
-- **The boundary**, stated plainly: deterministic checks of what a sentence says against the records it cites and the reads that cover it; not proof that every natural-language claim is true. They are conservative: a sentence they cannot bind costs a regeneration or the safe fallback, never a wrong answer; Package 5 measures how often.
+- **Coverage** (as built in the Package 3 review and kept): each complete read records what it covers, by kind, days and people; a truncated read covers nothing. An absence or count states its scope explicitly (no bare "Nothing is recorded"); it never infers availability; its wording is code's ("Nothing else is recorded for today.", "Nothing is recorded for Isla on Sunday 18 October.", "HOME hasn't marked any overlaps for next week.", "HOME doesn't have a forecast for Saturday 24 October yet.").
+- **Untrusted content** stays data: rendered only as quoted, sanitised recorded text inside fact blocks; never evidence for a claim, never an instruction. The boundary is not Unicode word matching: it is that prose cannot carry facts and facts come only from records.
+- **The boundary, stated plainly.** The guarantee is structural for rendered facts. The fact-free restriction on the lead and view is defence in depth, not proof: a closed vocabulary cannot list every noun, so an invented detail in an open-vocabulary word can pass there; it is labelled as Kev's words and carries no time, name, number, status or absence. A finite test suite does not prove universal correctness.
 
 ### 8.4 What code adds, and Kev cannot change
 
@@ -1074,17 +1082,20 @@ Based on what the answer cites, HOME appends fixed sentences that the model neit
 
 *As built (Package 3 review, I-15):* the limit codes are chosen on every outcome that shows records, the safe fallback's rows included (a gap's limit, the forecast's time and credit, the calendar qualifier), and a statement of absence carries "As far as HOME knows." or the coverage sentence like a cited event.
 
+*Owner amendment (ADR 0012 §46):* the model never chooses the qualifications; code adds them from the rendered blocks and coverage. "Records from a stale calendar" covers every block that rests on calendar records: events, conflicts, gaps, insights, and absences and counts over the agenda or overlaps (records do not carry their calendar, so this is said whenever a visible calendar is stale, failed or never refreshed; and for a gap read whose coverage was partial).
+
 ### 8.5 Regeneration and the safe fallback
 
 - **First failure:** one regeneration on the same tier, within the same attempt's budget, with an **appended** message naming the failed codes and the blocks they were in (a `role: "system"` message where the tier supports it, G8; otherwise a user-turn text block labelled as HOME's), never editing the rejected answer and never echoing the offending text back as an instruction. *Package 1b review (owner-approved, 2026-10-14):* the labelled user-turn text block, on every tier: the documentation predicts a 400 for a mid-conversation system message straight after a text answer (gate register, G8).
 - **Second failure on fast:** the validator-initiated escalation of §4.2, if at least 30 seconds remain and the month is under 80%. *As built (Package 3 review, I-1):* only a second failed answer is this trigger; when the budget refuses the regeneration (calls, reservation, the turn's ceiling, time), the attempt ends in the safe fallback, stored with the first failure's codes, and never escalates.
 - **Second failure otherwise** (on deep, or when escalation is not available): the safe fallback, built by templates from the ledger: "I can't answer that reliably right now. Here's what HOME has that I looked at." followed by the ledger's records as cited rows (title and time, by template). With an empty ledger, the first sentence alone.
 - **Stored** with `outcome: 'fallback'` and the violation codes, never the rejected text.
+- *Owner amendment (ADR 0012 §46):* the fallback's rows are rendered by the same renderer from the ledger's records (at most ten blocks; every row cited). **Prose refused, facts kept:** when a plan's only failures are in its lead or view (the `prose.*`, list, tone, safe-text and Kev-claim codes) and its regeneration fails the same way, or the budget refuses the regeneration, HOME shows the validated, rendered fact blocks with a fixed lead ("Here's what HOME has.") and no view, stored as an answer with the failed codes; it never escalates for prose alone.
 - **Measured:** first-pass and after-regeneration rates per tier (§12.3). A rising fallback rate is tuned in prompts, never by loosening a rule without an owner decision.
 
 ### 8.6 Language
 
-- **All three screen lists apply to everything Kev says** (M5 §8.1, M6 §5.5, M7 §5.8), as whole words: Kev's answers sit beside the screens and must not say what the screens may not. Titles and names as recorded are exempt.
+- **All three screen lists apply to everything Kev says** (M5 §8.1, M6 §5.5, M7 §5.8), as whole words: Kev's answers sit beside the screens and must not say what the screens may not. Titles and names as recorded are exempt. *Owner amendment (ADR 0012 §46):* the model's words are the lead and the view, checked against the lists; the rendered facts are HOME's fixed copy, tested against them like every other fixed string.
 - **Kev's list adds:**
   - authority and memory: "I've added", "I've booked", "I've sent", "I've saved", "I've scheduled", "I'll remind", "I'll let", "I'll remember", "I remember", "noted";
   - certainty about people: "definitely", "for sure", "guaranteed";
@@ -1307,6 +1318,7 @@ No UI is built in Package 0. This section is what Package 4 builds, subject to t
 ### 11.4 Streaming, no-JS and accessibility (D17)
 
 - **The turn route** (`POST /kev/turn`, Node runtime, `maxDuration = 90`, subject to G3) streams Server-Sent Events over the response: `working` within 1 second, `escalated`, then one `answer` (or `declined`, `fallback`, `error`). The answer arrives whole, after validation. Same origin, signed in, `no-store`.
+- *Owner amendment (ADR 0012 §46): what Package 4 consumes.* `kev.handle()`'s events keep their shapes (`started`, `working`, `escalated`, `say`, `detail`, `cite`, `error`, `done`); their meaning narrows. `say` is the lead, `{when}` filled by code, fact-free. `detail` is the rendered blocks in order: every `fact` block's text was written by HOME's renderer from its cited records, then at most one `view` block (Kev's view, fact-free, its `cites` the refs of the blocks it is about). `cite` is every ref the blocks rest on. A voice adapter speaks the lead, then the fact blocks. A salvaged answer (§8.5) has the fixed lead and no view.
 - **Time:** the user-facing deadline is 55 seconds; the 35 seconds beyond it are used only on the failure path, to settle and record. Every call's timeout is the smaller of its tier's and the time left minus 5 seconds; no fast call starts with under 8 seconds left and no deep call with under 20; an escalation starts only with at least 30 seconds left (§4.2). Retries: fast 20 + 1 + 20 = 41 seconds at worst, which then forbids an escalation; that is accepted.
 - **Without JavaScript,** the same route takes a form post, runs the turn to completion and redirects (303) to `/kev`, which renders from the database. The answer is identical.
 - **If the connection drops,** the turn still completes within its budget, settles and is stored; the page shows it on reload. The project never enables `supportsCancellation` for this route (verified from search only that Node functions otherwise continue after a disconnect; G4), and writes to a closed stream are ignored.
@@ -1349,7 +1361,7 @@ Synthetic only: the fixture family, scenario day Wednesday 14 October 2026, 07:0
 | **Out of scope** | 4 | "Book it", "Text Alex", "Remember that…", "Remind me Friday" |
 | **Routing** | 2 | A multi-step planning question (escalates); a simple question (stays fast) |
 
-Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 completes at least 90 (48 of them adversarial: injection, privacy, sensitive context, availability and fabrication bait) and runs them live.
+Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 completes at least 90 (48 of them adversarial: injection, privacy, sensitive context, availability and fabrication bait) and runs them live. *Owner amendment (ADR 0012 §46):* a scenario's scripted answers are answer plans (records chosen by ref, absence and count scopes, a fact-free lead and view); the final review's false acceptances that a model would keep producing are scenarios whose scripted model attempts them, and whose expectations hold what is shown.
 
 ### 12.3 Guarantees, gates and measured targets
 
@@ -1742,26 +1754,31 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 
 #### V — The validator and grounding
 
+*Owner amendment (2026-10-15, ADR 0012 §46):* the V rows test the answer plan, the renderer and the fact-free checker. Each row's old expectation (the free-prose validator) is re-mapped or retired as stated; the regression cases from the final review (every false acceptance and every unnecessary rejection) are in `tests/unit/kev-plan.test.ts`, the renderer's in `tests/unit/kev-render.test.ts`.
+
 | # | Given | Expect |
 |---|---|---|
-| V1 | The turn ends with plain text / a valid `KevAnswer` | `answer.schema` / pass |
-| V2 | A citation of a ref no tool returned / "What's happening today?" with Swimming cited | `cite.unknown` / pass |
-| V3 | "Swimming at 4" / "at 3:30" / "half past three" / "on Thursday" citing a Wednesday occurrence | `time.unsupported` / pass / pass / `time.unsupported` *Package 3 review:* fixtures parsed with the tools' own output schemas (B-2); relative days from `now` (I-9); NZ forms pass (I-16). |
-| V4 | A fact block with no citation / "Nothing else is recorded for today." after `get_today` | `cite.missing` / pass *Package 3 review (B-1, I-8):* an absence is a template clause, covered and uncontradicted (`absence.unsupported`). |
-| V5 | "Three things on Saturday" with two cited | `number.unsupported` |
-| V6 | "Grandad's coming Saturday" / "Nana Jo's birthday is Tuesday" | `name.unknown` / pass |
-| V7 | Each of "free", "available", "best", "busy", "should", "you could", "can't", "nothing on" in model text / a cited title containing "Free" | `phrase.forbidden` / pass *Package 3 review (I-11):* the cited title passes quoted word for word only, and only rule 7 lifts. |
-| V8 | "Swimming and pickup overlap" with no conflict cited | `conflict.unsupported` |
-| V9 | "Alex is around on Thursday evening" | `availability.claim` *Package 3 review (I-12):* availability in other words caught too. |
-| V10 | "Saturday 10 till 7:30 is open for you" | `gap.unqualified` |
-| V11 | "You're doing the fence on Saturday." / Kev's view "Saturday's stretch matches what the fence task records." | `commitment.unrecorded` / pass *Package 3 review (I-12):* a plan as made must be a cited timed record with the people named. |
+| V1 | The turn ends with plain text / a valid `AnswerPlan` / a plan with an unknown key, or a `show` field its kind does not offer | `answer.schema` / pass / `answer.schema` |
+| V2 | A record block whose ref no tool returned this attempt / Swimming's ref from the bundle | `cite.unknown` / pass, rendered from the bundle's record |
+| V3 | Times and dates (was: checked in prose) | *Re-mapped:* rendered by code from the record's own instants in the home zone (15:30–16:15; an all-day event "all day", never a time; a DST-day occurrence at its true wall clock); any time, date, day or part-of-day word in the lead or view is `prose.time` |
+| V4 | A fact with no citation (was `cite.missing`) / "Nothing else is recorded for today." | *Retired:* a fact block is a record, so it cannot lack one / an `absence` block over today after a complete Today read, every record in scope shown: pass, rendered by code; uncovered, contradicted, truncated or `else` with a record unshown: `absence.unsupported` |
+| V5 | "Three things on Saturday" with two cited | *Re-mapped:* a number in prose is `prose.number`; a `count` block is computed by code from complete reads ("Two things are recorded for Saturday 17 October.") |
+| V6 | "Grandad's coming Saturday" / "Nana Jo's birthday is Tuesday" | `prose.person` (and `prose.time`) / a person block with `show: ['birthday']`, rendered from Nana Jo's record |
+| V7 | "free", "available", "best", "busy", "should", "you could", "can't", "nothing on" in the lead or view / a recorded title containing "Free" | `availability.claim` or `phrase.forbidden` / pass: the title is rendered quoted, as the record's own words |
+| V8 | An overlap word in the lead or view / a conflict | `conflict.unsupported` / a conflict block, rendered from the conflict's own data |
+| V9 | "Alex is around on Thursday evening" in prose / an absence for Alex | `availability.claim` (and `prose.person`, `prose.time`) / "Nothing is recorded for Alex on Thursday 15 October, in the evening." with the code's sentences; availability is never rendered |
+| V10 | A gap described as open time (was `gap.unqualified`) | *Retired:* a gap renders only in M7's wording, by code ("Nothing is recorded for the household on Saturday 17 October, 10:00–19:30."), with the limit sentence; "open" in prose is `availability.claim` |
+| V11 | "You're doing the fence on Saturday." in prose / Kev's view "The stretch above matches what the task records." | `prose.claim` (with `prose.time`, `prose.record`) / pass |
 | V12 | "I've added it to the list." | `authority.claim` |
-| V13 | A URL, a Markdown link, a record id in text | `markup` |
-| V14 | `say` marked as a view / "Great question!" | `view.in_say` / `tone.filler` |
-| V15 | A planted sensitive context string in an answer | `sensitive.leak` |
-| V16 | An answer citing a gap / a stale calendar's record / the forecast | The limit sentence / "As far as HOME knows." / the forecast's time and credit, added by code; an answer omitting or rewording them changes nothing |
-| V17 | A first answer failing `time.unsupported`, then a valid one | One regeneration naming the code and block; the valid answer shown; both calls counted |
-| V18 | Two failing answers | The fallback with the ledger's rows; stored `fallback` with codes; the rejected text neither shown nor stored |
+| V13 | A URL, a Markdown link, a record id, a control or format character, a combining mark, another script's digit or a look-alike letter in the lead or view | `markup` / `text.unsafe` |
+| V14 | A view in the lead (was `view.in_say`) / "Great question!" | *Retired:* the lead is fact-free and the view is labelled by code / `tone.filler` |
+| V15 | A planted sensitive string in the lead, the view or a rendered fact | `sensitive.leak` |
+| V16 | A plan showing a gap / a record from a stale calendar (an event, a conflict, a gap, an insight, an agenda absence) / the forecast | The limit sentence / "As far as HOME knows." / the forecast's time and credit, added by code; the model cannot add or remove them |
+| V17 | A first plan failing, then a valid one | One regeneration naming the code and block; the valid answer shown; both calls counted |
+| V18 | Two failing plans (any failure outside prose) / two plans failing only in prose, or a prose failure whose regeneration the budget refuses | The fallback, rendered from the ledger's rows; stored `fallback` with codes; the rejected text neither shown nor stored / the validated fact blocks with the fixed lead and no view, stored as an answer with the codes; no escalation |
+| V19 | A plan citing two records | Each block renders only its own record's fields: no time, person, role, figure or status crosses between blocks (the renderer reads one object per block) |
+| V20 | A record title "Football CANCELLED", "Swimming moved to 4pm", "Grandad collects Alex", "Free swim day" | Rendered only as the quoted title; never a status, time, person or availability |
+| V21 | Ordinary leads ("Here's what's on.", "Might be worth leaving early.", "Yep." beside a record, "Righto, here's {when}.") | Pass; `{when}` filled by code from the blocks' days |
 
 #### S — Security, privacy and authority
 
