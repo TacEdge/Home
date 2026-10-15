@@ -26,7 +26,6 @@ import {
   type KevEvent,
 } from '@/kev/orchestrator';
 import { ProviderError, type KevProvider } from '@/kev/providers/types';
-import type { ScriptStep } from '@/kev/providers/scripted';
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
 import type { Ref } from '@/kev/tools/types';
 import { listAudit } from '@/trust/audit';
@@ -1342,17 +1341,27 @@ describe('Package 3 review: orchestration (I-1, I-6) and the conversation (I-4, 
     });
   });
   it('I-1: a budget refusal after one failed answer is the fallback, never an escalation', async () => {
-    // The first answer fails and its call is charged far past the per-call maximum (usage
-    // the provider reported), so the regeneration cannot fit the reservation.
-    const t = await turn(f.kev.sam, 'Plan the weekend.', [
-      {
-        ...(answer('Swimming at 4.', [swim]) as Extract<ScriptStep, { kind: 'answer' }>),
-        usage: { outputTokens: 400_000 },
-      },
-      answer('Swimming at 3:30.', [swim]),
-    ]);
-    expect(t.provider.requests).toHaveLength(1);
-    expect(t.provider.counted).toHaveLength(1);
+    // The review's probe: three rounds, a failed answer, then a read where the regeneration was
+    // asked for. The fifth call is the attempt's last; the budget refuses a sixth. That is
+    // the fallback, not "failed twice": no deep attempt (which would answer here).
+    const t = await turn(
+      f.kev.sam,
+      'Plan the weekend.',
+      [
+        tools(['get_tasks', {}]),
+        tools(['get_people', {}]),
+        tools(['get_projects', {}]),
+        tools(['answer', answerInput('Swimming at 4.', [swim])]),
+        tools(['get_context', {}]),
+        // What a deep attempt would say, were it (wrongly) started.
+        tools(['answer', answerInput('Just swimming at 3:30.', [swim])]),
+        answer('Just swimming at 3:30.', [swim]),
+      ],
+      { deps: { answerPath: { fast: 'tool', deep: 'tool' } } },
+    );
+    expect(t.provider.requests).toHaveLength(5);
+    expect(t.provider.counted).toHaveLength(5);
+    expect(t.provider.requests.every((r) => r.tier === 'fast')).toBe(true);
     expect(types(t)).not.toContain('escalated');
     expect(t.done).toMatchObject({ outcome: 'fallback', escalated: false });
     const kev = (await kevRows(f.kev.sam)).at(-1);
