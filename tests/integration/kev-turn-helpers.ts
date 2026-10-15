@@ -16,7 +16,8 @@ import type { adminDb } from './db';
 // ticks (unlike ./clock.ts's frozen one): `now()` on the clocked pool is the
 // real transaction time plus an offset the test sets, so each turn's
 // messages, usage rows and reservations fall in a month of the test's own,
-// in order, and the per-adult limits are paced by moving the offset.
+// in order, and the per-adult limits are paced by moving the offset. Each
+// Package 3 suite uses months no other suite uses (2040–2042).
 
 type Admin = ReturnType<typeof adminDb>;
 

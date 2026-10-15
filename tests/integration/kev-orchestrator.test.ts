@@ -113,7 +113,7 @@ beforeAll(async () => {
   swim = { ...SWIM, id: f.id.swimming };
   football = { type: 'event', id: f.id.football, at: `${SAT}T09:00:00+13:00` };
   await createTickingClock(admin);
-  await clockTo(admin, '2033-02-01T00:00:00Z');
+  await clockTo(admin, '2040-02-01T00:00:00Z');
 });
 afterAll(async () => {
   for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];
@@ -1211,7 +1211,7 @@ describe('the request (N15’s scripted half, L4’s first half)', () => {
 
 describe('the cap and the month (L7, L8)', () => {
   it('L7 at 80%: `escalate` absent, the turn on fast; L8 at 100%: refused before any provider call, the words stored', async () => {
-    await clockTo(admin, '2033-12-10T00:00:00Z');
+    await clockTo(admin, '2040-11-10T00:00:00Z');
     process.env.HOME_KEV_MONTHLY_CAP_NZD = '10'; // 5,555,556 µ$
     try {
       await admin.db.execute(sql`
@@ -1316,6 +1316,6 @@ describe('L19: the per-adult limits through kev.handle(), on the real clock', ()
 
 describe('the clock seam', () => {
   it('the ticking clock is the test’s own month', async () => {
-    expect((await clockNow(admin)).slice(0, 7)).toBe('2033-12');
+    expect((await clockNow(admin)).slice(0, 7)).toBe('2040-11');
   });
 });

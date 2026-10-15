@@ -76,7 +76,7 @@ beforeAll(async () => {
       { db },
     );
   await createTickingClock(admin);
-  await clockTo(admin, '2034-03-01T00:00:00Z');
+  await clockTo(admin, '2041-03-01T00:00:00Z');
   stub = await startStub();
 });
 afterAll(async () => {

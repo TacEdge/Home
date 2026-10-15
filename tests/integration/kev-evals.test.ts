@@ -117,7 +117,7 @@ beforeAll(async () => {
     bins: f.id.bins,
   };
   await createTickingClock(admin);
-  await clockTo(admin, '2035-03-01T00:00:00Z');
+  await clockTo(admin, '2042-03-01T00:00:00Z');
 });
 afterAll(async () => {
   for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];
