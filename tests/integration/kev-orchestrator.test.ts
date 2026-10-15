@@ -39,6 +39,7 @@ import {
   addPrivateFor,
   at,
   buildKevFixture,
+  calendarRow,
   clearKevFixture,
   NOW,
   SAT,
@@ -369,6 +370,110 @@ describe('the event stream (§4.4, §11.4): progress first, the checked answer o
       decline: 'external_action',
       keepable: false,
     });
+  });
+});
+
+describe('the final review: qualifications, the forecast’s time and no-fact responses, end to end', () => {
+  let stale = '';
+  beforeAll(async () => {
+    // A household calendar last refreshed two days ago: stale for both adults.
+    stale = await calendarRow(
+      admin.db,
+      f.h.sam.userId,
+      'household',
+      'Old calendar',
+      at('2026-10-12', '06:00'),
+      '9',
+    );
+  });
+  afterAll(async () => {
+    const c = await admin.db.execute<{ connection_id: string }>(
+      sql`delete from calendar_source where id = ${stale}::uuid returning connection_id`,
+    );
+    await admin.db.execute(
+      sql`delete from calendar_connection where id = ${c.rows[0]!.connection_id}::uuid`,
+    );
+  });
+
+  it('a stale calendar: `limits` has calendar_stale on an answer, a salvage and the fallback', async () => {
+    const a = await turn(f.kev.sam, 'What’s happening today?', [
+      answer('when', [swim, TODAY_ELSE]),
+    ]);
+    expect(a.done).toMatchObject({ outcome: 'answer' });
+    expect((a.done as { limits: string[] }).limits).toContain('calendar_stale');
+    await clockForward(admin, 31);
+    await clearConversation(f.kev.sam, { db: clocked });
+    const raincoat = { type: 'suggestion', phrase: 'raincoat', about: [0] };
+    const s = await turn(f.kev.sam, 'What’s happening today?', [
+      answer('here_you_go', [swim, TODAY_ELSE], raincoat),
+      answer('here_you_go', [swim, TODAY_ELSE], raincoat),
+    ]);
+    expect(s.done).toMatchObject({ outcome: 'answer' });
+    expect((await kevRows(f.kev.sam)).at(-1)!.content).toMatchObject({ salvaged: true });
+    expect((s.done as { limits: string[] }).limits).toContain('calendar_stale');
+    await clockForward(admin, 31);
+    await clearConversation(f.kev.sam, { db: clocked });
+    const fb = await turn(
+      f.kev.sam,
+      'What’s happening today?',
+      [answer('Swimming at 4.', [swim]), answer('Swimming at 4.', [swim])],
+      { deps: { turnDeadlineMs: 25_000 } },
+    );
+    expect(fb.done).toMatchObject({ outcome: 'fallback' });
+    expect((fb.done as { limits: string[] }).limits).toContain('calendar_stale');
+  });
+
+  it('no response without facts but a social or fixed one: a bare “No worries.” is refused and never salvaged over nothing', async () => {
+    const t = await turn(
+      f.kev.sam,
+      'Is football cancelled?',
+      [answer('no_worries', []), answer('no_worries', [])],
+      { deps: { turnDeadlineMs: 25_000 } },
+    );
+    expect(t.done).toMatchObject({ outcome: 'fallback' });
+    const say = t.events.find((e) => e.type === 'say') as { text: string };
+    expect(say.text).not.toBe(SALVAGE_LEAD);
+    expect(JSON.stringify(t.events)).not.toContain('No worries');
+    const content = (await kevRows(f.kev.sam)).at(-1)!.content as Record<string, unknown>;
+    expect(content.salvaged).toBeUndefined();
+    expect(content.violations).toEqual(['lead.unsupported']);
+    await clockForward(admin, 31);
+    await clearConversation(f.kev.sam, { db: clocked });
+    const thanks = await turn(f.kev.sam, 'Thanks Kev.', [answer('welcome', [])]);
+    expect(thanks.events.find((e) => e.type === 'say')).toEqual({
+      type: 'say',
+      text: 'You’re welcome.',
+    });
+    expect(types(thanks)).not.toContain('detail');
+  });
+
+  it('an older forecast shows its own time ("As of …"), stored with the answer; a later cache never changes it', async () => {
+    const fetched = at('2026-10-13', '22:03'); // nine hours before NOW: older (M7 §5.1)
+    await writeForecast(admin.db, fetched);
+    try {
+      const t = await turn(f.kev.sam, 'What’s the weather on Saturday?', [
+        tools(['get_weather', { from: SAT, to: SAT }]),
+        answer('when', [{ type: 'forecast', id: `forecast:${SAT}` }]),
+      ]);
+      expect(t.done).toMatchObject({ outcome: 'answer' });
+      const detail = t.events.find((e) => e.type === 'detail') as { blocks: { text: string }[] };
+      expect(
+        detail.blocks[0]!.text.startsWith('As of yesterday 22:03, Saturday 17 October: '),
+      ).toBe(true);
+      const stored = (await kevRows(f.kev.sam)).at(-1)!;
+      const at1 = (stored.content as { forecastAt?: string }).forecastAt;
+      expect(Date.parse(at1!)).toBe(fetched.getTime());
+      expect((t.done as { forecastAt?: string }).forecastAt).toBe(at1);
+      expect((t.done as { limits: string[] }).limits).toContain('forecast_credit');
+      // The cache moves on; the stored answer keeps the time it was checked with.
+      await writeForecast(admin.db, at('2026-10-14', '06:55'));
+      const again = (await kevRows(f.kev.sam)).at(-1)!;
+      expect(again.created_at).toBe(stored.created_at);
+      expect((again.content as { forecastAt?: string }).forecastAt).toBe(at1);
+      expect(kevContentV2.safeParse(again.content).success).toBe(true);
+    } finally {
+      await writeForecast(admin.db, at('2026-10-14', '06:55'));
+    }
   });
 });
 
