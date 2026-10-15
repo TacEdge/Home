@@ -77,7 +77,11 @@ export type ToolContext = Readonly<{
 // can never disagree.
 
 /** Why the server refused to run Kev's tools or build the bundle: a closed code, never a message. */
-export const CONTEXT_REFUSAL_CODES = ['not_kev_actor', 'zone_mismatch', 'bundle_too_large'] as const;
+export const CONTEXT_REFUSAL_CODES = [
+  'not_kev_actor',
+  'zone_mismatch',
+  'bundle_too_large',
+] as const;
 export type ContextRefusalCode = (typeof CONTEXT_REFUSAL_CODES)[number];
 
 /** A closed refusal: its message is its code and nothing else (no record, query or value). */
