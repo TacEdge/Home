@@ -1,3 +1,5 @@
+import 'server-only';
+
 // Kev's fixed, code-owned language (M8 contract §3.2, §8.4, §8.6, §9.9,
 // §11.3; ADR 0012 §8). Every decline, error, refusal, fallback, progress
 // line and code-added sentence Kev shows is one of these strings, chosen by

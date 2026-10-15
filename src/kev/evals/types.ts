@@ -1,3 +1,5 @@
+import 'server-only';
+
 // The scenario dataset's format (M8 contract §12.1, §12.2; D18). Synthetic
 // only: the fixture family on Wednesday 14 October 2026, 07:03 (§15.6).
 //
