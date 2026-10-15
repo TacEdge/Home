@@ -7,6 +7,7 @@ import { WEATHER_VARIABLES, WELLINGTON, weatherEnv } from '../fixtures/weather';
 import { adminDb, testDb } from './db';
 import {
   addPrivateFor,
+  type PrivateAdded,
   buildKevFixture,
   clearKevFixture,
   NOW,
@@ -87,6 +88,18 @@ const PROBES = (f: KevFixture, reader: Adult): [string, unknown][] => {
     ['search', { query: 'ni-' }],
     ['search', { query: 'an' }],
     ['search', { query: 'thursday' }],
+    // The harder joins: probes scoped to a household person or project.
+    ['get_tasks', { project_id: f.id.fence }],
+    ['get_tasks', { assignee: f.id.milo }],
+    ['get_gaps', { from: THU, to: SUN, scope: f.id.milo }],
+    ['get_conflicts', { from: SAT, to: SAT }],
+    ['get_agenda', { from: '2026-10-14', to: '2026-10-24', person_ids: [f.id.milo] }],
+    ['get_context', { subject_type: 'person', subject_id: f.id.milo }],
+    ['search', { query: 'series' }],
+    ['search', { query: 'synced' }],
+    ['search', { query: 'task-in' }],
+    ['search', { query: 'birthday' }],
+    ['search', { query: 'overlap' }],
   ];
 };
 
@@ -137,12 +150,13 @@ describe.each([
   let otherBefore: Snapshot;
   let otherAfter: Snapshot;
   let f: KevFixture;
+  let added: PrivateAdded;
 
   beforeAll(async () => {
     f = await buildKevFixture(db, admin.db);
     before = await snapshot(f, f.kev[reader], reader);
     otherBefore = await snapshot(f, f.kev[other], other);
-    await addPrivateFor(f, other, db, admin.db);
+    added = await addPrivateFor(f, other, db, admin.db);
     after = await snapshot(f, f.kev[reader], reader);
     otherAfter = await snapshot(f, f.kev[other], other);
   });
@@ -167,6 +181,88 @@ describe.each([
     for (const t of [...expected, 'bundle']) expect(changed.has(t), t).toBe(true);
     expect(changed.has('get_weather')).toBe(false);
     expect([...otherAfter.values()].join('\n')).toContain(`ni-${other}-`);
+  });
+
+  it(`the domain refuses every household link to ${other}'s private records (references_private): the boundary, kept`, () => {
+    expect(added.refused).toEqual({
+      householdTaskForPrivatePerson: 'references_private',
+      householdTaskInPrivateProject: 'references_private',
+      householdEventWithPrivatePerson: 'references_private',
+      householdContextAboutPrivatePerson: 'references_private',
+    });
+  });
+
+  it(`S1 and S2 for the harder joins, probe by probe: ${reader} sees none of them; ${other} sees each`, () => {
+    const key = (name: string, input: unknown) => `${name} ${JSON.stringify(input)}`;
+    const week = { from: '2026-10-14', to: '2026-10-20' };
+    const present: [string, string[]][] = [
+      [key('get_people', { person_id: f.id.milo }), [added.series]],
+      [key('get_people', {}), [added.birthdayPerson]],
+      [key('get_tasks', { project_id: f.id.fence }), [added.taskInFence]],
+      [key('get_tasks', { assignee: f.id.milo }), [added.taskInFence]],
+      [key('get_tasks', {}), [added.taskInFence]],
+      [
+        key('get_agenda', { from: '2026-10-14', to: '2026-10-24', person_ids: [f.id.milo] }),
+        [added.series, added.overlap, added.taskInFence],
+      ],
+      [key('get_agenda', week), [...added.synced, added.series, added.overlap]],
+      [key('get_conflicts', { from: SAT, to: SAT }), [added.overlap]],
+      [key('get_context', { subject_type: 'person', subject_id: f.id.milo }), [added.miloContext]],
+      [key('get_calendar_health', {}), [added.syncedCalendar]],
+      [key('search', { query: 'series' }), [added.series]],
+      [key('search', { query: 'synced' }), added.synced],
+      [key('search', { query: 'task-in' }), [added.taskInFence]],
+      [key('search', { query: 'birthday' }), [added.birthdayPerson]],
+      [key('search', { query: 'overlap' }), [added.overlap]],
+    ];
+    for (const [k, ids] of present) {
+      expect(after.get(k), k).toBe(before.get(k));
+      expect(otherAfter.get(k), k).not.toBe(otherBefore.get(k));
+      for (const id of ids) {
+        expect(otherAfter.get(k), `${k} ${id}`).toContain(id);
+        expect(after.get(k), `${k} ${id}`).not.toContain(id);
+      }
+    }
+    // Milo's gaps narrow for the owner (their private series, overlap and synced events), not for the reader.
+    const gaps = key('get_gaps', { from: THU, to: SUN, scope: f.id.milo });
+    expect(after.get(gaps)).toBe(before.get(gaps));
+    expect(otherAfter.get(gaps)).not.toBe(otherBefore.get(gaps));
+    // No record the owner added, and no sensitive context, reaches the reader anywhere.
+    const all = [...after.values()].join('\n');
+    for (const id of [
+      added.series,
+      added.overlap,
+      ...added.synced,
+      added.syncedCalendar,
+      added.taskInFence,
+      added.birthdayPerson,
+      added.miloContext,
+      added.miloSensitive,
+      added.capture,
+    ])
+      expect(all, id).not.toContain(id);
+    for (const s of [after, otherAfter])
+      expect([...s.values()].join('\n')).not.toContain(added.miloSensitive);
+  });
+
+  it(`the bundle: ${reader}'s people_count, people_truncated and to_sort are unchanged; ${other}'s count both private people and the capture`, () => {
+    type B = { people_count: number; people_truncated: boolean; to_sort: number };
+    const read = (s: Snapshot) =>
+      JSON.parse((JSON.parse(s.get('bundle')!) as { text: string }).text) as B;
+    const [r0, r1, o0, o1] = [read(before), read(after), read(otherBefore), read(otherAfter)];
+    expect({
+      people_count: r1.people_count,
+      people_truncated: r1.people_truncated,
+      to_sort: r1.to_sort,
+    }).toEqual({
+      people_count: r0.people_count,
+      people_truncated: r0.people_truncated,
+      to_sort: r0.to_sort,
+    });
+    expect(o1.people_count).toBe(o0.people_count + 2);
+    expect(o1.people_truncated).toBe(false);
+    expect(o1.to_sort).toBe(o0.to_sort + 1);
+    expect(otherAfter.get('bundle')).toContain(added.birthdayPerson);
   });
 
   it('S3: sensitive household and private context appear in neither adult’s bundle or tool output', () => {
