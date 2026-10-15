@@ -242,6 +242,8 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   └── api/               # Route handlers: Kev stream, approvals, capture
 │   ├── ui/                    # Presentational components, design tokens
 │   ├── domain/                # Family Knowledge layer
+│   │   ├── agenda/            # loadAgenda + the Today input builder (moved from src/app/_agenda, M8 Package 2)
+│   │   ├── search/            # searchTitles: titles only, for Kev's search (M8 Package 2, ADR 0012 §19)
 │   │   ├── people/
 │   │   ├── events/
 │   │   ├── calendars/
@@ -258,8 +260,8 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   ├── config.ts          # tier → model/effort mapping, limits
 │   │   ├── providers/         # anthropic.ts (only SDK import)
 │   │   ├── prompts/           # System prompt, persona, Week Ahead template
-│   │   ├── context/           # Context assembly
-│   │   ├── tools/             # Tool definitions (Zod) → domain services
+│   │   ├── context/           # Context assembly (assemble.ts: the stable prefix's tools, the volatile bundle; M8 Package 2)
+│   │   ├── tools/             # registry.ts + one file per read tool (Zod in and out) → domain services (M8 Package 2)
 │   │   └── evals/             # Scenario fixtures + expected behaviours
 │   ├── integrations/
 │   │   ├── calendar/          # provider.ts (interface), ics/, (later google/, microsoft/, caldav/)

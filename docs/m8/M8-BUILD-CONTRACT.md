@@ -2,7 +2,7 @@
 
 Status: **Approved by the owner on 2026-10-13**: D1–D22 as written in §19.2, the owner decisions O1–O6 and the evaluation allocation (O7, §12.4), recorded in §19.2 and in ADR 0012 §39–§41. The approval takes effect when PR #81 (Package 0) merges.
 
-- **Progress:** Package 0 merged (PR #81). Package 1a merged (PR #82) and migration 0009 run in Preview and Production (evidence: DEPLOY.md §E, before item 23). **Package 1b in review** (model gateway, security and budget controls; ADR 0012 §43; the gate register is in §5.7; the owner's final decisions of 2026-10-15 on the preflight token count, G22, and the spend-status boundary are recorded in §2.2, §13.4 and §13.6). Nothing else built: no provider account, key, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere, and Kev is off everywhere deployed. The only new dependency is `@anthropic-ai/sdk` 0.129.0 (Package 1b).
+- **Progress:** Package 0 merged (PR #81). Package 1a merged (PR #82) and migration 0009 run in Preview and Production (evidence: DEPLOY.md §E, before item 23). Package 1b merged (PR #83; model gateway, security and budget controls; ADR 0012 §43; the gate register is in §5.7; the owner's final decisions of 2026-10-15 on the preflight token count, G22, and the spend-status boundary are recorded in §2.2, §13.4 and §13.6). **Package 2 in review** (authorised read tools and context; ADR 0012 §44; as-built notes in §2.2 and §6.6). Nothing else built: no provider account, key, secret, scheduled job or billing setting exists for Kev or its evaluations anywhere, and Kev is off everywhere deployed. The only new dependency is `@anthropic-ai/sdk` 0.129.0 (Package 1b).
 
 The architecture decisions are recorded in ADR 0012 (`docs/decisions/0012-m8-kev-intelligence.md`).
 
@@ -244,6 +244,7 @@ Packages 4 and 5 depend only on Package 3. The owner may swap them at Package 3'
   - The non-interference invariant holds for every tool through the real services as `home_app` (§15.2).
   - Today and Forward render byte-identically before and after the loader moves; their suites pass unchanged.
   - Every tool's JSON schema is static and carries no name, title or other record value (T22).
+  - *As built (Package 2, 2026-10-15; ADR 0012 §44):* the rows pass as §44 lists, with three parts left to Package 3 because their pieces are Package 3's: T22's answer schema (§4.4's `KevAnswer` is built with the validator), N14's system-prompt half (the prefix's tool definitions are built and byte-stable; the provisional prompt is Package 3's), and S7's trace representation of an unknown tool (the runner refuses and counts it). The as-built tool details, and where they read the contract one way among two, are in §6.6.
 - **Package 3:**
   - Matrix rows C1–C13, C15–C23, V1–V18, N9, N11, N15, L1–L5, L7, L8, L12, L19, S6 and S7 pass, and S1–S2 for the bundle, ledger and trace.
   - The person's words are stored before any provider call, in every failure path (C1, C2).
@@ -852,6 +853,24 @@ Recorded in Package 1b (§2.2). Sources: the documentary research of 2026-10-14 
 
 - **Proof of no change:** Today, Forward, a person's page and `respondToInsight` render or return byte-identical results on the seeded scenarios before and after; their suites pass unchanged; query counts are equal (T1).
 - **Tier:** `src/domain/` is high, as `src/app/_agenda/` is; full regression.
+
+*Done in Package 2 (2026-10-15):* `src/domain/agenda/load.ts` and `src/domain/agenda/today-input.ts`, moved unchanged (`todayInHomeZone` with the loader). Today, Forward (three horizons), a person's page's reads and `respondToInsight` gave byte-identical normalised output with equal query counts on the seeded scenario before and after (ADR 0012 §44). The tests that import or mock the two modules changed their import path only.
+
+### 6.6 As built (Package 2)
+
+*Recorded 2026-10-15, ADR 0012 §44. The design is unchanged; these are the build's readings where the contract allowed more than one, each for the owner's review.*
+
+- **Labelling covers names and template sentences.** §9.3 lists people's names among the untrusted text that reaches the model, and §6.1 says every user- or calendar-authored string is labelled, so names are `{ "untrusted_text": … }` everywhere, unlike §6.3's illustrative `"name": "Milo"`. The engines' template sentences (Today's headline, an insight's text) are code-written but carry recorded titles and names, so they are labelled too. M7's weather phrases and every code value (kinds, roles, statuses, rules, bands) are not. A cut string carries `"truncated": true`.
+- **`get_insights`** returns, for its surface, every insight the reader has not responded to that the surface lists (`shown_on: "list"`) or says on its item instead (`shown_on: "item"`). Forward's Week lists only calendar health and openings, so without the second kind a birthday next week would be absent, which T5 and §3.1's third row expect it to give.
+- **`get_tasks`** with `assignee: "me"` and no person linked to the reader's login returns no tasks and `unlinked: true`, so code can say "HOME doesn't know which person you are yet." (§3.1) rather than a closed error code.
+- **`get_weather`** returns each asked-for date the forecast covers (M7's day phrase, the low and high and strongest gust over the phrase's hours, and each covered part's band: the weather engine's new `dayOutlook`), the other dates as `uncovered`, the freshness and fetch time, and the credit as the provider's name (`Open-Meteo`), never a URL.
+- **`get_gaps`**: `needs: daylight` drops a stretch whose daylight is unknown (no location), as `dry_weather` drops one without a usable band; the band is the one an opening would cite for the same stretch (M7's `forecastFor`: the stretch's own hours today and tomorrow, the day's planning hours for days 2–6). Coverage is reported as `recorded`, `partial` or `unknown` with each calendar's health.
+- **`get_conflicts`** reads the reader's conflicts as every surface does (90 days from today, so keys and responses match) and returns those with an overlap inside the range, each at its first one there; days before today hold none.
+- **Ranges.** Every date input must be within today − 7 … today + 90 (`out_of_range`); a range whose end is before its start is `bad_input`. `get_weather` has no span limit of its own; its lists are bounded like every other.
+- **Size.** A result over 12 KiB is presented again with fewer items until it fits, with `truncated: true` and the full count, so 50 items is a ceiling, not a promise: a list of fuller items (tasks with an assignee and a project, say) may return fewer.
+- **Refs.** An occurrence's `at` is its start with the home offset, an all-day one's the start of its home day. Conflict, insight and gap refs carry their keys; a forecast day's ref is `forecast:{date}`. A tool's refs are unique and complete (the ledger's entries); its trace entry keeps the first 50.
+- **`search`** orders projects, tasks, events, then people, each by lower-cased title and id; an event's changed occurrence is found through its series.
+- **`escalate`** is in the registry with the read class (T23) as a control entry: its input schema and description are built, it reads nothing, and the runner never runs it; Package 3's orchestrator handles it.
 
 ---
 
