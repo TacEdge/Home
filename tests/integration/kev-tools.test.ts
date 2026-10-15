@@ -1124,7 +1124,7 @@ describe('search bounds and pattern characters', () => {
     try {
       type S = {
         results: { title: { untrusted_text: string } }[];
-        count: number;
+        returned: number;
         truncated: boolean;
       };
       const q = async (query: string) =>
@@ -1140,10 +1140,32 @@ describe('search bounds and pattern characters', () => {
         made.push(await createTask(f.h.sam, { title: `zebra ${n}` }, deps));
       const many = await data<S>(f.kev.sam, 'search', { query: 'zebra' });
       expect(many.results).toHaveLength(20);
-      expect(many.truncated).toBe(true);
+      // `returned` is what is listed, never a total; `truncated` says more match.
+      expect(many).toMatchObject({ returned: 20, truncated: true });
+      expect('count' in many).toBe(false);
+      const few = await data<S>(f.kev.sam, 'search', { query: 'zebra 1' });
+      expect(few).toMatchObject({ returned: 11, truncated: false });
+      expect(few.results).toHaveLength(11);
     } finally {
       for (const t of made) await archiveTask(f.h.sam, t.id, deps);
     }
+  });
+
+  it('trims the query before checking it: whitespace alone, or under 2 characters once trimmed, is bad_input', async () => {
+    for (const query of ['  ', ' a ', '\t\n', ' '.repeat(60) + 'a']) {
+      const out = await call(f.kev.sam, 'search', { query });
+      expect(out.result, JSON.stringify(query)).toEqual({ ok: false, code: 'bad_input' });
+      expect(out.content).toBe('{"error":"bad_input"}');
+    }
+    const plain = await call(f.kev.sam, 'search', { query: 'Milo' });
+    const padded = await call(f.kev.sam, 'search', { query: '  Milo  ' });
+    expect(padded.content).toBe(plain.content);
+    expect(padded.trace.args).toEqual({ query_length: 4 });
+    expect(padded.trace.resultCount).toBe(1);
+    const ab = await call(f.kev.sam, 'search', { query: '  mi  ' });
+    expect(ab.result.ok).toBe(true);
+    expect(ab.trace.args).toEqual({ query_length: 2 });
+    expect(ab.content).toBe((await call(f.kev.sam, 'search', { query: 'mi' })).content);
   });
 });
 

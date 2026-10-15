@@ -299,7 +299,9 @@ export function createToolRunner(ctx: ToolContext & { attemptId: string }): Tool
             data: out.data,
             refs: uniqueRefs(checked.data),
           };
-          const count = (out.data as { count?: unknown }).count;
+          // A list's count, or search's `returned` (it never counts past 20).
+          const d = out.data as { count?: unknown; returned?: unknown };
+          const count = d.count ?? d.returned;
           return {
             kind: 'ran',
             result,
