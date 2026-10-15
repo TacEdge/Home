@@ -620,7 +620,7 @@ describe('reserveAttempt and settleAttempt', () => {
           visibility: string;
           visible_to_user_id: string | null;
         }>(sql`select actor_user_id, actor_via, subject_type, meta, visibility, visible_to_user_id
-               from audit_log where event = 'kev_budget.sweep' and at > ${since}::timestamptz`)
+               from audit_log where event = 'kev_budget.sweep' and at >= ${since}::timestamptz`)
       ).rows;
     };
     await setClock('2033-04-10T00:00:00Z');
