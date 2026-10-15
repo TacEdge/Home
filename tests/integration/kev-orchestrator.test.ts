@@ -4,6 +4,7 @@ import { captureVerbatim } from '@/domain/captures/service';
 import { NotFoundError } from '@/domain/common/errors';
 import { archiveConversation, getConversation } from '@/domain/conversations/service';
 import { createEventWithPeople } from '@/domain/events/service';
+import { user as userTable } from '@/db/schema';
 import { exportFor } from '@/domain/export/service';
 import {
   clearConversation,
@@ -1269,6 +1270,47 @@ describe('the cap and the month (L7, L8)', () => {
     ]);
     expect(t.provider.requests).toHaveLength(1);
     expect(t.done.outcome).toBe('fallback');
+  });
+});
+
+describe('L19: the per-adult limits through kev.handle(), on the real clock', () => {
+  it('six turns in a minute, Clear, and a seventh: refused before anything is stored; the limit counts audit rows', async () => {
+    // A synthetic adult of its own, on the real clock (the limits count
+    // audit rows by their own time), so no other test's turns count.
+    const id = `u-kev-l19-${crypto.randomUUID().slice(0, 8)}`;
+    await db.insert(userTable).values({ id, name: 'l19', email: `${id}@example.test` });
+    const a: UserActor = {
+      kind: 'user',
+      userId: id,
+      email: `${id}@example.test`,
+      via: 'kev',
+      channel: 'web',
+    };
+    const reply = async () =>
+      admin.db.execute(sql`
+        insert into message (conversation_id, role, channel, content, tier, model)
+        select c.id, 'kev', 'web', ${JSON.stringify({ v: 2, outcome: 'answer', say: 'ok', blocks: [], cites: [], limits: [], trace: [], calls: [], escalated: false })}::jsonb, 'fast', 'synthetic'
+          from conversation c where c.user_id = ${id} and c.archived_at is null`);
+    for (let i = 0; i < 6; i++) {
+      const t = await runTurn(
+        a,
+        `question ${i}`,
+        [answer('Nothing else is recorded for today.', [])],
+        { now: NOW, db },
+      );
+      expect(t.events[0]).toEqual({ type: 'started' });
+      // Whatever the real month's budget allowed, release the one-turn guard.
+      if (!t.events.some((e) => e.type === 'say')) await reply();
+    }
+    expect((await clearConversation(a, { db })).ok).toBe(true);
+    const seventh = await runTurn(a, 'question 7', [answer('x', [])], { now: NOW, db });
+    expect(seventh.events[0]).toEqual({
+      type: 'error',
+      code: 'rate_limited',
+      message: ERROR_TEXT.rate_limited,
+    });
+    expect(seventh.provider.counted).toHaveLength(0);
+    expect(await messagesOf(admin, id)).toEqual([]);
   });
 });
 
