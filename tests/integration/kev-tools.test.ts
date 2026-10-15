@@ -713,6 +713,54 @@ describe('T15–T21: refusals, bounds, labelling, minimisation, failure, trace, 
     }
   });
 
+  it('T20: a trace keeps the first 50 refs; past 50 it says so (refsTruncated), at 50 it does not', async () => {
+    const ids: string[] = [];
+    const add = async (n: number, assigneePersonId?: string) =>
+      ids.push(
+        (
+          await createTask(
+            f.h.alex,
+            {
+              title: `refs ${String(n).padStart(2, '0')}`,
+              dueDate: '2026-10-08',
+              visibility: 'private',
+              ...(assigneePersonId ? { assigneePersonId } : {}),
+            },
+            deps,
+          )
+        ).id,
+      );
+    const input = { due_before: '2026-10-09' };
+    try {
+      await add(0, f.id.alex);
+      for (let n = 1; n < 49; n++) await add(n);
+      // 49 tasks, one assigned to Alex: exactly 50 refs, and no flag.
+      const fifty = await call(f.kev.alex, 'get_tasks', input);
+      expect(fifty.result.ok && fifty.result.refs).toHaveLength(50);
+      expect(fifty.trace.refs).toEqual(fifty.result.ok ? fifty.result.refs : null);
+      expect('refsTruncated' in fifty.trace).toBe(false);
+      expect(traceEntrySchema.safeParse(fifty.trace).success).toBe(true);
+      await add(49);
+      // 50 tasks: 51 refs; the trace keeps the first 50, in order, and says it was cut.
+      const more = await call(f.kev.alex, 'get_tasks', input);
+      const refs = more.result.ok ? more.result.refs : [];
+      expect(refs).toHaveLength(51);
+      expect(more.trace.refs).toEqual(refs.slice(0, 50));
+      expect(more.trace.refsTruncated).toBe(true);
+      expect(more.trace.resultCount).toBe(50);
+      expect(traceEntrySchema.safeParse(more.trace).success).toBe(true);
+      // Stable: the same call, the same trace.
+      const again = await call(f.kev.alex, 'get_tasks', input);
+      expect({ ...again.trace, attemptId: '' }).toEqual({ ...more.trace, attemptId: '' });
+      // Sam can see none of it.
+      const sam = await call(f.kev.sam, 'get_tasks', input);
+      expect(sam.trace.refs).toEqual([]);
+      expect('refsTruncated' in sam.trace).toBe(false);
+    } finally {
+      for (const id of ids) await archiveTask(f.h.alex, id, deps);
+    }
+  });
+
   it('T17: every user- or calendar-authored string is inside untrusted_text, within its cap', async () => {
     const authored = [
       'Swimming',

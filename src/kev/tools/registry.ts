@@ -168,7 +168,10 @@ export type TraceEntry = {
   code?: ToolErrorCode;
   args: TraceArgs;
   resultCount: number;
+  /** The first 50 of the result's refs, in order. */
   refs: Ref[];
+  /** Present, and true, only when the result had more than 50 refs. */
+  refsTruncated?: true;
   attemptId: string;
 };
 
@@ -224,15 +227,19 @@ export function createToolRunner(ctx: ToolContext & { attemptId: string }): Tool
     args: TraceArgs,
     result: ToolResult<unknown>,
     resultCount: number,
-  ): TraceEntry => ({
-    tool,
-    ok: result.ok,
-    ...(result.ok ? {} : { code: result.code }),
-    args,
-    resultCount,
-    refs: result.ok ? result.refs.slice(0, MAX_ITEMS) : [],
-    attemptId: ctx.attemptId,
-  });
+  ): TraceEntry => {
+    const refs = result.ok ? result.refs : [];
+    return {
+      tool,
+      ok: result.ok,
+      ...(result.ok ? {} : { code: result.code }),
+      args,
+      resultCount,
+      refs: refs.slice(0, MAX_ITEMS),
+      ...(refs.length > MAX_ITEMS ? { refsTruncated: true as const } : {}),
+      attemptId: ctx.attemptId,
+    };
+  };
 
   return {
     get unknownRefused() {

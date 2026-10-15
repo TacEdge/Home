@@ -120,6 +120,24 @@ describe('T23: the registry', () => {
     expect(refSchema.parse(ref)).toEqual(contentRefSchema.parse(ref));
   });
 
+  it('content v2’s trace entry carries refsTruncated only as true, beside at most 50 refs', () => {
+    const entry = {
+      tool: 'get_tasks',
+      ok: true,
+      args: {},
+      resultCount: 50,
+      refs: Array.from({ length: 50 }, () => ({ type: 'task', id: UUID })),
+      attemptId: UUID,
+    };
+    expect(traceEntrySchema.safeParse(entry).success).toBe(true);
+    expect(traceEntrySchema.safeParse({ ...entry, refsTruncated: true }).success).toBe(true);
+    for (const bad of [false, 'true', 1])
+      expect(traceEntrySchema.safeParse({ ...entry, refsTruncated: bad }).success).toBe(false);
+    expect(
+      traceEntrySchema.safeParse({ ...entry, refs: [...entry.refs, entry.refs[0]] }).success,
+    ).toBe(false);
+  });
+
   it('a runner exists only for a user acting through Kev: never the system, never the UI', () => {
     const base = { now: NOW, timeZone: ZONE, attemptId: UUID };
     const user = {
