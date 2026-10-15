@@ -117,10 +117,29 @@ export async function listAudit(
   opts: { limit?: number; before?: AuditCursor } = {},
   deps: Deps = {},
 ): Promise<AuditPage> {
+  const limit = pageLimit(opts.limit);
+  const rows = await listAuditQuery(actor, opts, deps);
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  const next = rows.length > limit && last ? { id: last.id } : null;
+  return { rows: page, next };
+}
+
+const pageLimit = (limit: number | undefined) => Math.min(Math.max(limit ?? 50, 1), 200);
+
+/**
+ * The one query behind `listAudit`: up to a page and one more row. Exported
+ * so tests/integration/activity-query.test.ts can read its plan; nothing else
+ * calls it.
+ */
+export function listAuditQuery(
+  actor: Actor,
+  opts: { limit?: number; before?: AuditCursor } = {},
+  deps: Deps = {},
+) {
   const db = deps.db ?? getDb();
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const cursor = opts.before;
-  const rows = await db
+  return db
     .select(auditRowColumns)
     .from(auditLog)
     .where(
@@ -132,9 +151,5 @@ export async function listAudit(
       ),
     )
     .orderBy(desc(auditLog.at), desc(auditLog.id))
-    .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const last = page.at(-1);
-  const next = rows.length > limit && last ? { id: last.id } : null;
-  return { rows: page, next };
+    .limit(pageLimit(opts.limit) + 1);
 }
