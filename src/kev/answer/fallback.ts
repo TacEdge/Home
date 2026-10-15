@@ -68,23 +68,31 @@ export type Coverage = {
 /**
  * The code's sentences for what an answer cites (§8.4), as limit codes. The
  * model neither writes nor removes them: an answer that omits or rewords
- * them changes nothing (V16).
+ * them changes nothing (V16). Run on every outcome that shows records,
+ * the safe fallback's rows included (I-15).
  * - any gap: M7's limit sentence;
- * - an event while a visible calendar is stale, failed or never refreshed:
- *   "As far as HOME knows." (records do not carry their calendar, so this is
- *   said whenever such a calendar exists and an event is cited: conservative);
+ * - an event, or a statement that nothing is recorded, while a visible
+ *   calendar is stale, failed or never refreshed: "As far as HOME knows."
+ *   (records do not carry their calendar, so this is said whenever such a
+ *   calendar exists: conservative);
  * - the forecast: its time and credit;
  * - coverage `unknown` (no calendar at all, or a gap read that said so) with
- *   an event or gap cited: "HOME has no calendar connected…".
+ *   an event, a gap or a statement of absence: "HOME has no calendar
+ *   connected…".
  */
-export function limitsFor(cites: readonly Ref[], coverage: Coverage): LimitCode[] {
+export function limitsFor(
+  cites: readonly Ref[],
+  coverage: Coverage,
+  claims: { absence?: boolean } = {},
+): LimitCode[] {
   const has = (t: Ref['type']) => cites.some((c) => c.type === t);
+  const absence = claims.absence === true;
   const out: LimitCode[] = [];
   if (has('gap')) out.push('gap_limit');
-  if (has('event') && coverage.calendarsUnhealthy) out.push('calendar_stale');
+  if ((has('event') || absence) && coverage.calendarsUnhealthy) out.push('calendar_stale');
   if (has('forecast')) out.push('forecast_credit');
   if (
-    (has('event') || has('gap')) &&
+    (has('event') || has('gap') || absence) &&
     (coverage.noCalendars || (has('gap') && coverage.gapsUnknown))
   )
     out.push('coverage_unknown');

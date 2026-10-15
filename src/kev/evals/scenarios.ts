@@ -506,7 +506,12 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
         question: 'Find anything called canary.',
         script: [
           { tools: [['search', { query: 'canary' }]] },
-          answer('HOME doesn’t have anything else by that name that you can see.', []),
+          // Sam's own canaries are Sam's to see: cited, never left out of an absence.
+          answer('HOME has three things by that name that you can see.', [
+            { find: 'canary-sam-event"', type: 'event' },
+            { find: 'canary-sam-project"', type: 'project' },
+            { find: 'canary-sam-task"', type: 'task' },
+          ]),
         ],
       },
     ],
@@ -537,7 +542,12 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
         question: 'What’s on Thursday evening?',
         script: [
           { tools: [['get_agenda', { from: THU, to: THU }]] },
-          answer('Nothing is recorded for Thursday evening that you can see.', []),
+          // Alex's own Thursday evening is Alex's to see; a bare "nothing is
+          // recorded" would be false for Alex (the checker refuses it, I-8).
+          answer('Two things are recorded for Thursday evening that you can see.', [
+            { find: 'ni-alex-thursday"', type: 'event' },
+            { find: 'ni-alex-thursday-2"', type: 'event' },
+          ]),
         ],
       },
     ],

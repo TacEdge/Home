@@ -16,270 +16,38 @@ import { Ledger } from '@/kev/answer/ledger';
 import { ANSWER_JSON_SCHEMA, parseAnswer } from '@/kev/answer/schema';
 import { codesOf, validateAnswer } from '@/kev/answer/validate';
 import type { Ref } from '@/kev/tools/types';
-
-// The grounding check (M8 contract §8.3–§8.5; matrix rows V1–V16 and V18's
-// fallback; T22's answer half). Pure: a ledger built from tool outputs
-// shaped exactly as the tools send them, on the contract's fixture
-// (Wednesday 14 October 2026, 07:03). Synthetic only.
-
-const NOW = new Date('2026-10-14T07:03:00+13:00');
-const ZONE = 'Pacific/Auckland';
-const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const P = { sam: id(1), alex: id(2), milo: id(3), isla: id(4), nana: id(5) };
-const E = {
-  swimming: id(10),
-  football: id(11),
-  board: id(12),
-  interviews: id(13),
-  birthday: id(14),
-};
-const T = { paint: id(20) };
-const u = (s: string) => ({ untrusted_text: s });
-const person = (pid: string): Ref => ({ type: 'person', id: pid });
-const swim: Ref = { type: 'event', id: E.swimming, at: '2026-10-14T15:30:00+13:00' };
-const foot: Ref = { type: 'event', id: E.football, at: '2026-10-17T09:00:00+13:00' };
-const board: Ref = { type: 'event', id: E.board, at: '2026-10-15T17:30:00+13:00' };
-const interviews: Ref = { type: 'event', id: E.interviews, at: '2026-10-15T18:00:00+13:00' };
-const conflict: Ref = { type: 'conflict', id: 'conflict.overlap:abc' };
-const paint: Ref = { type: 'task', id: T.paint };
-const gap: Ref = { type: 'gap', id: 'gap:household:2026-10-17:1000' };
-const sat: Ref = { type: 'forecast', id: 'forecast:2026-10-17' };
-
-const bundle = {
-  now: { weekday: 'wednesday', date: '2026-10-14', time: '07:03', zone: ZONE },
-  reader: { ref: person(P.sam), name: u('Sam') },
-  people: [
-    {
-      ref: person(P.sam),
-      name: u('Sam'),
-      role: 'adult',
-      relationship: null,
-      age: null,
-      in_household: true,
-    },
-    {
-      ref: person(P.alex),
-      name: u('Alex'),
-      role: 'adult',
-      relationship: null,
-      age: null,
-      in_household: true,
-    },
-    {
-      ref: person(P.milo),
-      name: u('Milo'),
-      role: 'child',
-      relationship: null,
-      age: 9,
-      in_household: true,
-    },
-    {
-      ref: person(P.isla),
-      name: u('Isla'),
-      role: 'child',
-      relationship: null,
-      age: 6,
-      in_household: true,
-    },
-    {
-      ref: person(P.nana),
-      name: u('Nana Jo'),
-      role: 'other',
-      relationship: u('Grandmother'),
-      age: 79,
-      in_household: false,
-    },
-  ],
-  people_count: 5,
-  people_truncated: false,
-  today: {
-    date: '2026-10-14',
-    people: [
-      {
-        items: [
-          {
-            type: 'event',
-            ref: swim,
-            title: u('Swimming'),
-            all_day: false,
-            start: '2026-10-14T15:30:00+13:00',
-            end: '2026-10-14T16:15:00+13:00',
-            kind: null,
-            people: [
-              { ref: person(P.milo), name: u('Milo'), role: 'attending' },
-              { ref: person(P.sam), name: u('Sam'), role: 'responsible' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  freshness: {
-    calendars: { healthy: 1, stale: 0, failed: 0, never: 0 },
-    forecast_fetched_at: '2026-10-14T06:55:00+13:00',
-  },
-  to_sort: 0,
-  focus: null,
-};
-const bundleRefs = [
-  person(P.sam),
-  person(P.alex),
-  person(P.milo),
-  person(P.isla),
-  person(P.nana),
+import {
+  board,
+  bundle,
+  bundleRefs,
+  conflict,
+  E,
+  fixtureLedger,
+  foot,
+  gap,
+  id,
+  NOW,
+  P,
+  paint,
+  person,
+  reads,
+  sat,
   swim,
-];
+  swimItem,
+  u,
+  withEvent,
+  ZONE,
+} from './kev-ledger-fixture';
+import { getAgenda } from '@/kev/tools/get-agenda';
 
-function ledger(): Ledger {
-  const l = new Ledger();
-  l.addBundle(bundle, bundleRefs);
-  l.addResult(
-    'get_agenda',
-    {
-      days: [
-        {
-          date: '2026-10-17',
-          items: [
-            {
-              type: 'event',
-              ref: foot,
-              title: u('Football'),
-              all_day: false,
-              start: '2026-10-17T09:00:00+13:00',
-              end: '2026-10-17T10:00:00+13:00',
-              kind: null,
-              people: [{ ref: person(P.milo), name: u('Milo'), role: 'attending' }],
-            },
-          ],
-        },
-        { date: '2026-10-18', items: [] },
-      ],
-    },
-    [foot, person(P.milo)],
-  );
-  l.addCovered('2026-10-17', '2026-10-18');
-  l.addResult(
-    'get_conflicts',
-    {
-      conflicts: [
-        {
-          ref: conflict,
-          key: 'conflict.overlap:abc',
-          rule: 'conflict.overlap',
-          person: { ref: person(P.sam), name: u('Sam') },
-          commitments: [
-            {
-              ref: board,
-              title: u('Board meeting'),
-              start: '2026-10-15T17:30:00+13:00',
-              end: '2026-10-15T19:30:00+13:00',
-              role: 'attending',
-            },
-            {
-              ref: interviews,
-              title: u('Parent interviews'),
-              start: '2026-10-15T18:00:00+13:00',
-              end: '2026-10-15T18:30:00+13:00',
-              role: 'attending',
-            },
-          ],
-          overlap: { from: '2026-10-15T18:00:00+13:00', to: '2026-10-15T18:30:00+13:00' },
-          when: '2026-10-15',
-          responded: false,
-        },
-      ],
-      count: 1,
-      truncated: false,
-    },
-    [conflict, person(P.sam), board, interviews],
-  );
-  l.addResult(
-    'get_tasks',
-    {
-      tasks: [
-        {
-          ref: paint,
-          title: u('Paint the back fence'),
-          status: 'open',
-          estimate_minutes: 180,
-          needs: ['dry_weather', 'daylight'],
-          due: null,
-          scheduled: null,
-          assignee: { ref: person(P.sam), name: u('Sam') },
-          project: null,
-        },
-      ],
-      count: 1,
-      truncated: false,
-    },
-    [paint, person(P.sam)],
-  );
-  l.addResult(
-    'get_gaps',
-    {
-      gaps: [
-        {
-          ref: gap,
-          key: 'gap:household:2026-10-17:1000',
-          date: '2026-10-17',
-          from: '2026-10-17T10:00:00+13:00',
-          to: '2026-10-17T19:30:00+13:00',
-          before: { ref: foot, title: u('Football') },
-          after: null,
-          daylight: { from: '2026-10-17T06:30:00+13:00', to: '2026-10-17T19:30:00+13:00' },
-          forecast_band: 'dry',
-        },
-      ],
-      limit: true,
-      count: 1,
-      truncated: false,
-    },
-    [gap, foot],
-  );
-  l.addResult(
-    'get_weather',
-    {
-      configured: true,
-      freshness: 'fresh',
-      fetched_at: '2026-10-14T06:55:00+13:00',
-      days: [
-        {
-          ref: sat,
-          date: '2026-10-17',
-          phrase: 'Looks dry',
-          low_c: 9,
-          high_c: 17,
-          max_gust_kmh: 30,
-          parts: [{ part: 'morning', band: 'dry' }],
-        },
-      ],
-      uncovered: [],
-      credit: 'Open-Meteo',
-      count: 1,
-      truncated: false,
-    },
-    [sat],
-  );
-  l.addResult(
-    'get_people',
-    {
-      people: [
-        {
-          ref: person(P.nana),
-          name: u('Nana Jo'),
-          role: 'other',
-          in_household: false,
-          age: 79,
-          next_birthday: { date: '2026-10-20', age: 80 },
-        },
-      ],
-      count: 1,
-      truncated: false,
-    },
-    [person(P.nana)],
-  );
-  return l;
-}
+// The grounding check (M8 contract §8.3–§8.5; matrix rows V1–V18 and V18's
+// fallback; T22's answer half). Pure: a ledger built from tool outputs
+// that the tools' own output schemas accept (./kev-ledger-fixture.ts), on
+// the contract's fixture (Wednesday 14 October 2026, 07:03). Synthetic
+// only. The Package 3 review's counterexamples (B-1, B-2, I-8–I-16 and the
+// minors) are below the original rows, each with its expected result.
+
+const ledger = () => fixtureLedger();
 
 const say = (text: string, cites: Ref[] = [], blocks: unknown[] = []) => ({
   say: { text, cites: cites.map((c) => ({ ...c, at: c.at ?? null })) },
@@ -422,7 +190,7 @@ describe('V4: a factual sentence cites something, unless it states an absence', 
           say('Football on Saturday at 9.', [foot], [fact('Nothing else is recorded for Monday.')]),
         ),
       ),
-    ).toEqual(['time.unsupported']);
+    ).toEqual(['absence.unsupported']);
     // A view may stand without citations (it may add nothing, though).
     expect(
       check(json(say('Swimming at 3:30.', [swim], [view('That is the only item listed.')]))),
@@ -464,34 +232,21 @@ describe('V7: the forbidden lists, titles and names exempt', () => {
     },
   );
 
-  it('a cited title containing "Free" passes', () => {
-    const l = ledger();
-    const freeRef: Ref = { type: 'event', id: id(40), at: '2026-10-17T11:00:00+13:00' };
-    l.addResult(
-      'get_agenda',
-      {
-        items: [
-          {
-            type: 'event',
-            ref: freeRef,
-            title: u('Free swim day'),
-            all_day: false,
-            start: freeRef.at,
-            end: '2026-10-17T12:00:00+13:00',
-            kind: null,
-            people: [],
-          },
-        ],
-      },
-      [freeRef],
-    );
-    const r = validateAnswer({
-      raw: json(say('Free swim day on Saturday at 11.', [freeRef])),
-      ledger: l,
-      now: NOW,
-      timeZone: ZONE,
-    });
-    expect(r.ok).toBe(true);
+  it('a cited title containing "Free" passes quoted word for word, and only then (I-11)', () => {
+    const freeRef = { type: 'event' as const, id: id(40), at: '2026-10-17T11:00:00+13:00' };
+    const run = (text: string) => {
+      const l = withEvent(ledger(), freeRef, 'Free swim day', '2026-10-17T12:00:00+13:00');
+      const r = validateAnswer({
+        raw: json(say(text, [freeRef])),
+        ledger: l,
+        now: NOW,
+        timeZone: ZONE,
+      });
+      return r.ok ? [] : codesOf(r.violations);
+    };
+    expect(run('“Free swim day” on Saturday at 11.')).toEqual([]);
+    expect(run('Free swim day on Saturday at 11.')).toEqual(['phrase.forbidden']);
+    expect(run('“Free Swim Day” on Saturday at 11.')).toEqual(['phrase.forbidden']);
   });
 
   it('every fixed string passes the four lists, its "can’t" about Kev itself excepted (§8.6)', () => {
@@ -727,5 +482,505 @@ describe('V18 (pure half): the safe fallback', () => {
       'Kev isn’t answering right now. What you asked is kept here.',
     );
     expect(ERROR_TEXT.refused).toBe('I can’t help with that one.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Package 3 review's counterexamples (each was accepted before the
+// correction) and the legitimate answers the correction must keep.
+
+const inj = { type: 'event' as const, id: id(50), at: '2026-10-17T11:00:00+13:00' };
+const injected = (title: string) =>
+  withEvent(fixtureLedger(), inj, title, '2026-10-17T12:00:00+13:00');
+const run = (answer: unknown, l: Ledger = fixtureLedger()) => {
+  const r = validateAnswer({ raw: json(answer), ledger: l, now: NOW, timeZone: ZONE });
+  return r.ok ? [] : codesOf(r.violations);
+};
+/** A ledger with one agenda read of Wednesday and Thursday holding swimming (B-2's from/to). */
+function agendaWedThu(): Ledger {
+  const l = new Ledger();
+  l.addBundle(bundle, bundleRefs);
+  l.addResult(
+    'get_agenda',
+    getAgenda.output.parse({
+      from: '2026-10-14',
+      to: '2026-10-15',
+      days: [
+        { date: '2026-10-14', items: [swimItem] },
+        { date: '2026-10-15', items: [] },
+      ],
+      count: 1,
+      truncated: false,
+    }),
+    [swim],
+    { from: '2026-10-14', to: '2026-10-15' },
+  );
+  return l;
+}
+/** The fixture plus an agenda read of the rest of this week (Wednesday to Sunday). */
+function withThisWeek(): Ledger {
+  const l = fixtureLedger();
+  l.addResult(
+    'get_agenda',
+    getAgenda.output.parse({
+      from: '2026-10-14',
+      to: '2026-10-18',
+      days: ['14', '15', '16', '17', '18'].map((d) => ({ date: `2026-10-${d}`, items: [] })),
+      count: 0,
+      truncated: false,
+    }),
+    [],
+    { from: '2026-10-14', to: '2026-10-18' },
+  );
+  return l;
+}
+
+describe('B-1: an absence is a whole clause, never a pass for the rest', () => {
+  it.each([
+    [say('HOME doesn’t show more, but Alex has the dentist with Milo.'), 'cite.missing'],
+    [say('Nothing else is recorded, and Alex is responsible for football.'), 'cite.missing'],
+    [
+      say(
+        'Football on Saturday at 9.',
+        [foot],
+        [fact('No reason to worry: Milo has swimming with Alex too, as recorded.')],
+      ),
+      'cite.missing',
+    ],
+  ])('%j is refused', (answer, code) => {
+    expect(run(answer)).toContain(code);
+  });
+});
+
+describe('B-2: a result’s range is never a fact of its records', () => {
+  it.each([
+    [say('Swimming on Thursday at 3:30.', [swim]), agendaWedThu()],
+    [say('Swimming on 15 October at 3:30.', [swim]), agendaWedThu()],
+    [say('Football on Sunday at 9.', [foot]), fixtureLedger()],
+  ])('%j is time.unsupported', (answer, l) => {
+    expect(run(answer, l)).toEqual(['time.unsupported']);
+  });
+
+  it('the forecast’s fetch time and credit are its days’ facts (the allow-list)', () => {
+    expect(run(say('As of 06:55, Saturday looks dry.', [sat]))).toEqual([]);
+    expect(run(say('As of 06:55, Swimming at 3:30.', [swim]))).toEqual(['time.unsupported']);
+  });
+
+  it('an agenda day’s date is its birthday item’s fact', () => {
+    const l = fixtureLedger();
+    l.addResult(
+      'get_agenda',
+      getAgenda.output.parse({
+        from: '2026-10-20',
+        to: '2026-10-20',
+        days: [
+          {
+            date: '2026-10-20',
+            items: [{ type: 'birthday', ref: person(P.nana), name: u('Nana Jo'), age: 80 }],
+          },
+        ],
+        count: 1,
+        truncated: false,
+      }),
+      [person(P.nana)],
+      { from: '2026-10-20', to: '2026-10-20' },
+    );
+    expect(run(say('Nana Jo’s birthday is on Tuesday 20 October.', [person(P.nana)]), l)).toEqual(
+      [],
+    );
+    expect(run(say('Nothing is recorded for Tuesday.'), l)).toEqual(['absence.unsupported']);
+  });
+});
+
+describe('I-8: an absence must be covered, and not contradicted', () => {
+  it.each([
+    ['Nothing is recorded for Saturday.', 'Football is in the ledger'],
+    ['Nothing is recorded for Thursday.', 'no agenda read covers Thursday'],
+    ['Nothing is recorded for next week.', 'nothing read next week'],
+    ['Nothing is recorded for Milo on Saturday.', 'Football has Milo'],
+    ['Nothing else is recorded for today.', 'swimming is uncited'],
+  ])('%s (%s) is absence.unsupported', (text) => {
+    expect(run(say(text))).toEqual(['absence.unsupported']);
+  });
+
+  it('a conflicts or forecast read is not agenda coverage; a truncated read covers nothing', () => {
+    // get_conflicts covered Thursday; get_weather covered the weekend: neither is the agenda.
+    const l = fixtureLedger([reads.thursdayConflicts, reads.weekendWeather]);
+    expect(run(say('Nothing is recorded for Thursday.'), l)).toEqual(['absence.unsupported']);
+    expect(run(say('Nothing is recorded for Sunday.'), l)).toEqual(['absence.unsupported']);
+    const cut = new Ledger();
+    cut.addBundle(bundle, bundleRefs);
+    cut.addResult(
+      'get_agenda',
+      { ...reads.weekendAgenda.data, truncated: true },
+      reads.weekendAgenda.refs,
+      reads.weekendAgenda.input,
+    );
+    expect(run(say('Nothing else is recorded for Sunday.'), cut)).toEqual(['absence.unsupported']);
+  });
+
+  it('a person-filtered agenda read covers only that person', () => {
+    const l = new Ledger();
+    l.addBundle(bundle, bundleRefs);
+    l.addResult(
+      'get_agenda',
+      getAgenda.output.parse({
+        from: '2026-10-18',
+        to: '2026-10-18',
+        days: [{ date: '2026-10-18', items: [] }],
+        count: 0,
+        truncated: false,
+      }),
+      [],
+      { from: '2026-10-18', to: '2026-10-18', person_ids: [P.alex] },
+    );
+    expect(run(say('Nothing is recorded for Alex on Sunday.'), l)).toEqual([]);
+    expect(run(say('Nothing is recorded for Sunday.'), l)).toEqual(['absence.unsupported']);
+    expect(run(say('Nothing is recorded for Milo on Sunday.'), l)).toEqual(['absence.unsupported']);
+  });
+
+  it('supported absences pass', () => {
+    expect(run(say('Nothing is recorded for Sunday.'))).toEqual([]);
+    expect(run(say('Nothing is recorded for Alex on Saturday.'))).toEqual([]);
+    expect(
+      run(
+        say(
+          'Football on Saturday at 9.',
+          [foot],
+          [fact('Nothing else is recorded for Milo on Saturday.')],
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('I-9: today, tomorrow, the weekend and next week are resolved from now', () => {
+  it.each([
+    'Football tomorrow at 9.',
+    'Football next week at 9.',
+    'Swimming on the weekend at 3:30.',
+    'Swimming tomorrow at 3:30.',
+  ])('%s is time.unsupported', (text) => {
+    expect(run(say(text, [text.startsWith('Football') ? foot : swim]))).toEqual([
+      'time.unsupported',
+    ]);
+  });
+
+  it.each([
+    ['Swimming today at 3:30.', swim],
+    ['Football this weekend at 9.', foot],
+    ['Football on Saturday at 9, this weekend.', foot],
+    ['Nana Jo’s birthday is next week, on Tuesday.', person(P.nana)],
+  ])('%s passes', (text, ref) => {
+    expect(run(say(text, [ref]))).toEqual([]);
+  });
+});
+
+describe('I-10: people, roles and relationships come from the cited records', () => {
+  it.each([
+    say('Swimming at 3:30, and Alex is marked responsible.', [swim]),
+    say('Swimming at 3:30 with Isla.', [swim]),
+    say('Your grandad goes with Milo to football on Saturday at 9.', [foot]),
+    say('Milo is marked responsible for swimming at 3:30.', [swim]),
+    say('Football on Saturday at 9, with Milo and his coach.', [foot]),
+  ])('%j is person.unsupported', (answer) => {
+    expect(run(answer)).toContain('person.unsupported');
+  });
+
+  it('recorded people and roles pass', () => {
+    expect(run(say('Swimming at 3:30 with Milo, and Sam is marked responsible.', [swim]))).toEqual(
+      [],
+    );
+    expect(run(say('Milo is attending football on Saturday at 9.', [foot]))).toEqual([]);
+    expect(run(say('Nana Jo turns 80 on Tuesday.', [person(P.nana)]))).toEqual([]);
+    expect(run(say('Your nana, Nana Jo, turns 80 on Tuesday.', [person(P.nana)]))).toEqual([]);
+  });
+});
+
+describe('I-11: recorded text is quoted evidence, never an exemption', () => {
+  it.each([
+    ['Alex is free all afternoon', say('Alex is free all afternoon.', [inj]), 'availability.claim'],
+    ['Busy', say('Alex is busy on Saturday at 11.', [inj]), 'availability.claim'],
+    [
+      'I’ve booked the plumber',
+      say('I’ve booked the plumber on Saturday at 11.', [inj]),
+      'authority.claim',
+    ],
+    [
+      'Alex is free every Saturday and should do the fence',
+      say('Alex is free every Saturday and should do the fence.', [inj]),
+      'availability.claim',
+    ],
+    [
+      'Alex is free all afternoon',
+      say('“Alex is free all afternoon” is on Saturday at 11.', [inj]),
+      'availability.claim',
+    ],
+  ])('a cited title %j does not let %j through', (title, answer, code) => {
+    expect(run(answer, injected(title))).toContain(code);
+  });
+
+  it('a quoted title only lifts the wording rule, and only word for word', () => {
+    expect(run(say('“Busy bees” on Saturday at 11.', [inj]), injected('Busy bees'))).toEqual([]);
+    expect(run(say('“Busy bees” on Saturday at 4.', [inj]), injected('Busy bees'))).toEqual([
+      'time.unsupported',
+    ]);
+    expect(run(say('“Busy” bees on Saturday at 11.', [inj]), injected('Busy bees'))).toEqual([
+      'phrase.forbidden',
+    ]);
+  });
+});
+
+describe('I-12: no availability, and no plan presented as made', () => {
+  it.each([
+    [say('Sam, you’re doing the fence on Saturday at 9.', [foot, paint]), 'commitment.unrecorded'],
+    [say('Sam paints the fence on Saturday at 9.', [paint, foot]), 'commitment.unrecorded'],
+    [
+      say(
+        'On Saturday nothing is recorded from 10 till 7:30.',
+        [gap],
+        [view('Sam’s painting the fence on Saturday from 10.', [gap, paint])],
+      ),
+      'time.unsupported',
+    ],
+    [say('Alex has Thursday evening to himself.', [board]), 'availability.claim'],
+    [say('Alex’s Thursday evening is empty.', [board]), 'availability.claim'],
+    [say('Alex can make football on Saturday at 9.', [foot]), 'availability.claim'],
+    [say('Alex has no plans on Saturday.', [foot]), 'availability.claim'],
+    [
+      say('On Saturday nothing is recorded from 10 till 7:30, so Alex can do the fence then.', [
+        gap,
+        paint,
+      ]),
+      'availability.claim',
+    ],
+    [say('You’re doing the fence on Saturday.', [paint]), 'commitment.unrecorded'],
+  ])('%j is refused', (answer, code) => {
+    expect(run(answer)).toContain(code);
+  });
+
+  it('a recorded commitment with its people passes', () => {
+    expect(run(say('Milo goes to football on Saturday at 9.', [foot]))).toEqual([]);
+    expect(run(say('Alex goes to football on Saturday at 9.', [foot]))).toEqual([
+      'person.unsupported',
+      'commitment.unrecorded',
+    ]);
+  });
+});
+
+describe('I-13: a view is checked like a fact', () => {
+  it('a view naming people or records needs citations, and those must carry it', () => {
+    expect(
+      run(
+        say(
+          'Swimming at 3:30.',
+          [swim],
+          [view('Alex is responsible for Milo’s swimming every week.')],
+        ),
+      ),
+    ).toEqual(['cite.missing']);
+    expect(
+      run(
+        say(
+          'Swimming at 3:30.',
+          [swim],
+          [view('Alex is responsible for Milo’s swimming every week.', [swim])],
+        ),
+      ),
+    ).toEqual(['time.unsupported', 'person.unsupported']);
+    expect(
+      run(say('Swimming at 3:30.', [swim], [view('Alex is free on Saturday.', [foot])])),
+    ).toContain('availability.claim');
+  });
+});
+
+describe('I-14: invisible and look-alike characters', () => {
+  // Written as code points: the repository holds no literal invisible character.
+  const ch = (...cp: number[]) => String.fromCodePoint(...cp);
+  it.each([
+    ['U+200B', `Milo is fr${ch(0x200b)}ee on Saturday at 9.`],
+    ['U+2063', `Milo is fr${ch(0x2063)}ee on Saturday at 9.`],
+    ['U+00AD', `Milo is fr${ch(0xad)}ee on Saturday at 9.`],
+    ['Cyrillic e', `Milo is fr${ch(0x435, 0x435)} on Saturday at 9.`],
+    ['U+202E', `Football on Saturday at 9 ${ch(0x202e)}with Milo.`],
+  ])('%s is text.unsafe', (_label, text) => {
+    expect(run(say(text, [foot]))).toContain('text.unsafe');
+  });
+
+  it('names with diacritics and NZ English pass', () => {
+    const l = new Ledger();
+    const zoe = id(60);
+    const tane = id(61);
+    const b = {
+      ...bundle,
+      people: [
+        ...bundle.people,
+        { ...bundle.people[2]!, ref: person(zoe), name: u('Zoë') },
+        { ...bundle.people[2]!, ref: person(tane), name: u('Tāne') },
+      ],
+    };
+    l.addBundle(b, [...bundleRefs, person(zoe), person(tane)]);
+    l.addResult(
+      'get_agenda',
+      getAgenda.output.parse({
+        from: '2026-10-17',
+        to: '2026-10-17',
+        days: [
+          {
+            date: '2026-10-17',
+            items: [
+              {
+                ...reads.weekendAgenda.data.days[0]!.items[0]!,
+                title: u('Kapa haka'),
+                people: [
+                  { ref: person(zoe), name: u('Zoë'), role: 'attending' },
+                  { ref: person(tane), name: u('Tāne'), role: 'responsible' },
+                ],
+              },
+            ],
+          },
+        ],
+        count: 1,
+        truncated: false,
+      }),
+      [foot],
+      { from: '2026-10-17', to: '2026-10-17' },
+    );
+    expect(
+      run(say('Kapa haka on Saturday at 9 with Zoë, and Tāne is marked responsible.', [foot]), l),
+    ).toEqual([]);
+  });
+});
+
+describe('I-16: legitimate answers the checker used to refuse', () => {
+  it('no overlaps after an empty, covering conflicts read', () => {
+    expect(
+      run(
+        say(
+          'Football on Saturday at 9.',
+          [foot],
+          [fact('No overlaps are recorded for next week.')],
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      run(say('HOME hasn’t marked an overlap there.'), fixtureLedger([reads.nextWeekConflicts])),
+    ).toEqual([]);
+    // An uncited conflict in the covered days still contradicts it (conservative).
+    expect(run(say('HOME hasn’t marked an overlap there.'))).toEqual(['absence.unsupported']);
+    // No conflicts read at all: no overlap absence.
+    expect(
+      run(say('No overlaps are recorded for next week.'), fixtureLedger([reads.tasks])),
+    ).toEqual(['absence.unsupported']);
+  });
+
+  it.each([
+    [say('You’re marked responsible for swimming at 3:30.', [swim]), fixtureLedger()],
+    [
+      say(
+        'Doesn’t look like anything else is recorded for Saturday.',
+        [],
+        [fact('Football on Saturday at 9.', [foot])],
+      ),
+      fixtureLedger(),
+    ],
+    [
+      say(
+        'Nothing else is recorded for you this week.',
+        [],
+        [fact('Swimming today at 3:30.', [swim])],
+      ),
+      withThisWeek(),
+    ],
+    [say('Swimming at 3.30 today.', [swim]), fixtureLedger()],
+    [say('Football Sat 9am.', [foot]), fixtureLedger()],
+    [say('Swimming Wed 14 Oct at 3:30.', [swim]), fixtureLedger()],
+    [say('Swimming at half three.', [swim]), fixtureLedger()],
+    [say('Swimming at three-thirty.', [swim]), fixtureLedger()],
+    [say('Swimming, from 3.30 till 4.15.', [swim]), fixtureLedger()],
+    [say('I’m not seeing anything else, and swimming is at 3:30.', [swim]), fixtureLedger()],
+  ])('%j passes', (answer, l) => {
+    expect(run(answer, l)).toEqual([]);
+  });
+
+  it('wrong times in NZ forms still fail', () => {
+    expect(run(say('Swimming at 4.30 today.', [swim]))).toEqual(['time.unsupported']);
+    expect(run(say('Swimming at half four.', [swim]))).toEqual(['time.unsupported']);
+    expect(run(say('Football Sun 9am.', [foot]))).toEqual(['time.unsupported']);
+  });
+
+  it.each([
+    'I’ve gone ahead and booked it.',
+    'I have now added paint the back fence.',
+    'Done, that’s in To sort now.',
+    'I just added it.',
+    'I’ll keep an eye on it.',
+    'I can add that for you.',
+  ])('Kev’s completed or promised action %j is authority.claim', (text) => {
+    expect(run(say(text, [paint]))).toContain('authority.claim');
+  });
+});
+
+describe('The minors: bound times, numbers, markup and views', () => {
+  it('a time said with one record cannot belong to another cited with it', () => {
+    expect(run(say('Swimming at 9 and football at 3:30.', [swim, foot]))).toEqual([
+      'time.unsupported',
+    ]);
+    expect(run(say('Swimming at 3:30 and football at 9.', [swim, foot]))).toEqual([]);
+  });
+
+  it.each([
+    [say('Paint the back fence is recorded as about ninety minutes.', [paint]), 'time.unsupported'],
+    [say('Nana Jo turns ninety on Tuesday.', [person(P.nana)]), 'number.unsupported'],
+    [say('Nana Jo turns 79 on Tuesday.', [person(P.nana)]), 'number.unsupported'],
+    [say('Saturday looks dry, a low of 17.', [sat]), 'number.unsupported'],
+    [say('Saturday looks dry, gusts of 45.', [sat]), 'number.unsupported'],
+    [say('Swimming at 3:30, see evil.xyz/login.', [swim]), 'markup'],
+    [say('Swimming at **3:30**.', [swim]), 'markup'],
+    [say('Swimming at 3:30 # today.', [swim]), 'markup'],
+    [say('Swimming at 3:30, which seems tight.', [swim]), 'view.in_say'],
+  ])('%j is %s', (answer, code) => {
+    expect(run(answer)).toContain(code);
+  });
+
+  it('numbers that are what they say pass', () => {
+    expect(run(say('Nana Jo is 79, and turns 80 on Tuesday.', [person(P.nana)]))).toEqual([]);
+    expect(
+      run(say('Saturday looks dry, a low of 9 and a high of 17, gusts of 30.', [sat])),
+    ).toEqual([]);
+    // Numbers past ninety-nine in words are not read: refused, conservatively.
+    expect(
+      run(say('Paint the back fence is recorded as about a hundred and eighty minutes.', [paint])),
+    ).toEqual(['time.unsupported', 'number.unsupported']);
+  });
+});
+
+describe('Limits on every outcome (I-15)', () => {
+  it('an absence carries the coverage sentences; the fallback’s rows carry theirs', () => {
+    const unhealthy = { calendarsUnhealthy: true, noCalendars: false, gapsUnknown: false };
+    expect(limitsFor([], unhealthy, { absence: true })).toEqual(['calendar_stale']);
+    expect(
+      limitsFor(
+        [],
+        { ...unhealthy, calendarsUnhealthy: false, noCalendars: true },
+        { absence: true },
+      ),
+    ).toEqual(['coverage_unknown']);
+    const f = buildFallback(ledger());
+    expect(limitsFor(f.cites, unhealthy)).toEqual([
+      'gap_limit',
+      'calendar_stale',
+      'forecast_credit',
+    ]);
+  });
+
+  it('a passing answer reports whether it states an absence', () => {
+    const r = validateAnswer({
+      raw: json(say('Nothing is recorded for Sunday.')),
+      ledger: ledger(),
+      now: NOW,
+      timeZone: ZONE,
+    });
+    expect(r.ok && r.absence).toBe(true);
   });
 });

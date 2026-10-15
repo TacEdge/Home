@@ -65,6 +65,12 @@ export const VALIDATOR_CODES = [
   'time.unsupported',
   'number.unsupported',
   'name.unknown',
+  // Added in the Package 3 review (application schema; no migration):
+  // control, format or mixed-script text (rule 0), an absence no covering
+  // read supports, a person or role the cited records do not carry.
+  'text.unsafe',
+  'absence.unsupported',
+  'person.unsupported',
   'phrase.forbidden',
   'conflict.unsupported',
   'availability.claim',

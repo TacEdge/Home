@@ -577,14 +577,13 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
         }
         pushTrace(turn, o.trace);
         if (!o.result.ok) return;
+        // The result, and what it covers for statements of absence (by tool, in the ledger).
         ledger.addResult(
           o.trace.tool as Exclude<TraceEntry['tool'], 'escalate'>,
           o.result.data,
           o.result.refs,
+          u.input,
         );
-        const args = o.trace.args;
-        if (typeof args.from === 'string' && typeof args.to === 'string')
-          ledger.addCovered(args.from, args.to);
         const data = o.result.data as { coverage?: { status?: unknown } };
         if (o.trace.tool === 'get_gaps' && data.coverage?.status === 'unknown')
           coverage.gapsUnknown = true;
