@@ -438,8 +438,8 @@ export async function addPrivateFor(f: KevFixture, adult: Adult, db: Db, admin: 
   // Their responses on whatever conflict and opening they now see.
   const { readConflicts } = await import('@/domain/insights/conflicts');
   const mine = await readConflicts(a, NOW, ZONE, deps);
-  if (mine.all[0])
-    await respondToInsight(a, mine.all[0].key, 'dismissed', 'today', NOW, ZONE, deps);
+  if (!mine.all[0]) throw new Error('the fixture should give them a conflict to respond to');
+  await respondToInsight(a, mine.all[0].key, 'dismissed', 'today', NOW, ZONE, deps);
   const runner = createToolRunner({
     actor: { ...a, via: 'kev' },
     now: NOW,
@@ -453,7 +453,8 @@ export async function addPrivateFor(f: KevFixture, adult: Adult, db: Db, admin: 
       ? (week.result.data as { insights: { key: string; kind: string }[] }).insights
       : [];
   const opening = listed.find((i) => i.kind === 'open_window');
-  if (opening) await respondToInsight(a, opening.key, 'not_useful', 'forward', NOW, ZONE, deps);
+  if (!opening) throw new Error('the fixture should give them an opening to respond to');
+  await respondToInsight(a, opening.key, 'not_useful', 'forward', NOW, ZONE, deps);
   const conversation = await startConversation(a, deps);
   await addMessage(
     a,
