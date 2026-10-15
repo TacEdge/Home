@@ -114,7 +114,7 @@ describe('C6: what an earlier answer replays as', () => {
           },
         ],
         limits: ['forecast_credit'],
-        violations: ['prose.time'],
+        violations: ['lead.unsupported'],
       }),
     ]);
     // Every replayed text labelled (I-7): the facts quote records word for word.

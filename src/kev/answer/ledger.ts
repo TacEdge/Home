@@ -114,18 +114,6 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  * standing: conservative.
  */
 const ONE_OFF_CONFLICT = /:\d{8}T\d{4}Z-\d{8}T\d{4}Z$/;
-/** Keys of recorded text whose words are a record's own (titles, names, labels, notes …). */
-const RECORD_TEXT_KEYS = new Set([
-  'title',
-  'name',
-  'label',
-  'body',
-  'content',
-  'summary',
-  'stage_note',
-  'relationship',
-]);
-
 const isRef = (v: unknown): v is Ref => refSchema.safeParse(v).success;
 const refOf = (v: unknown): Ref | null => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
@@ -219,8 +207,6 @@ export class Ledger {
   readonly #timeZone: string;
   /** The visible people's names by person id (from the bundle and the reads). */
   readonly namesById = new Map<string, string>();
-  /** Every recorded title, name, label, note and context text in the ledger, as sent. */
-  readonly recordTexts = new Set<string>();
   /** The reader's own person id, when a person is linked to them. */
   readerId: string | null = null;
 
@@ -404,24 +390,20 @@ export class Ledger {
     }
   }
 
-  /** Recorded text and people's names, for the prose check (./prose.ts). */
-  #texts(node: unknown, key: string | undefined): void {
+  /** People's names, by person id, from wherever a read carries a person's ref and name. */
+  #names(node: unknown): void {
     if (Array.isArray(node)) {
-      for (const v of node) this.#texts(v, key);
+      for (const v of node) this.#names(v);
       return;
     }
     if (typeof node !== 'object' || node === null) return;
     const o = node as Record<string, unknown>;
-    const t = untrustedOf(o);
-    if (t !== null) {
-      if (key !== undefined && RECORD_TEXT_KEYS.has(key)) this.recordTexts.add(t);
-      return;
-    }
+    if (untrustedOf(o) !== null) return;
     const ref = refOf(o);
     const name = untrustedOf(o.name);
     if (ref?.type === 'person' && name !== null && !this.namesById.has(ref.id))
       this.namesById.set(ref.id, name);
-    for (const [k, v] of Object.entries(o)) this.#texts(v, k);
+    for (const v of Object.values(o)) this.#names(v);
   }
 
   /**
@@ -530,7 +512,7 @@ export class Ledger {
       };
       context = (r) => (r.type === 'gap' ? c : {});
     }
-    this.#texts(data, undefined);
+    this.#names(data);
     this.#walk(data, source, context, undefined, undefined, undefined);
     // Every returned ref is citable, even one the walk did not meet.
     for (const r of refs) if (!this.has(r)) this.#add(r, source, null, 'ref_only', {});
@@ -600,7 +582,7 @@ export class Ledger {
         this.namesById.set(p.ref.id, n);
     }
     if (b.reader && isRef(b.reader.ref)) this.readerId = b.reader.ref.id;
-    this.#texts(bundle, undefined);
+    this.#names(bundle);
     this.#walk(bundle, 'bundle', () => ({}), undefined, undefined, undefined);
     for (const ref of refs) if (!this.has(ref)) this.#add(ref, 'bundle', null, 'ref_only', {});
     if (

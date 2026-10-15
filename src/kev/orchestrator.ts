@@ -216,7 +216,7 @@ type AttemptEnd =
       reason: BudgetRefusal | 'input_cap' | 'tool_loop';
       /** The failed answer's codes, when the budget refused its regeneration (I-1). */
       violations?: Violation[];
-      /** As `invalid`'s: the failed plan's facts, when only its prose failed. */
+      /** As `invalid`'s: the failed plan's facts, when only its lead or view failed. */
       salvage?: RenderedAnswer | null;
     }
   | { kind: 'refused' }
