@@ -47,7 +47,9 @@ const thinking = (index: number, text: string, signature: string) =>
     index,
     content_block: { type: 'thinking', thinking: '', signature: '' },
   }) +
-  (text ? ev('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: text } }) : '') +
+  (text
+    ? ev('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: text } })
+    : '') +
   ev('content_block_delta', { index, delta: { type: 'signature_delta', signature } }) +
   ev('content_block_stop', { index });
 
@@ -68,7 +70,11 @@ beforeAll(async () => {
   f = await buildKevFixture(db, admin.db);
   // Enough of Sam's tasks that get_tasks is cut to fit before it is sent.
   for (let i = 0; i < 60; i++)
-    await createTask(f.h.sam, { title: `Synthetic wire task ${i} ${'z'.repeat(120)}`, visibility: 'private' }, { db });
+    await createTask(
+      f.h.sam,
+      { title: `Synthetic wire task ${i} ${'z'.repeat(120)}`, visibility: 'private' },
+      { db },
+    );
   await createTickingClock(admin);
   await clockTo(admin, '2034-03-01T00:00:00Z');
   stub = await startStub();
@@ -79,7 +85,9 @@ afterAll(async () => {
   await stub.close();
   await clockedHandle.end();
   await dropTestClock(admin);
-  await admin.db.execute(sql`update task set archived_at = now() where title like 'Synthetic wire task %'`);
+  await admin.db.execute(
+    sql`update task set archived_at = now() where title like 'Synthetic wire task %'`,
+  );
   await clearKevFixture(db, admin.db);
   await close();
   await admin.close();
@@ -119,7 +127,12 @@ describe('N15: the grow-only request, on the wire', () => {
     );
     const events: KevEvent[] = [];
     for await (const e of handle(
-      { actor: f.kev.sam, channel: 'web', input: { text: 'What have we got this weekend?' }, now: NOW },
+      {
+        actor: f.kev.sam,
+        channel: 'web',
+        input: { text: 'What have we got this weekend?' },
+        now: NOW,
+      },
       { db: clocked, provider },
     ))
       events.push(e);
@@ -145,31 +158,59 @@ describe('N15: the grow-only request, on the wire', () => {
       const pm = prev.messages as unknown[];
       const nm = next.messages as unknown[];
       expect(nm.length).toBeGreaterThan(pm.length);
-      for (let k = 0; k < pm.length; k++) expect(bytes(nm[k]), `request ${i}, message ${k}`).toBe(bytes(pm[k]));
+      for (let k = 0; k < pm.length; k++)
+        expect(bytes(nm[k]), `request ${i}, message ${k}`).toBe(bytes(pm[k]));
       // And as raw bytes: the earlier messages' serialisation is a prefix of the later one's.
       const pText = bytes(pm);
       expect(bytes(nm).startsWith(pText.slice(0, -1))).toBe(true);
     }
-    expect(bodies.map((b) => (b.tool_choice as { type: string }).type)).toEqual(['auto', 'auto', 'auto', 'none']);
+    expect(bodies.map((b) => (b.tool_choice as { type: string }).type)).toEqual([
+      'auto',
+      'auto',
+      'auto',
+      'none',
+    ]);
 
     // Thinking blocks, the empty one included, replayed verbatim with their signatures.
-    const last = bodies[3]!.messages as { role: string; content: { type: string; thinking?: string; signature?: string }[] }[];
+    const last = bodies[3]!.messages as {
+      role: string;
+      content: { type: string; thinking?: string; signature?: string }[];
+    }[];
     const assistant = last.filter((m) => m.role === 'assistant');
-    expect(assistant[0]!.content[0]).toEqual({ type: 'thinking', thinking: '', signature: 'sig-empty-1' });
-    expect(assistant[1]!.content[0]).toEqual({ type: 'thinking', thinking: 'Synthetic thinking.', signature: 'sig-2' });
-    expect(assistant[2]!.content[0]).toEqual({ type: 'thinking', thinking: '', signature: 'sig-empty-3' });
+    expect(assistant[0]!.content[0]).toEqual({
+      type: 'thinking',
+      thinking: '',
+      signature: 'sig-empty-1',
+    });
+    expect(assistant[1]!.content[0]).toEqual({
+      type: 'thinking',
+      thinking: 'Synthetic thinking.',
+      signature: 'sig-2',
+    });
+    expect(assistant[2]!.content[0]).toEqual({
+      type: 'thinking',
+      thinking: '',
+      signature: 'sig-empty-3',
+    });
 
     // The get_tasks result was cut before it was first sent, and says so.
     const results = last
       .filter((m) => m.role === 'user')
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .filter((b) => b.type === 'tool_result') as unknown as { content: string }[];
-    const tasks = JSON.parse(results[1]!.content) as { truncated: boolean; count: number; tasks: unknown[] };
+    const tasks = JSON.parse(results[1]!.content) as {
+      truncated: boolean;
+      count: number;
+      tasks: unknown[];
+    };
     expect(tasks.truncated).toBe(true);
     expect(tasks.tasks.length).toBeLessThan(tasks.count);
 
     // The regeneration is appended as a labelled user-turn text block, last.
-    const note = last.at(-1) as unknown as { role: string; content: { type: string; text: string }[] };
+    const note = last.at(-1) as unknown as {
+      role: string;
+      content: { type: string; text: string }[];
+    };
     expect(note.role).toBe('user');
     expect(note.content.at(-1)!.text).toContain('time.unsupported in the say sentence');
     expect(note.content.at(-1)!.text).not.toContain('at 4');
