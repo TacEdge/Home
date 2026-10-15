@@ -800,7 +800,7 @@ Recorded in Package 1b (§2.2). Sources: the documentary research of 2026-10-14 
 |---|---|---|---|---|
 | `get_today` | Today, as the reader's Today shows it | `{}` | The date; the headline's template sentence; each person's items (ref, title, start, end, people and roles); To do; listed insights (key, kind, rule, template text, refs) | `loadAgenda` and the Today builder (moved, §6.5), `readInsights` |
 | `get_agenda` | What is recorded over a range | `from`, `to` (dates, ≤ 31 days); `person_ids?` (≤ 6) | Per day: items (ref, title, start, end or all-day, kind, people with `attending` or `responsible`), birthdays, scheduled and due tasks | `loadAgenda` + the agenda engine |
-| `get_conflicts` | Overlaps the engine found | `from`, `to` (≤ 90 days) | Each: key, rule (`conflict.overlap` or `conflict.responsible`), the person, both commitments (ref, title, start, end), the overlap's times, whether the reader responded | `readConflicts` |
+| `get_conflicts` | Overlaps the engine found | `from`, `to` (≤ 90 days; the end no later than today + 89, §6.6) | Each: key, rule (`conflict.overlap` or `conflict.responsible`), the person, both commitments (ref, title, start, end), the overlap's times, whether the reader responded | `readConflicts` |
 | `get_insights` | What HOME lists, as on screen | `surface`: `today` \| `forward_week` | Listed insights without the reader's responses: key, kind, rule, `when`, template text, refs | `readInsights`, `forwardInsights` |
 | `get_tasks` | Tasks as recorded | `status?` (`open` default \| `done`); `assignee?` (`me` \| person id); `project_id?`; `due_before?` | Each: ref, title, estimate, needs, due date, scheduled time, assignee, project | `listTasks` |
 | `get_projects` | Projects, or one project in full | `project_id?`; `status?` | A list (ref, title, status, open-task count) or one project (summary, tasks, up to 10 notes, each ≤ 500 characters) | `listProjects`, `getProject`, `listTasks`, `listNotes` |
@@ -809,7 +809,7 @@ Recorded in Package 1b (§2.2). Sources: the documentary research of 2026-10-14 
 | `get_calendar_health` | Whether the reader's calendars are current | `{}` | Visible calendars: ref, label, last success, `healthy` \| `stale` \| `failed` \| `never` | `listCalendars` |
 | `get_weather` | The cached forecast, in M7's words | `from`, `to` (dates) | `configured`; fetch time and age (`fresh` \| `older` \| `unusable` \| `none`); per covered day: M7's phrase, low and high, strongest gust, band per part of day; the credit | `readForecast`, the weather engine |
 | `get_gaps` | Where nothing is recorded that the reader can see | `from`, `to` (≤ 7 days); `scope`: `household` \| person id; `min_minutes` (≥ 60, default 60); `needs?` (`dry_weather`, `daylight`) | Coverage (`recorded` \| `partial` \| `unknown`, calendars named); gaps (key, date, from, to, the commitments either side, daylight, the forecast band when known); `limit: true` | `readGaps`, `daylightOver`, `readOpeningWeather` |
-| `search` | Find a record by its title | `query` (2–60 characters) | Up to 20: ref, type, title | `searchTitles` (new, D10) |
+| `search` | Find a record by its title | `query` (2–60 characters once trimmed, §6.6) | Up to 20: ref, type, title; how many were returned and whether more match (§6.6) | `searchTitles` (new, D10) |
 | `escalate` | Hand the turn to deep (fast only) | `reason`: `multi_step_planning` \| `many_constraints` \| `long_range` | Ends the attempt | — |
 
 **Notes:**
@@ -865,11 +865,15 @@ Recorded in Package 1b (§2.2). Sources: the documentary research of 2026-10-14 
 - **`get_tasks`** with `assignee: "me"` and no person linked to the reader's login returns no tasks and `unlinked: true`, so code can say "HOME doesn't know which person you are yet." (§3.1) rather than a closed error code.
 - **`get_weather`** returns each asked-for date the forecast covers (M7's day phrase, the low and high and strongest gust over the phrase's hours, and each covered part's band: the weather engine's new `dayOutlook`), the other dates as `uncovered`, the freshness and fetch time, and the credit as the provider's name (`Open-Meteo`), never a URL.
 - **`get_gaps`**: `needs: daylight` drops a stretch whose daylight is unknown (no location), as `dry_weather` drops one without a usable band; the band is the one an opening would cite for the same stretch (M7's `forecastFor`: the stretch's own hours today and tomorrow, the day's planning hours for days 2–6). Coverage is reported as `recorded`, `partial` or `unknown` with each calendar's health.
-- **`get_conflicts`** reads the reader's conflicts as every surface does (90 days from today, so keys and responses match) and returns those with an overlap inside the range, each at its first one there; days before today hold none.
-- **Ranges.** Every date input must be within today − 7 … today + 90 (`out_of_range`); a range whose end is before its start is `bad_input`. `get_weather` has no span limit of its own; its lists are bounded like every other.
+- **`get_conflicts`** reads the reader's conflicts as every surface does (the 90 days today … today + 89, so keys and responses match) and returns those with an overlap inside the range, each at its first one there. Its range may end no later than today + 89, the last day that read covers: an end of today + 90 or later is `out_of_range`, never a partial answer (corrected in review; ADR 0012 §44). It may start up to 7 days back like every range, but the engine looks from today, so days before today hold none: such a range is answered, with nothing for those days, and the tool's description says so.
+- **Ranges.** Every date input must be within today − 7 … today + 90 (`out_of_range`), except `get_conflicts`' end (today + 89, above); a range whose end is before its start is `bad_input`. `get_weather` has no span limit of its own; its lists are bounded like every other.
+- **`get_tasks` `due_before`** is deliberately bounded for M8 (owner, 2026-10-15): today − 7 … today + 90 like every date input, so "due before" a date beyond Forward's horizon is `out_of_range`. Widening it is a later decision.
 - **Size.** A result over 12 KiB is presented again with fewer items until it fits, with `truncated: true` and the full count, so 50 items is a ceiling, not a promise: a list of fuller items (tasks with an assignee and a project, say) may return fewer.
-- **Refs.** An occurrence's `at` is its start with the home offset, an all-day one's the start of its home day. Conflict, insight and gap refs carry their keys; a forecast day's ref is `forecast:{date}`. A tool's refs are unique and complete (the ledger's entries); its trace entry keeps the first 50.
-- **`search`** orders projects, tasks, events, then people, each by lower-cased title and id; an event's changed occurrence is found through its series.
+- **Refs.** An occurrence's `at` is its start with the home offset, an all-day one's the start of its home day. Conflict, insight and gap refs carry their keys; a forecast day's ref is `forecast:{date}`. A tool's refs are unique and complete (the ledger's entries); its trace entry keeps the first 50, in order, and carries `refsTruncated: true` when there were more (absent otherwise; content v2's trace schema accepts it as an application schema change, no migration).
+- **`search`** orders projects, tasks, events, then people, each by lower-cased title and id; an event's changed occurrence is found through its series. The query is trimmed before it is checked: whitespace alone, or fewer than 2 characters once trimmed, is `bad_input`, and the trace records the trimmed length. The domain stops at 20 and never counts past them, so the result carries `returned` (how many are listed, at most 20) and `truncated` (more match), never a total; every other list's `count` is its full count before any cut.
+- **Who and where.** The tool runner and the bundle share one guard (`assertKevContext`): the actor must be a user via Kev (never the system, the UI or sync, and never an identity from model input), and the zone must be `HOME_TIMEZONE`, the zone the shared agenda loader reads with, so nothing is read in one zone and presented in another. Anything else, and a bundle that does not fit even at its smallest cut, fails closed with a `ContextRefusal` carrying only a closed code (`not_kev_actor`, `zone_mismatch`, `bundle_too_large`), before any read.
+- **The bundle's people** carry `people_count` (how many people the reader can see, before the cut) and `people_truncated`, always present, so the model can tell a full list from a cut one. The other adult's private people never move the reader's count (S1).
+- **Fields beyond §6.2's minimised outputs**, each code-derived or already on the reader's screens, none a new kind of data: `get_conflicts` each commitment's `role` and the conflict's `when`; `get_projects` `target_date` (list and one) and `notes_count` (one); `get_tasks` each task's `status` and the result's `unlinked`; `get_insights` `shown_on`; `get_weather` `uncovered`; `get_today` `state`, `qualified`, `late`, `also_today`, `evening` and `to_sort`; `get_people` each regular-week entry's `time` and `cadence`; `get_gaps` `min_minutes` capped at 720; `search` `returned`; the bundle's `people_count` and `people_truncated`; the trace's `refsTruncated`.
 - **`escalate`** is in the registry with the read class (T23) as a control entry: its input schema and description are built, it reads nothing, and the runner never runs it; Package 3's orchestrator handles it.
 
 ---
@@ -923,7 +927,7 @@ The **volatile bundle** (after the cache breakpoint and after the conversation w
 
 - the weekday, date, time and zone;
 - the reader's first name and person id;
-- people the reader can see: id, first name, role, relationship (as `untrusted_text`), age, in household;
+- people the reader can see: id, first name, role, relationship (as `untrusted_text`), age, in household; with how many there are and whether the list is cut (§6.6);
 - the reader's Today: the headline's template sentence and today's items (as `get_today` returns them, without insights);
 - freshness: how many visible calendars are healthy, stale, failed or never refreshed, and the forecast's fetch time or none;
 - the reader's To sort count;
@@ -968,7 +972,8 @@ type KevContentV2 = {
 type TraceEntry = {
   tool: ToolName; ok: boolean; code?: ToolErrorCode;
   args: Record<string, string | number | boolean>;   // dates, scopes, ids, counts; never free text
-  resultCount: number; refs: Ref[];                  // ≤ 50
+  resultCount: number; refs: Ref[];                  // ≤ 50: the first 50
+  refsTruncated?: true;                              // only when the result had more than 50
   attemptId: string;
 };
 type CallUsage = {
