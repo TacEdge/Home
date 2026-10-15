@@ -664,10 +664,17 @@ describe('T15–T21: refusals, bounds, labelling, minimisation, failure, trace, 
       ['get_tasks', { project_id: hiddenProject }],
       ['get_context', { subject_type: 'project', subject_id: hiddenProject }],
     ] as const) {
-      expect((await call(f.kev.sam, name, input)).result, name).toEqual({
-        ok: false,
-        code: 'not_found',
+      const hidden = await call(f.kev.sam, name, input);
+      expect(hidden.result, name).toEqual({ ok: false, code: 'not_found' });
+      // Byte for byte what a project that does not exist gives.
+      const miss = await call(f.kev.sam, name, {
+        ...input,
+        ...('project_id' in input ? { project_id: missing } : { subject_id: missing }),
       });
+      expect(miss.result, name).toEqual({ ok: false, code: 'not_found' });
+      expect(hidden.content, name).toBe(miss.content);
+      expect(hidden.trace.resultCount, name).toBe(miss.trace.resultCount);
+      expect(hidden.trace.refs, name).toEqual(miss.trace.refs);
       expect((await call(f.kev.alex, name, input)).result.ok, name).toBe(true);
     }
   });

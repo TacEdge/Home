@@ -71,7 +71,12 @@ const output = z
   })
   .strict();
 
-type Read = { inputs: AgendaInputs; people: AgendaInputs['people']; today: string };
+type Read = {
+  people: AgendaInputs['people'];
+  /** Each person's regular week, worked out once in the read (`present` may run again to fit). */
+  weeks: ReadonlyMap<string, RegularWeekEntry[]>;
+  today: string;
+};
 
 export const getPeople: ReadTool<Input, Read, z.output<typeof output>> = {
   name: 'get_people',
@@ -86,26 +91,30 @@ export const getPeople: ReadTool<Input, Read, z.output<typeof output>> = {
     const inputs = await readAgendaInputs(ctx.actor, ctx.deps);
     const people = i.person_id ? inputs.people.filter((p) => p.id === i.person_id) : inputs.people;
     if (i.person_id && people.length === 0) throw new ToolRefusal('not_found');
-    return { inputs, people, today: todayOf(ctx) };
+    const today = todayOf(ctx);
+    const weeks = new Map(
+      people
+        .slice(0, MAX_ITEMS)
+        .map((p) => [p.id, regularWeek(inputs.events, p.id, { today, timeZone: ctx.timeZone })]),
+    );
+    return { people, weeks, today };
   },
-  present: ({ inputs, people, today }, limit, ctx) => {
+  present: ({ people, weeks, today }, limit) => {
     const refs: Ref[] = [];
     const out = people.slice(0, limit).map((p) => {
       const ref = personRef(p.id);
       refs.push(ref);
-      const week = regularWeek(inputs.events, p.id, { today, timeZone: ctx.timeZone })
-        .slice(0, limit)
-        .map((e: RegularWeekEntry) => {
-          const eref: Ref = { type: 'event', id: e.eventId };
-          refs.push(eref);
-          return {
-            weekday: WEEKDAYS[e.weekday]!,
-            time: e.allDay ? null : e.time,
-            cadence: e.cadence,
-            ref: eref,
-            title: untrusted(e.title, TEXT_CAP.title),
-          };
-        });
+      const week = (weeks.get(p.id) ?? []).slice(0, limit).map((e: RegularWeekEntry) => {
+        const eref: Ref = { type: 'event', id: e.eventId };
+        refs.push(eref);
+        return {
+          weekday: WEEKDAYS[e.weekday]!,
+          time: e.allDay ? null : e.time,
+          cadence: e.cadence,
+          ref: eref,
+          title: untrusted(e.title, TEXT_CAP.title),
+        };
+      });
       const next = nextBirthday(p.dateOfBirth, today);
       return {
         ref,
