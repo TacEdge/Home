@@ -6,7 +6,9 @@ import { Ledger } from '@/kev/answer/ledger';
 import { codesOf, validateAnswer, type ValidateResult } from '@/kev/answer/validate';
 import { getAgenda } from '@/kev/tools/get-agenda';
 import { getConflicts } from '@/kev/tools/get-conflicts';
+import { getGaps } from '@/kev/tools/get-gaps';
 import { getToday } from '@/kev/tools/get-today';
+import { getTasks } from '@/kev/tools/get-tasks';
 import { getWeather } from '@/kev/tools/get-weather';
 import { search } from '@/kev/tools/search';
 import type { Ref } from '@/kev/tools/types';
@@ -14,6 +16,7 @@ import {
   bundle,
   bundleRefs,
   busyLedger,
+  calendar,
   conflict,
   fixtureLedger,
   foot,
@@ -870,6 +873,95 @@ describe('typed interpretations: support checked by code (owner decision 8)', ()
         ),
       ),
     ).toEqual(['view.unsupported']);
+  });
+
+  it('a stretch shorter than the estimate is refused (Sunday 12:00–13:00 against three hours)', () => {
+    const short: Ref = { type: 'gap', id: 'gap:household:2026-10-18:1200' };
+    const l = weekend();
+    l.addResult(
+      'get_gaps',
+      getGaps.output.parse({
+        from: SUN,
+        to: SUN,
+        scope: 'household',
+        min_minutes: 60,
+        needs: [],
+        coverage: {
+          status: 'recorded',
+          calendars: [
+            {
+              ref: calendar,
+              label: u('Family'),
+              last_success: '2026-10-14T06:00:00+13:00',
+              status: 'healthy',
+            },
+          ],
+        },
+        gaps: [
+          {
+            ref: short,
+            key: 'gap:household:2026-10-18:1200',
+            date: SUN,
+            from: '2026-10-18T12:00:00+13:00',
+            to: '2026-10-18T13:00:00+13:00',
+            before: null,
+            after: null,
+            daylight: { from: '2026-10-18T06:30:00+13:00', to: '2026-10-18T19:30:00+13:00' },
+            forecast_band: 'showers',
+          },
+        ],
+        limit: true,
+        count: 1,
+        truncated: false,
+      }),
+      [calendar, short],
+      { from: SUN, to: SUN, scope: 'household' },
+    );
+    expect(
+      codes(
+        check(
+          plan(
+            'when',
+            [rec(short), rec(paint, ['estimate'])],
+            v('suggestion', 'stretch_estimate', [0, 1]),
+          ),
+          l,
+        ),
+      ),
+    ).toEqual(['view.unsupported']);
+  });
+
+  it('a nudge needs an open task shown with its assignee', () => {
+    const loose: Ref = { type: 'task', id: id(70) };
+    const l = weekend();
+    l.addResult(
+      'get_tasks',
+      getTasks.output.parse({
+        tasks: [
+          {
+            ref: loose,
+            title: u('Sort the shed'),
+            status: 'open',
+            estimate_minutes: null,
+            needs: [],
+            due: null,
+            scheduled: null,
+            assignee: null,
+            project: null,
+          },
+        ],
+        count: 1,
+        truncated: false,
+      }),
+      [loose],
+      { status: 'open' },
+    );
+    const nudge = (r: Ref, show: string[]) =>
+      check(plan('here_you_go', [rec(r, show)], v('suggestion', 'nudge', [0])), l);
+    expect(texts(nudge(paint, ['status', 'assignee'])).at(-1)).toBe('Might be worth a nudge.');
+    // The assignee not shown, or none recorded: nothing the adult can see supports it.
+    expect(codes(nudge(paint, ['status']))).toEqual(['view.unsupported']);
+    expect(codes(nudge(loose, ['status']))).toEqual(['view.unsupported']);
   });
 
   it('a phrase of another type, or a phrase that is not HOME’s, is not a plan', () => {

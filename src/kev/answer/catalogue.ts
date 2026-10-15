@@ -389,6 +389,7 @@ export function supports(
         (a) =>
           a.entry!.shape === 'task' &&
           shows(a, 'status') &&
+          shows(a, 'assignee') &&
           recOf(a)!.status === 'open' &&
           recOf(a)!.assignee !== null &&
           recOf(a)!.assignee !== undefined,
