@@ -189,7 +189,17 @@ export async function recordUserMessage(
     };
     const [row] = await tx
       .insert(message)
-      .values({ conversationId: conv.id, role: 'user', channel: actor.channel, content })
+      .values({
+        conversationId: conv.id,
+        role: 'user',
+        channel: actor.channel,
+        content,
+        // The database's clock, written as now() rather than left to the
+        // column default (as a reservation's is): the same instant in
+        // production, and one clock with every comparison the one-turn
+        // guard, the window and expiry make (a test can move it).
+        createdAt: sql`now()`,
+      })
       .returning();
     if (!row) throw new Error('message insert returned no row');
     await tx
@@ -233,6 +243,7 @@ export async function recordKevMessage(
         content: data.content,
         tier: data.tier,
         model: data.model,
+        createdAt: sql`now()`,
       })
       .returning();
     if (!row) throw new Error('message insert returned no row');

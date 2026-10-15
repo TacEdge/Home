@@ -117,7 +117,8 @@ export type KevEvent =
   | { type: 'error'; code: KevTurnErrorCode; message: string }
   | {
       type: 'done';
-      outcome: KevOutcome | 'none';
+      /** `error`: the error state; nothing of Kev's is stored (§9.9). */
+      outcome: KevOutcome;
       /** The code's sentences for what the answer cites (§8.4). */
       limits: LimitCode[];
       escalated: boolean;
@@ -250,13 +251,13 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     emit({ type: 'error', code, message: ERROR_TEXT[code] });
     emit({
       type: 'done',
-      outcome: 'none',
+      outcome: 'error',
       limits: [],
       escalated: false,
       keepable: KEEPABLE_ERRORS.has(code),
     });
   };
-  const turnLog: Record<string, unknown> = { outcome: 'none' };
+  const turnLog: Record<string, unknown> = { outcome: 'error' };
   try {
     // 1. Guard. Test seams never on a deployed process.
     if (SEAMS.some((k) => deps[k] !== undefined) && deployed(deploymentEnv()))
@@ -783,12 +784,14 @@ async function finish(
   turnLog.outcome = content.outcome;
   if (errorCode) turnLog.errorCode = errorCode;
 
-  // A Kev message names its tier and model (message_author_check): a turn in
-  // which no model call was made stores none (§7.6, C13). One that ended in
-  // the error state after a call stores its codes, usage and trace, so the
-  // one-turn guard is released and the trace is the adult's to see.
+  // What is stored follows §9.9's table: an answer, a decline, a refusal and
+  // the safe fallback store Kev's message beside the person's; the error
+  // states (the cap reached, the provider unreachable, overloaded or timing
+  // out, a bad response) store the person's message only (C2, C13), their
+  // usage already settled in `kev_usage`. Content v2's `error` outcome is
+  // therefore never written in M8 Package 3.
   let kevMessageId: string | undefined;
-  if (turn.calls.length > 0) {
+  if (!errorCode) {
     try {
       const row = await recordKevMessage(
         actor,
