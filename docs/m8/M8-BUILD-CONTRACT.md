@@ -1160,7 +1160,7 @@ What leaves HOME is §5.5's table, per turn, and nothing else. Two rules decide 
 
 ADR 0005 §39 left open how Kev records its own transcript and usage, "an exception like `captureVerbatim`, or recording as the person", and forbade a silent relaxation. M8 decides: **a named, narrow path, acting as the requesting adult.**
 
-- **Where:** `src/domain/kev-bookkeeping/`, six functions acting as the adult and one system function:
+- **Where:** `src/domain/kev-bookkeeping/`, six functions acting as the adult and one system function (*a seventh adult function added in the Package 3 review, owner-approved 2026-10-15, I-5: `recordTurnEnd(actor, {outcome})`, one structural `kev.turn_end` audit row private to the adult, no message, so a turn that stores no Kev message releases the one-turn guard at once*):
   - `recordUserMessage(actor, text, focus?)`: the person's words, verbatim, before any model call, under the conversation row lock (one turn at a time);
   - `recordKevMessage(actor, content, tier, model)`;
   - `reserveAttempt(actor, attempt)`: the attempt's reservation, under the budget lock (§13.6);
@@ -1607,7 +1607,7 @@ The reader's bundle, every tool's output, the ledger, the trace and the rendered
 
 ### 15.5 Kept
 
-Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privacy suite (with its approved-writes list extended by exactly the seven bookkeeping functions) and the sensitive-context guard (extended to `src/kev`).
+Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privacy suite (with its approved-writes list extended by exactly the seven bookkeeping functions; eight with `recordTurnEnd`, Package 3 review) and the sensitive-context guard (extended to `src/kev`).
 
 ### 15.6 Contract test matrix
 
@@ -1770,8 +1770,8 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 | S1 | §15.2's records added for the other adult | The reader's bundle, tool outputs, ledger, trace and Kev page byte-identical |
 | S2 | The same records | The other adult's own outputs change |
 | S3 | Sensitive household and private context | Absent from every bundle and tool output; `get_context` has no sensitive parameter; the static guard covers `src/kev` |
-| S4 | A `via: 'kev'` actor against every exported write function | Refused (`kev_cannot_write`) except the six bookkeeping functions that take the adult, `captureVerbatim` and `createProposal`; `purgeExpiredMessages` refuses every actor but the system's; the completeness check lists exactly these |
-| S5 | The six adult bookkeeping functions with the system actor / a `via: 'ui'` actor / Alex's actor on Sam's conversation / Production with the gate closed | Refused each time, before any write |
+| S4 | A `via: 'kev'` actor against every exported write function | Refused (`kev_cannot_write`) except the six bookkeeping functions that take the adult, `captureVerbatim` and `createProposal`; `purgeExpiredMessages` refuses every actor but the system's; the completeness check lists exactly these *Package 3 review (I-5):* `recordTurnEnd` is the seventh adult function, listed and tested alike. |
+| S5 | The six adult bookkeeping functions with the system actor / a `via: 'ui'` actor / Alex's actor on Sam's conversation / Production with the gate closed | Refused each time, before any write *Package 3 review (I-5):* `recordTurnEnd` is the seventh adult function, listed and tested alike. |
 | S6 | A scripted model that follows an instruction planted in an event title (asks for an unregistered tool, then claims "I've deleted the tasks") | The tool call refused; `authority.claim`; the fallback; no record changed |
 | S7 | A tool name not in the registry | Refused and counted; the trace has the code |
 | S8 | The turn route: cross-site / signed out / the stranger / a 9 KiB body / 2,001 characters | 403 / 401 / refused / 413 / refused before storing |

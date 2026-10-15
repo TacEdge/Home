@@ -37,13 +37,14 @@ import {
 
 // Kev's bookkeeping path (M8 contract §7.2, §9.6, §9.7, §13.6; D5; ADR 0012
 // §25, §35, §42). The one narrow, named exception to `kev_cannot_write`:
-// six functions that record Kev's own turn, acting as the requesting adult
+// seven functions that record Kev's own turn, acting as the requesting adult
+// (the seventh, recordTurnEnd, from the Package 3 review, I-5)
 // (a user actor `via: 'kev'` whose `userId` owns the conversation), and one
 // system function, the daily retention cleanup. Nothing here writes a family
 // record: only the adult's own conversation and messages, their usage and
 // the household's budget reservations.
 //
-// - Who: the six refuse the system actor (`not_a_user`) and any actor not
+// - Who: the seven refuse the system actor (`not_a_user`) and any actor not
 //   `via: 'kev'` (`kev_bookkeeping_only`); the conversation is always the
 //   actor's own, resolved from `actor.userId`, never named by the caller, so
 //   another adult's is unreachable. `purgeExpiredMessages` refuses every
@@ -77,7 +78,7 @@ function assertGate(): void {
   assertFamilyWritesOpen();
 }
 
-/** The six adult functions: the gate, then a user actor via Kev. */
+/** The seven adult functions: the gate, then a user actor via Kev. */
 function assertKevAsAdult(actor: UserActor): void {
   assertGate();
   if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');

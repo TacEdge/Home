@@ -425,7 +425,8 @@ describe('audit metadata carries no user-written content', () => {
 
 type Call = (a: UserActor) => Promise<unknown>;
 // Kev's approved writes (M8 contract §9.7, S4): capture and propose (M2),
-// and the six bookkeeping functions that act as the adult. Exactly these.
+// and the seven bookkeeping functions that act as the adult (the seventh,
+// recordTurnEnd, from the Package 3 review, I-5). Exactly these.
 const KEV_MAY = new Set([
   'captures.captureVerbatim',
   'proposals.createProposal',
@@ -435,6 +436,7 @@ const KEV_MAY = new Set([
   'kevBookkeeping.settleAttempt',
   'kevBookkeeping.purgeExpired',
   'kevBookkeeping.clearConversation',
+  'kevBookkeeping.recordTurnEnd',
 ]);
 /** The audit events the bookkeeping path may write (structural, the adult's own). */
 const BOOKKEEPING_EVENTS = new Set([
@@ -445,6 +447,7 @@ const BOOKKEEPING_EVENTS = new Set([
   'kev_budget.late_settle',
   'conversation.purge',
   'conversation.clear',
+  'kev.turn_end',
 ]);
 // The system's one write: the daily retention cleanup, which only deletes
 // expired messages and so does not depend on the real-data gate.
@@ -669,6 +672,13 @@ function writeCalls(own: Adult): Record<string, Call> {
     'kevBookkeeping.clearConversation': (a) => kevBookkeeping.clearConversation(a, d),
     'kevBookkeeping.recordUserMessage': (a) =>
       kevBookkeeping.recordUserMessage(a, { text: 'x' }, d),
+    // Via Kev, on the adult's own conversation (a turn that stored no Kev message).
+    'kevBookkeeping.recordTurnEnd': (a) =>
+      a.via === 'kev'
+        ? kevBookkeeping
+            .recordUserMessage(a, { text: 'x' }, d)
+            .then(() => kevBookkeeping.recordTurnEnd(a, { outcome: 'timeout' }, d))
+        : kevBookkeeping.recordTurnEnd(a, { outcome: 'timeout' }, d),
     'kevBookkeeping.purgeExpiredMessages': (a) => kevBookkeeping.purgeExpiredMessages(a, d),
   };
 }
