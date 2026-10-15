@@ -56,7 +56,7 @@ describe.each(ADULTS)('%s’s default export', (a) => {
   it('is a valid file of the current version', () => {
     expect(exportSchema.parse(JSON.parse(text(e)))).toBeTruthy();
     expect(e.format).toBe('home-export');
-    expect(e.version).toBe(2);
+    expect(e.version).toBe(3);
     expect(e.timeZone).toBe(env.HOME_TIMEZONE);
     expect(e.includesSensitive).toBe(false);
     expect(Object.keys(e.records)).toEqual(Object.keys(EXPORT_TYPES));
@@ -237,7 +237,7 @@ describe('scripts/check-export.mts (DEPLOY.md §E item 9)', () => {
     writeFileSync(file, JSON.stringify(e));
     const r = spawnSync('node', ['scripts/check-export.mts', file], { encoding: 'utf8' });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('valid home-export v2');
+    expect(r.stdout).toContain('valid home-export v3');
     expect(r.stdout).toContain(`people: ${e.records.people.length}`);
     expect(r.stdout + r.stderr).not.toContain(CANARY_MARK.sam);
   });

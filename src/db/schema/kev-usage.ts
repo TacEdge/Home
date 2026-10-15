@@ -36,9 +36,11 @@ export const kevUsage = pgTable(
     cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
     costUsdMicros: bigint('cost_usd_micros', { mode: 'bigint' }).notNull(),
     escalated: boolean('escalated').notNull().default(false),
-    // `attempt_id` (uuid, nullable) is added by migration 0009 (M8 Package
-    // 1a) and defined here by Package 1b, once 0009 has run in Production and
-    // Preview (migration-first; tests/unit/deferred-columns.test.ts).
+    // The Kev attempt this call belonged to (migration 0009, M8 Package 1a;
+    // defined by Package 1b once 0009 had run in Production and Preview).
+    // Every row M8 writes carries it, so an attempt's reservation and its
+    // per-call usage reconcile (contract §13.6). Null on rows written before.
+    attemptId: uuid('attempt_id'),
   },
   (t) => [
     check('kev_usage_tier_check', oneOf(t.tier, KEV_TIERS)),

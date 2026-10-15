@@ -10,6 +10,7 @@ import {
   conversation,
   event,
   insightResponse,
+  kevBudgetReservation,
   kevUsage,
   note,
   person,
@@ -87,6 +88,10 @@ export const auditSubjects: Record<string, AuditSubject> = register(
   { table: conversation, visible: ownedBy(conversation.userId) },
   { table: insightResponse, visible: ownedBy(insightResponse.userId) },
   { table: kevUsage, visible: ownedBy(kevUsage.userId) },
+  // M8 (Package 1b): an attempt's reservation and settlement rows
+  // (`kev_budget.reserve`, `kev_usage.record`, `kev_budget.late_settle`) are
+  // its adult's alone, like each Kev run; only the cap is the household's.
+  { table: kevBudgetReservation, visible: ownedBy(kevBudgetReservation.userId) },
 );
 
 /** The write-time snapshot: household, or private to its recorded owner. */

@@ -73,11 +73,11 @@ describe('export completeness', () => {
     }
   });
 
-  it('the current schema (version 2) refuses unknown fields, so a file says exactly what it holds', () => {
+  it('the current schema (version 3) refuses unknown fields, so a file says exactly what it holds', () => {
     const empty = Object.fromEntries(types.map((t) => [t, []]));
     const base = {
       format: 'home-export',
-      version: 2,
+      version: 3,
       exportedAt: '2026-10-14T18:03:00.000Z',
       timeZone: 'Pacific/Auckland',
       exportedBy: { personId: null },
@@ -86,6 +86,7 @@ describe('export completeness', () => {
     };
     expect(exportSchema.safeParse(base).success).toBe(true);
     expect(exportSchema.safeParse({ ...base, version: 1 }).success).toBe(false);
+    expect(exportSchema.safeParse({ ...base, version: 2 }).success).toBe(false);
     expect(
       exportSchema.safeParse({ ...base, records: { ...empty, people: [{ id: 'x', secret: 1 }] } })
         .success,

@@ -11,7 +11,7 @@ import nextTs from 'eslint-config-next/typescript';
 //   db → lib
 //   ui → lib (types only)
 //   lib → nothing internal
-// Nothing imports app. Only kev/providers may import an LLM SDK.
+// Nothing imports app. Only src/kev/providers/anthropic.ts may import an LLM SDK.
 const layers = ['app', 'ui', 'domain', 'kev', 'integrations', 'trust', 'db', 'lib'];
 const allowed = {
   app: ['domain', 'kev', 'trust', 'ui', 'lib'],
@@ -52,22 +52,28 @@ const forbidFor = (layer) =>
       };
     });
 
-// Only the LLM provider adapter (src/kev/providers/*) may import an LLM SDK.
-const llmSdkPaths = [
-  { name: '@anthropic-ai/sdk', message: 'Only src/kev/providers/* may import an LLM SDK.' },
-];
+// Only the Anthropic adapter (src/kev/providers/anthropic.ts) may import an
+// LLM SDK, its subpaths included (M8 contract §4.3, matrix row N1;
+// tests/unit/kev-sdk-import.test.ts holds the rule and the source tree to it).
+const SDK_ADAPTER = 'src/kev/providers/anthropic.ts';
+const llmSdkMessage = `Only ${SDK_ADAPTER} may import an LLM SDK.`;
+const llmSdkPaths = [{ name: '@anthropic-ai/sdk', message: llmSdkMessage }];
+const llmSdkPatterns = [{ group: ['@anthropic-ai/sdk/*'], message: llmSdkMessage }];
 
 const boundaryRules = layers.flatMap((layer) => [
   {
     files: [`src/${layer}/**/*.{ts,tsx}`],
     rules: {
-      'no-restricted-imports': ['error', { patterns: forbidFor(layer), paths: llmSdkPaths }],
+      'no-restricted-imports': [
+        'error',
+        { patterns: [...forbidFor(layer), ...llmSdkPatterns], paths: llmSdkPaths },
+      ],
     },
   },
   ...(layer === 'kev'
     ? [
         {
-          files: ['src/kev/providers/**/*.{ts,tsx}'],
+          files: [SDK_ADAPTER],
           rules: { 'no-restricted-imports': ['error', { patterns: forbidFor(layer) }] },
         },
       ]

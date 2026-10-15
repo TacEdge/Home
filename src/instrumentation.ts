@@ -4,7 +4,8 @@
 // runtime applies: HOME has no edge code.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  const { parseEnv, describeDbSsl, weatherBootStatus, weatherConfig } = await import('@/lib/env');
+  const { parseEnv, describeDbSsl, weatherBootStatus, weatherConfig, kevBootStatus, kevConfig } =
+    await import('@/lib/env');
   // One diagnostic line: the TLS mode `pg` will parse from DATABASE_URL and
   // how many times it appears. Nothing else from the URL is ever logged.
   const tls = describeDbSsl(process.env.DATABASE_URL ?? '');
@@ -24,6 +25,9 @@ export async function register(): Promise<void> {
   // absent | invalid | set, key missing. A bad value leaves weather off; it
   // never stops HOME booting.
   console.log(`[home] weather location: ${weatherBootStatus(weatherConfig(process.env))}`);
+  // Kev's state, never the key (M8 contract §14): on | off | off (gate
+  // closed) | no key | scripted.
+  console.log(`[home] kev: ${kevBootStatus(kevConfig(process.env))}`);
   const [{ getDb }, { assertRuntimeRole }] = await Promise.all([
     import('@/db/client'),
     import('@/db/role-check'),

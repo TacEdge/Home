@@ -44,6 +44,8 @@ export const NOT_PERMITTED_COPY: Record<NotPermittedCode, string> = {
   calendar_credential_unreadable:
     'HOME can’t read this calendar’s address any more. Connect it again to carry on.',
   calendar_disconnected: 'This calendar is disconnected. Connect it again to refresh it.',
+  kev_bookkeeping_only: 'Only Kev keeps its own conversation records.',
+  system_only: 'HOME does this on its own, on a schedule.',
 };
 
 export const NOT_FOUND_COPY = 'That isn’t here any more.';

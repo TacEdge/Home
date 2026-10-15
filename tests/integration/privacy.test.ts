@@ -8,6 +8,7 @@ import * as context from '@/domain/context/service';
 import * as conversations from '@/domain/conversations/service';
 import * as events from '@/domain/events/service';
 import * as insights from '@/domain/insights/service';
+import * as kevBookkeeping from '@/domain/kev-bookkeeping/service';
 import * as kevUsage from '@/domain/kev-usage/service';
 import * as notes from '@/domain/notes/service';
 import * as people from '@/domain/people/service';
@@ -24,6 +25,7 @@ import {
   seedFixtureFamily,
   type SeedManifest,
 } from '../fixtures/seed';
+import { clockedPool, createTestClock, dropTestClock, setTestClock } from './clock';
 import { adminDb, testDb } from './db';
 import { clearDomainRows } from './fixtures';
 
@@ -37,11 +39,19 @@ import { clearDomainRows } from './fixtures';
 //   - Activity (listAudit) shows no row about a record the actor cannot see;
 //   - no audit row anywhere carries user-written content;
 //   - Kev and the system cannot write anywhere in the M2 domain, beyond the
-//     two approved Kev writes (capture verbatim, propose).
+//     two approved Kev writes (capture verbatim, propose) and, from M8
+//     Package 1b, Kev's bookkeeping path: its six functions acting as the
+//     adult via Kev, and the system's daily retention cleanup (M8 contract
+//     §9.7, matrix row S4).
 
 const { db, close } = testDb();
 const admin = adminDb();
 const deps = { db };
+// Kev's reservations and settlements run in a month of their own on a moved
+// database clock (./clock.ts): the real month is shared with suites that
+// record usage at the real now, and the household cap counts all of it.
+const { pool: clockedHandle, db: clocked } = clockedPool(10);
+const kevDeps = { db: clocked };
 let seed: Required<SeedManifest>;
 type Adult = 'sam' | 'alex';
 const OTHER: Record<Adult, Adult> = { sam: 'alex', alex: 'sam' };
@@ -52,10 +62,15 @@ beforeAll(async () => {
   const s = await seedFixtureFamily(db);
   if (s.status !== 'seeded') throw new Error('the privacy suite needs a fresh seed');
   seed = s as Required<SeedManifest>;
+  await createTestClock(admin);
+  // Before the bookkeeping suite's months (2032 on), so its sweeps clear what this leaves open.
+  await setTestClock(admin, '2030-06-10T00:00:00Z');
 });
 afterAll(async () => {
   // Leave no seeded rows (linked people especially) for the suites after this one.
   await clearDomainRows(db);
+  await clockedHandle.end();
+  await dropTestClock(admin);
   await close();
   await admin.close();
 });
@@ -409,12 +424,38 @@ describe('audit metadata carries no user-written content', () => {
 // completeness check fails if a new one is added without being listed here.
 
 type Call = (a: UserActor) => Promise<unknown>;
-const KEV_MAY = new Set(['captures.captureVerbatim', 'proposals.createProposal']);
+// Kev's approved writes (M8 contract §9.7, S4): capture and propose (M2),
+// and the six bookkeeping functions that act as the adult. Exactly these.
+const KEV_MAY = new Set([
+  'captures.captureVerbatim',
+  'proposals.createProposal',
+  'kevBookkeeping.recordUserMessage',
+  'kevBookkeeping.recordKevMessage',
+  'kevBookkeeping.reserveAttempt',
+  'kevBookkeeping.settleAttempt',
+  'kevBookkeeping.purgeExpired',
+  'kevBookkeeping.clearConversation',
+]);
+/** The audit events the bookkeeping path may write (structural, the adult's own). */
+const BOOKKEEPING_EVENTS = new Set([
+  'conversation.start',
+  'message.add',
+  'kev_budget.reserve',
+  'kev_usage.record',
+  'kev_budget.late_settle',
+  'conversation.purge',
+  'conversation.clear',
+]);
+// The system's one write: the daily retention cleanup, which only deletes
+// expired messages and so does not depend on the real-data gate.
+const SYSTEM_MAY = new Set(['kevBookkeeping.purgeExpiredMessages']);
+const UNGATED = new Set(['kevBookkeeping.purgeExpiredMessages']);
 const READS = /^(get|list|respondedKeys|monthToDate|stalenessOf)/;
 const INTERNAL = new Set([
   'captures.lockForProposal',
   'captures.settleCapture',
   'calendars.assertPerson', // the calendar services' own actor check, not a write
+  'kevBookkeeping.isLiveReservation', // a check of a minted value, not a write
 ]);
 const MODULES = {
   people,
@@ -431,6 +472,8 @@ const MODULES = {
   // M4 Package 4b: connecting, changing, disconnecting and refreshing calendars.
   calendars,
   calendarSync,
+  // M8 Package 1b: Kev's bookkeeping path.
+  kevBookkeeping,
 };
 
 /** A synthetic secret address: the gate, Kev and system refusals come before it is read. */
@@ -576,6 +619,57 @@ function writeCalls(own: Adult): Record<string, Call> {
     'calendarSync.refreshCalendar': (a) => calendarSync.refreshCalendar(a, id, NO_PROVIDER, {}, d),
     'calendarSync.refreshStaleCalendars': (a) =>
       calendarSync.refreshStaleCalendars(a, NO_PROVIDER, {}, d),
+    // M8 Package 1b, in this order: the person's message last, so that it
+    // does not leave a turn in flight for Clear.
+    'kevBookkeeping.reserveAttempt': (a) =>
+      kevBookkeeping.reserveAttempt(
+        a,
+        {
+          attemptId: crypto.randomUUID(),
+          tier: 'fast',
+          reservedUsdMicros: 1n,
+        },
+        kevDeps,
+      ),
+    // Via Kev, settle an attempt it reserved; anyone else, any attempt.
+    'kevBookkeeping.settleAttempt': (a) => {
+      const attemptId = crypto.randomUUID();
+      const settle = () =>
+        kevBookkeeping.settleAttempt(a, { attemptId, conversationId: null, calls: [] }, kevDeps);
+      return a.via === 'kev'
+        ? kevBookkeeping
+            .reserveAttempt(a, { attemptId, tier: 'fast', reservedUsdMicros: 1n }, kevDeps)
+            .then((r) => {
+              if (!r.ok) throw new Error(`reserve: ${r.code}`);
+              return settle();
+            })
+        : settle();
+    },
+    'kevBookkeeping.recordKevMessage': (a) =>
+      kevBookkeeping.recordKevMessage(
+        a,
+        {
+          content: {
+            v: 2,
+            outcome: 'answer',
+            say: 'x',
+            blocks: [],
+            cites: [],
+            limits: [],
+            trace: [],
+            calls: [],
+            escalated: false,
+          },
+          tier: 'fast',
+          model: 'm',
+        },
+        d,
+      ),
+    'kevBookkeeping.purgeExpired': (a) => kevBookkeeping.purgeExpired(a, d),
+    'kevBookkeeping.clearConversation': (a) => kevBookkeeping.clearConversation(a, d),
+    'kevBookkeeping.recordUserMessage': (a) =>
+      kevBookkeeping.recordUserMessage(a, { text: 'x' }, d),
+    'kevBookkeeping.purgeExpiredMessages': (a) => kevBookkeeping.purgeExpiredMessages(a, d),
   };
 }
 
@@ -591,29 +685,69 @@ describe('Kev and the system cannot write anywhere in the M2 domain', () => {
   });
 
   it.each(ADULTS)(
-    '%s via Kev: refused (kev_cannot_write) everywhere but capture and propose',
+    '%s via Kev: refused (kev_cannot_write) everywhere but capture, propose and the bookkeeping path',
     async (a) => {
-      const before = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-      let allowedWrites = 0;
+      const newRows = async (since: string) =>
+        (
+          await admin.db.execute<{
+            event: string;
+            actor_via: string;
+            visible_to_user_id: string | null;
+          }>(
+            sql`select event, actor_via, visible_to_user_id from audit_log where at > ${since}::timestamptz order by at`,
+          )
+        ).rows;
+      const clock = async () =>
+        String(
+          (await admin.db.execute<{ t: string }>(sql`select clock_timestamp()::text as t`)).rows[0]
+            ?.t,
+        );
       for (const [name, call] of Object.entries(writeCalls(a))) {
+        const since = await clock();
         const r = await outcome(call(actor(a, 'kev')));
-        if (KEV_MAY.has(name)) {
+        const rows = await newRows(since);
+        if (!KEV_MAY.has(name)) {
+          expect(r, name).toBe('kev_cannot_write');
+          expect(rows, name).toEqual([]);
+        } else if (name.startsWith('kevBookkeeping.')) {
           expect(r, name).toBe('resolved');
-          allowedWrites += 1;
-        } else expect(r, name).toBe('kev_cannot_write');
+          // Only its own structural rows, as the adult via Kev, private to them.
+          for (const row of rows) {
+            // A reservation's sweep of stale reservations is the system's, private to no one.
+            if (row.event === 'kev_budget.sweep') {
+              expect(row).toMatchObject({ actor_via: 'system', visible_to_user_id: null });
+              continue;
+            }
+            expect(BOOKKEEPING_EVENTS.has(row.event), `${name}: ${row.event}`).toBe(true);
+            expect(row).toMatchObject({
+              actor_via: 'kev',
+              visible_to_user_id: seed.actors[a].userId,
+            });
+          }
+        } else {
+          // Capture and propose: exactly one row each, as in M2.
+          expect(r, name).toBe('resolved');
+          expect(rows, name).toHaveLength(1);
+        }
       }
-      const after = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-      // Only the two approved Kev writes reached the log (a capture; a proposal).
-      expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(allowedWrites);
     },
   );
 
-  it('the system actor: refused (not_a_user) everywhere, including capture and propose', async () => {
+  it('the system actor: refused (not_a_user) everywhere, including capture and propose; only the retention cleanup runs', async () => {
     const before = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
     for (const [name, call] of Object.entries(writeCalls('sam')))
-      expect(await outcome(call(sys)), name).toBe('not_a_user');
+      expect(await outcome(call(sys)), name).toBe(SYSTEM_MAY.has(name) ? 'resolved' : 'not_a_user');
     const after = await admin.db.execute(sql`select count(*)::int as n from audit_log`);
-    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    // The cleanup's one structural system row.
+    expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(SYSTEM_MAY.size);
+  });
+
+  it('S4: a person (via the UI) cannot use the bookkeeping path, nor the cleanup', async () => {
+    for (const [name, call] of Object.entries(writeCalls('sam')))
+      if (name.startsWith('kevBookkeeping.'))
+        expect(await outcome(call(actor('sam'))), name).toBe(
+          SYSTEM_MAY.has(name) ? 'system_only' : 'kev_bookkeeping_only',
+        );
   });
 });
 
@@ -650,7 +784,8 @@ describe('the real-data gate in Production', () => {
       try {
         for (const a of ADULTS)
           for (const [name, call] of Object.entries(writeCalls(a)))
-            expect(await outcome(call(actor(a))), name).toBe('real_data_closed');
+            if (!UNGATED.has(name))
+              expect(await outcome(call(actor(a))), name).toBe('real_data_closed');
         // The no-op context update is a write request too.
         expect(
           await outcome(context.updateContext(actor('sam'), seed.canaries.sam.context, {}, deps)),
@@ -693,5 +828,80 @@ describe('the real-data gate in Production', () => {
     } finally {
       restore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I5 (ADR 0012 §43): the household's spend status tells one adult nothing
+// about the other's turn while it is in flight. An adult sees the cap and
+// the month's recorded usage only; open reservations, their count, tier and
+// amount, and any reservation outcome's household figures never reach them.
+
+describe('I5: one adult’s spend status never reveals the other’s turn in flight', () => {
+  it('Alex’s status before, during (Sam’s open fast and deep reservations) and after Sam’s turn differs only by Sam’s recorded usage', async () => {
+    const sam = actor('sam', 'kev');
+    const alex = actor('alex', 'kev');
+    const before = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(Object.keys(before).sort()).toEqual(['capUsdMicros', 'recordedUsdMicros', 'state']);
+
+    // Sam's turn: a fast attempt, then an escalated deep one, both open.
+    const fastId = crypto.randomUUID();
+    const deepId = crypto.randomUUID();
+    const fast = await kevBookkeeping.reserveAttempt(
+      sam,
+      { attemptId: fastId, tier: 'fast', reservedUsdMicros: 665_280n },
+      kevDeps,
+    );
+    const deep = await kevBookkeeping.reserveAttempt(
+      sam,
+      { attemptId: deepId, tier: 'deep', reservedUsdMicros: 1_500_000n },
+      kevDeps,
+    );
+    // The reserving adult's own outcome carries no household figure.
+    for (const r of [fast, deep]) {
+      expect(r.ok).toBe(true);
+      expect(Object.keys(r).sort()).toEqual(['ok', 'reservation']);
+      expect(
+        JSON.stringify(r, (_k, v: unknown) => (typeof v === 'bigint' ? String(v) : v)),
+      ).not.toMatch(/count|open|unreconciled|cap/i);
+    }
+    const during = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(during).toEqual(before);
+    // Sam sees the same as Alex: nothing about the attempt in flight.
+    expect(await kevBookkeeping.getSpendStatus(sam, kevDeps)).toEqual(before);
+
+    // Sam's turn settles: only then does Alex's view change, by the recorded usage.
+    const usage = (cost: bigint, tier: 'fast' | 'deep') => ({
+      tier,
+      model: 'fixture-model',
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsdMicros: cost,
+      escalated: tier === 'deep',
+    });
+    await kevBookkeeping.settleAttempt(
+      sam,
+      { attemptId: fastId, conversationId: null, calls: [usage(12_345n, 'fast')] },
+      kevDeps,
+    );
+    await kevBookkeeping.settleAttempt(
+      sam,
+      { attemptId: deepId, conversationId: null, calls: [usage(54_321n, 'deep')] },
+      kevDeps,
+    );
+    const after = await kevBookkeeping.getSpendStatus(alex, kevDeps);
+    expect(after.capUsdMicros).toBe(before.capUsdMicros);
+    expect(after.recordedUsdMicros - before.recordedUsdMicros).toBe(12_345n + 54_321n);
+    expect(after.state).toBe(before.state);
+  });
+
+  it('the system-only report, with the open count, refuses both adults however they ask', async () => {
+    for (const a of ADULTS)
+      for (const via of ['ui', 'kev'] as const)
+        expect(await outcome(kevBookkeeping.getSpendReport(actor(a, via), kevDeps))).toBe(
+          'system_only',
+        );
   });
 });

@@ -42,6 +42,8 @@ export type NotPermittedCode =
   | 'calendar_keys_unavailable' // HOME_CREDENTIALS_KEY or HOME_FINGERPRINT_KEY is missing or invalid (M4 §4.1)
   | 'calendar_credential_unreadable' // the stored credential no longer opens with HOME's keys
   | 'calendar_disconnected' // a disconnected calendar is not refreshed
+  | 'kev_bookkeeping_only' // the bookkeeping path records Kev's own turn, as the adult via Kev; a person's own UI never calls it (M8 contract §9.7)
+  | 'system_only' // the daily retention cleanup is the system's alone (M8 contract §7.2)
   | 'real_data_closed'; // Production refuses family-domain writes until the real-data gate opens (ADR 0006 §2)
 
 export class NotPermittedError extends Error {
