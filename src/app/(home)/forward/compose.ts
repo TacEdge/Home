@@ -1,5 +1,5 @@
-import { loadAgenda } from '@/app/_agenda/load';
-import { todayInput } from '@/app/_agenda/today-input';
+import { loadAgenda } from '@/domain/agenda/load';
+import { todayInput } from '@/domain/agenda/today-input';
 import type { FactLookup } from '@/app/_insights/facts';
 import { creditOpeningKey } from '@/app/_insights/weather/credit-key';
 import type { Deps } from '@/domain/common/write';

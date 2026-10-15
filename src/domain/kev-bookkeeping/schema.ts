@@ -137,6 +137,8 @@ export const traceEntrySchema = z
     args: z.record(z.string().regex(/^[a-z_]{1,40}$/), traceArg),
     resultCount: z.number().int().nonnegative().max(1_000),
     refs: z.array(refSchema).max(50),
+    /** Only when the result had more than 50 refs: `refs` holds the first 50. */
+    refsTruncated: z.literal(true).optional(),
     attemptId: z.uuid(),
   })
   .strict();

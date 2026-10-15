@@ -253,13 +253,15 @@ const floorHour = (t: number) => Math.floor(t / HOUR) * HOUR;
 const ceilHour = (t: number) => Math.ceil(t / HOUR) * HOUR;
 
 /**
- * What the forecast says for an opening, or null (no words, no dry match):
+ * What the forecast says for an opening, or null (no words, no dry match).
+ * Exported unchanged for Kev's get_gaps (M8 Package 2), so a stretch's band
+ * there is exactly the band an opening would cite for it:
  * only a usable forecast (§5.1: not over 12 hours old), only today to
  * today + 6, and only when every hour described is covered and has a band.
  * Today and tomorrow: the hours the shown span touches; days 2–6: the day's
  * planning hours (no hour-precise timing beyond tomorrow, D6).
  */
-function forecastFor(
+export function forecastFor(
   forecast: Forecast | null,
   date: IsoDate,
   offset: number,

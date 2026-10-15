@@ -15,7 +15,7 @@ import { listNotes } from '@/domain/notes/service';
 import { getPerson } from '@/domain/people/service';
 import { AgendaDays } from '@/app/_agenda/agenda-list';
 import { RegularWeek } from '@/app/_profile/regular-week';
-import { loadAgenda } from '@/app/_agenda/load';
+import { loadAgenda } from '@/domain/agenda/load';
 import { requestNow } from '@/app/_agenda/now';
 import { ConflictMarks } from '@/app/_insights/conflict-marks';
 import type { FactLookup } from '@/app/_insights/facts';

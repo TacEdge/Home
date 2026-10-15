@@ -154,6 +154,8 @@ All tools have Zod schemas, run server-side through domain services under the Ac
 
 *Approved in M8 Package 0 (ADR 0012, owner decision, 2026-10-13):* `find_free_windows` is built as `get_gaps` (stretches where nothing is recorded, never ranked by fit); `get_conflicts` returns only the engine's two rules (no "both adults away"); `get_context` has no `include_sensitive` parameter, because Kev never requests or receives sensitive context (ADR 0005 §37); `search` matches titles only; `list_captures` waits for M9. Tool calls are recorded in a per-turn trace with Kev's message, not as audit rows. The composite behaviours "recommend one window" and "Find us a night out" (for both adults) are superseded: Kev lays out what is recorded with its facts and never names "the best" time or says anyone is free (ADR 0012 §7, §17–§19, §26).
 
+*Built in M8 Package 2 (ADR 0012 §44, contract §6.6):* the twelve read tools and `escalate` are in `src/kev/tools/`, as the contract's §6.2 table defines them rather than this table's signatures: `get_insights` takes a surface (`today` or `forward_week`), not a range; `get_project`/`list_tasks` are `get_projects`/`get_tasks`; `get_people` returns age and next birthday, never a date of birth. Every name, title and other recorded text reaches the model inside an `untrusted_text` field.
+
 ### The capture tool (executes immediately, tightly constrained)
 
 | Tool | Behaviour |

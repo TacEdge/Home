@@ -74,13 +74,22 @@ describe('sensitive context is never opted into automatically', () => {
   });
 
   it('Kev has no way in: nothing under src/kev reads context with sensitivity options', () => {
-    const kev = (() => {
-      try {
-        return walk(join('src', 'kev'));
-      } catch {
-        return [];
-      }
-    })();
-    expect(kev.filter((f) => /includeSensitive/.test(readFileSync(f, 'utf8')))).toEqual([]);
+    // M8 Package 2 (contract §15.1, S3; D7): Kev's tools and context assembly
+    // now exist, so the guard requires them and covers every file under
+    // src/kev: no sensitivity option, no raw sensitivity or readability
+    // predicate, and no tool input that names sensitivity at all.
+    const kev = walk(join('src', 'kev')).filter((f) => /\.(ts|tsx)$/.test(f));
+    expect(kev).toContain(join('src', 'kev', 'tools', 'get-context.ts'));
+    expect(kev).toContain(join('src', 'kev', 'context', 'assemble.ts'));
+    const offenders = kev.filter((f) =>
+      /includeSensitive|include_sensitive|sensitivityFilter|readableBy|SENSITIVITY\b/.test(
+        readFileSync(f, 'utf8'),
+      ),
+    );
+    expect(offenders).toEqual([]);
+    const getContext = readFileSync(join('src', 'kev', 'tools', 'get-context.ts'), 'utf8');
+    const input = /const input = z([\s\S]*?)\.strict\(\);/.exec(getContext)?.[1] ?? '';
+    expect(input).toMatch(/subject_type/);
+    expect(input).not.toMatch(/sensitiv/i);
   });
 });

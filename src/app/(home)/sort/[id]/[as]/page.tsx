@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { todayInHomeZone } from '@/app/_agenda/load';
+import { todayInHomeZone } from '@/domain/agenda/load';
 import { NotFoundError } from '@/domain/common/errors';
 import { getCapture } from '@/domain/captures/service';
 import { CONTEXT_CATEGORIES } from '@/domain/context/schema';

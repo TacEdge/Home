@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ActionForm } from '@/app/_forms/action-form';
-import { todayInHomeZone } from '@/app/_agenda/load';
+import { todayInHomeZone } from '@/domain/agenda/load';
 import type { Person } from '@/domain/people/service';
 import type { Project } from '@/domain/projects/service';
 import type { Task } from '@/domain/tasks/service';

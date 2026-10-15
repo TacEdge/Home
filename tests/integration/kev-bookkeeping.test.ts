@@ -603,11 +603,14 @@ describe('reserveAttempt and settleAttempt', () => {
     const sam = await adult('l17');
     const alex = await adult('l17-other');
     /** The sweep's audit rows written by `p`. */
-    const sweepRows = async (p: Promise<unknown>) => {
+    // Takes the call, not its promise: `since` is read before the reservation's
+    // transaction begins, so its audit row's `at` (the transaction's start)
+    // can never fall before it.
+    const sweepRows = async (call: () => Promise<unknown>) => {
       const since = (
         await admin.db.execute<{ t: string }>(sql`select clock_timestamp()::text as t`)
       ).rows[0]!.t;
-      await p;
+      await call();
       return (
         await admin.db.execute<{
           actor_user_id: string | null;
@@ -617,7 +620,7 @@ describe('reserveAttempt and settleAttempt', () => {
           visibility: string;
           visible_to_user_id: string | null;
         }>(sql`select actor_user_id, actor_via, subject_type, meta, visibility, visible_to_user_id
-               from audit_log where event = 'kev_budget.sweep' and at > ${since}::timestamptz`)
+               from audit_log where event = 'kev_budget.sweep' and at >= ${since}::timestamptz`)
       ).rows;
     };
     await setClock('2033-04-10T00:00:00Z');
@@ -632,7 +635,7 @@ describe('reserveAttempt and settleAttempt', () => {
     const notYet = uuid();
     setCapNzd(0);
     expect(
-      await sweepRows(
+      await sweepRows(() =>
         reserveAttempt(sam, { attemptId: notYet, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
       ),
     ).toEqual([]);
@@ -641,7 +644,7 @@ describe('reserveAttempt and settleAttempt', () => {
     // refused attempt itself writes no reservation.
     await setClock('2033-04-10T00:02:01Z');
     const refused = uuid();
-    const rows = await sweepRows(
+    const rows = await sweepRows(() =>
       reserveAttempt(alex, { attemptId: refused, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
     );
     expect(rows).toEqual([
@@ -678,7 +681,7 @@ describe('reserveAttempt and settleAttempt', () => {
       await reserveAttempt(who, { attemptId: id, tier: 'fast', reservedUsdMicros: 7n }, cdeps);
     await setClock('2033-04-10T00:05:00Z');
     const taken = uuid();
-    const okRows = await sweepRows(
+    const okRows = await sweepRows(() =>
       reserveAttempt(sam, { attemptId: taken, tier: 'fast', reservedUsdMicros: 1n }, cdeps),
     );
     expect(okRows.map((r) => [r.actor_via, r.meta])).toEqual([['system', { count: 2 }]]);

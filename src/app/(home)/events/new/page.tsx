@@ -1,4 +1,4 @@
-import { todayInHomeZone } from '@/app/_agenda/load';
+import { todayInHomeZone } from '@/domain/agenda/load';
 import { listPeople } from '@/domain/people/service';
 import { requireActor } from '@/trust/session';
 import { Page } from '@/ui/page';

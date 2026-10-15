@@ -35,7 +35,7 @@ vi.mock('@/domain/captures/service', () => ({ listCaptures: async () => [] }));
 // 07:03 on Wednesday 14 October in Pacific/Auckland, with one calendar read an hour before.
 const NOW = new Date('2026-10-13T18:03:00Z');
 vi.mock('@/app/_agenda/now', () => ({ requestNow: async () => NOW }));
-vi.mock('@/app/_agenda/load', () => ({
+vi.mock('@/domain/agenda/load', () => ({
   loadAgenda: async () => ({
     today: '2026-10-14',
     from: '2026-10-14',
