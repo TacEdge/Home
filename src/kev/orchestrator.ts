@@ -83,14 +83,15 @@ import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 //                 at most 3 tool rounds, 8 tool calls, 5 model calls, 32,000
 //                 input tokens a call, inside the 55 s deadline;
 //   7. answer     the checker, which renders the plan (owner amendment, ADR
-//                 0012 §46: HOME writes every fact; the model's lead and
-//                 view are fact-free); one regeneration (a labelled
+//                 0012 §46: HOME writes every word; the model's lead and
+//                 view are catalogue selections); one regeneration (a labelled
 //                 user-turn block); then escalation (the model's `escalate`
 //                 while reads are still allowed, or two failed answers on
 //                 fast; ≥ 30 s left; under 80% of the counted month) or the
 //                 safe fallback, which a budget refusal also ends in; a plan
-//                 that failed only in its lead or view shows its rendered
-//                 facts with HOME's lead instead (never an escalation);
+//                 that failed only in its lead or view, and shows at least
+//                 one fact, shows its rendered facts with HOME's lead
+//                 instead (never an escalation);
 //   8. settle     every provider call's usage, in a `finally`, the reservation
 //                 closed;
 //   9. record     Kev's message (content v2), then the answer is emitted; a
@@ -142,6 +143,8 @@ export type KevEvent =
       decline?: DeclineCode;
       /** The stored Kev message, when one was stored. */
       kevMessageId?: string;
+      /** The fetch time of the forecast the answer shows (`forecast_credit`'s time), as stored. */
+      forecastAt?: string;
     };
 
 /**
@@ -868,6 +871,7 @@ async function finish(
           cites: r.cites,
           limits: limitsFor(r.shown, end.coverage),
           plan: end.plan,
+          ...(r.shown.forecastAt ? { forecastAt: r.shown.forecastAt } : {}),
         };
       }
       break;
@@ -878,8 +882,10 @@ async function finish(
       const failed = end.kind === 'escalate' ? undefined : end.violations;
       const violations: ValidatorCode[] = failed ? codesOf(failed) : [];
       const salvage = end.kind === 'escalate' ? null : (end.salvage ?? null);
-      if (salvage) {
-        // The plan's own words failed; its facts passed and are shown with HOME's lead (§8.5).
+      // Never "Here's what HOME has." over nothing: a salvage shows at least
+      // one checked fact (owner decision 7); otherwise the safe fallback.
+      if (salvage && salvage.blocks.some((b) => b.kind === 'fact')) {
+        // The plan's lead or view failed; its facts passed and are shown with HOME's lead (§8.5).
         content = {
           ...base,
           outcome: 'answer',
@@ -889,6 +895,7 @@ async function finish(
           limits: limitsFor(salvage.shown, end.coverage),
           violations,
           salvaged: true,
+          ...(salvage.shown.forecastAt ? { forecastAt: salvage.shown.forecastAt } : {}),
         };
         turnLog.violations = violations;
         turnLog.reason = 'salvaged';
@@ -903,6 +910,7 @@ async function finish(
         cites: f.cites,
         // The rows' own sentences (§8.4): a gap's limit, a forecast's time and credit (I-15).
         limits: limitsFor(f.shown, end.coverage),
+        ...(f.shown.forecastAt ? { forecastAt: f.shown.forecastAt } : {}),
         ...(violations.length > 0 ? { violations } : {}),
         ...(end.kind === 'fallback' ? { errorCode: 'budget_exhausted' as const } : {}),
       };
@@ -996,5 +1004,6 @@ async function finish(
         : content.outcome === 'fallback',
     ...(decline ? { decline } : {}),
     ...(kevMessageId ? { kevMessageId } : {}),
+    ...(!errorCode && content.forecastAt ? { forecastAt: content.forecastAt } : {}),
   });
 }

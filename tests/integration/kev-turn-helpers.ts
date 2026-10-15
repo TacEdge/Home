@@ -7,6 +7,7 @@ import {
   type ScriptStep,
 } from '@/kev/providers/scripted';
 import { BUNDLE_LEAD, handle, type KevDeps, type KevEvent } from '@/kev/orchestrator';
+import { LEAD_IDS, LEADS } from '@/kev/answer/catalogue';
 import type { Ref } from '@/kev/tools/types';
 import type { UserActor } from '@/trust/actor';
 import type { adminDb } from './db';
@@ -91,21 +92,29 @@ function factOf(f: FactIn): Record<string, unknown> {
   return { kind: f.type, ref: wireRef(f), show: [], scope: null };
 }
 
-/** A final answer plan (the flat, structured-output shape): a fact-free lead, the facts chosen, a view. */
+/** Kev's view as the plan carries it: a type, a phrase id and the blocks it is about. */
+export type ViewIn = { type: string; phrase: string; about: number[] };
+
+/**
+ * A lead as the plan carries it: HOME's catalogue id, given by id or by its
+ * words (so a test reads as the adult sees it: 'Here’s {when}.' is `when`).
+ * Any other string is a model writing its own words, which the schema
+ * refuses (`answer.schema`).
+ */
+export const leadOf = (lead: string): string =>
+  LEAD_IDS.find((id) => id === lead || LEADS[id].text === lead) ?? lead;
+
+/** A final answer plan (the flat, structured-output shape): a lead, the facts chosen, a typed view. */
 export function answerInput(
   lead: string,
   facts: FactIn[] = [],
-  view: { text: string; about: number[] } | null = null,
+  view: ViewIn | null = null,
 ): Record<string, unknown> {
-  return { lead, facts: facts.map(factOf), view, decline: null };
+  return { lead: leadOf(lead), facts: facts.map(factOf), view, decline: null };
 }
 
 /** The same plan as the structured-output text. */
-export function answer(
-  lead: string,
-  facts: FactIn[] = [],
-  view: { text: string; about: number[] } | null = null,
-): ScriptStep {
+export function answer(lead: string, facts: FactIn[] = [], view: ViewIn | null = null): ScriptStep {
   return { kind: 'answer', text: [JSON.stringify(answerInput(lead, facts, view))] };
 }
 

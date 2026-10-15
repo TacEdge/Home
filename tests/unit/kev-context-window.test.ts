@@ -1,3 +1,4 @@
+import { LEAD_IDS, VIEW_PHRASE_IDS, VIEW_TYPES } from '@/kev/answer/catalogue';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -195,9 +196,13 @@ describe('N14’s prompt half: the provisional system prompt', () => {
       "Kev's view",
       'absence',
       '{when}',
-      'HOME writes every fact',
+      'HOME writes every word',
     ])
       expect(SYSTEM_PROMPT).toContain(s);
+    // Every lead, view type and phrase of HOME's catalogue, by its identifier.
+    for (const l of LEAD_IDS) expect(SYSTEM_PROMPT).toContain(`"${l}"`);
+    for (const t of VIEW_TYPES) expect(SYSTEM_PROMPT).toContain(`"${t}"`);
+    for (const p of VIEW_PHRASE_IDS) expect(SYSTEM_PROMPT).toContain(`"${p}"`);
     for (const c of [
       'external_action',
       'write',
@@ -215,14 +220,14 @@ describe('\u00A78.5: the regeneration note', () => {
   it('is labelled as HOME’s, names each code and where, and never quotes the answer', () => {
     const note = regenerationNote([
       { code: 'absence.unsupported', where: 0 },
-      { code: 'prose.time', where: 'lead' },
-      { code: 'prose.claim', where: 'view' },
+      { code: 'lead.unsupported', where: 'lead' },
+      { code: 'view.unsupported', where: 'view' },
       { code: 'answer.schema', where: 'answer' },
     ]);
     expect(note.startsWith(HOME_LABEL)).toBe(true);
     expect(note).toContain('- absence.unsupported in fact 1');
-    expect(note).toContain('- prose.time in the lead');
-    expect(note).toContain('- prose.claim in the view');
+    expect(note).toContain('- lead.unsupported in the lead');
+    expect(note).toContain('- view.unsupported in the view');
     expect(note).toContain('- answer.schema in the answer');
     expect(BUNDLE_LEAD.startsWith(HOME_LABEL)).toBe(true);
   });

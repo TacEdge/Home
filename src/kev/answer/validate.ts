@@ -3,12 +3,20 @@ import type { VALIDATOR_CODES } from '@/domain/kev-bookkeeping/schema';
 import { capitalise } from '@/domain/engines/day-facts';
 import { isoDateInZone, type IsoDate } from '@/lib/dates';
 import type { Ref, RefType } from '../tools/types';
-import { renderSummary } from './coverage';
-import { SALVAGE_LEAD } from './language';
-import { fullKeyOf, type Ledger } from './ledger';
-import { normaliseProse, proseViolations } from './prose';
-import { daysPhrase, renderRecord } from './render';
 import {
+  classifyMessage,
+  LEADS,
+  SALVAGE_LEAD_ID,
+  supports,
+  VIEW_PHRASES,
+  type AboutBlock,
+  type LeadId,
+} from './catalogue';
+import { renderSummary } from './coverage';
+import { fullKeyOf, type Ledger, type LedgerEntry } from './ledger';
+import { daysPhrase, forecastFetchedAt, pickEntry, renderRecord } from './render';
+import {
+  DEFAULT_SHOW,
   isSummary,
   MAX_CITES,
   parsePlan,
@@ -19,11 +27,13 @@ import {
   type ScopeKind,
 } from './schema';
 
-// The checker (M8 contract §8.3; owner amendment of 2026-10-15, ADR 0012
+// The checker (M8 contract §8.3; owner amendments of 2026-10-15, ADR 0012
 // §46): pure and deterministic, run on every plan before anything is shown
-// or stored as an answer. It no longer reads factual prose. It checks, in
-// order:
-//  1. the plan's strict schema (`answer.schema`);
+// or stored as an answer. The model writes no words: its lead and its view
+// are identifiers from HOME's catalogue (./catalogue.ts). The checker
+// checks, in order:
+//  1. the plan's strict schema (`answer.schema`): a lead, type or phrase
+//     outside the catalogue is a malformed plan;
 //  2. every record block: its ref a member of this attempt's ledger
 //     (`cite.unknown`), its kind the record's type and the record renderable
 //     from what this attempt read (`fact.kind`), every field asked for
@@ -31,15 +41,20 @@ import {
 //  3. every absence and count: its scope covered by complete reads of its
 //     kind, uncontradicted, `else` only with every record in scope shown
 //     (`absence.unsupported`); then HOME renders it;
-//  4. Kev's view refers to blocks that exist (`view.about`);
-//  5. the lead and the view are fact-free (./prose.ts), `{when}` only when
-//     the blocks are dated;
-//  6. no sensitive string anywhere (defence in depth; Kev never reads
-//     sensitive context, D7).
-// What passes is returned rendered: the lead (normalised, `{when}` filled),
-// the fact blocks HOME wrote, and the view, with their citations. A plan
-// whose only failures are in its lead or view also carries the salvage:
-// the same rendered facts with the fixed lead and no view (§8.5).
+//  4. the lead is allowed here (`lead.unsupported`): a fact lead beside at
+//     least one block (`{when}` only beside a dated one, "here it is" beside
+//     exactly one record, "No worries." beside a record, "flagged" beside an
+//     overlap or insight HOME flagged), no affirming lead for a yes-or-no,
+//     availability or unreadable message; a response with no blocks is a
+//     social lead to a message that asks nothing, or HOME's "not sure";
+//  5. Kev's view refers to blocks that exist (`view.about`) and those
+//     blocks support its phrase (`view.unsupported`); never with no blocks;
+//  6. no sensitive string in a rendered fact (defence in depth; Kev never
+//     reads sensitive context, D7).
+// What passes is returned rendered. A plan whose only failures are its lead
+// or view, and which shows at least one fact, also carries the salvage: the
+// same rendered facts with HOME's fixed lead and no view (§8.5). A plan
+// with no facts has no salvage.
 
 export type ValidatorCode = (typeof VALIDATOR_CODES)[number];
 /** Where a check failed: the lead, the view, a fact block by index, or the plan as a whole. */
@@ -52,7 +67,7 @@ export type ValidateInput = {
   ledger: Ledger;
   now: Date;
   timeZone: string;
-  /** The adult's question (for "Yep" on an availability question). */
+  /** The adult's message (to withhold leads only; ./catalogue.ts `classifyMessage`). */
   question?: string;
   /** Strings that must never appear (Kev never receives sensitive context, D7). */
   sensitive?: readonly string[];
@@ -64,6 +79,8 @@ export type Shown = {
   summaries: ReadonlySet<ScopeKind>;
   /** A gap shown came from a read whose calendars were only partly covered. */
   gapsPartial: boolean;
+  /** The fetch time of the forecast shown (stored with the answer: the screen's "as of" time). */
+  forecastAt?: string;
 };
 
 export type RenderedAnswer = {
@@ -79,7 +96,7 @@ export type ValidateResult =
       ok: false;
       plan: AnswerPlan | null;
       violations: Violation[];
-      /** The rendered facts with the fixed lead and no view, when only the lead or view failed. */
+      /** The rendered facts with the fixed lead and no view, when only the lead or view failed and facts exist. */
       salvage: RenderedAnswer | null;
     };
 
@@ -89,19 +106,9 @@ const ORDER: readonly ValidatorCode[] = [
   'fact.kind',
   'fact.field',
   'absence.unsupported',
+  'lead.unsupported',
   'view.about',
-  'text.unsafe',
-  'markup',
-  'prose.time',
-  'prose.number',
-  'prose.person',
-  'prose.record',
-  'prose.claim',
-  'availability.claim',
-  'conflict.unsupported',
-  'authority.claim',
-  'phrase.forbidden',
-  'tone.filler',
+  'view.unsupported',
   'sensitive.leak',
 ];
 
@@ -111,7 +118,7 @@ const sortViolations = (v: Violation[]) =>
 /**
  * Checks and renders a plan (above). A decline passes (code renders it).
  * Returns the rendered answer when it passes, or every check it failed,
- * with where (and the salvage when only prose failed).
+ * with where (and the salvage when only the lead or view failed).
  */
 export function validateAnswer(input: ValidateInput): ValidateResult {
   const plan = parsePlan(input.raw);
@@ -124,6 +131,14 @@ export function validateAnswer(input: ValidateInput): ValidateResult {
     };
   if ('decline' in plan) return { ok: true, plan, rendered: null };
   return check(plan, input);
+}
+
+/** The lead's words for these blocks: `{when}` filled from their days. */
+export function leadText(lead: LeadId, days: readonly IsoDate[], today: IsoDate): string {
+  const text = LEADS[lead].text;
+  if (!text.includes(WHEN)) return text;
+  const filled = text.replace(WHEN, daysPhrase(days, today, 'bare'));
+  return text.startsWith(WHEN) ? capitalise(filled) : filled;
 }
 
 function check(plan: PlanOf, input: ValidateInput): ValidateResult {
@@ -139,18 +154,25 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
   const facts: ({ text: string; cites: Ref[]; dates: IsoDate[] } | null)[] = plan.facts.map(
     () => null,
   );
+  const used: (LedgerEntry | null)[] = plan.facts.map(() => null);
   const shown = new Set<string>();
   const types = new Set<RefType>();
   let gapsPartial = false;
+  let forecastAt: string | undefined;
   plan.facts.forEach((b, i) => {
     if (isSummary(b)) return;
     const r = renderRecord(b, ctx);
     if (!r.ok) return add(r.code, i);
     facts[i] = { text: r.text, cites: r.cites, dates: r.dates };
+    used[i] = pickEntry(ledger.resolve(b.ref), b.kind);
     for (const c of r.cites) shown.add(fullKeyOf(c));
     types.add(b.kind);
     if (b.kind === 'gap' && ledger.resolve(b.ref).some((e) => e.context.gapCoverage === 'partial'))
       gapsPartial = true;
+    if (b.kind === 'forecast' && !forecastAt) {
+      const at = used[i] ? forecastFetchedAt(used[i]) : null;
+      if (at) forecastAt = used[i]!.context.fetchedAt!;
+    }
   });
   // 3. Absence and counts.
   const summaries = new Set<ScopeKind>();
@@ -161,43 +183,70 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
     facts[i] = { text: r.text, cites: [], dates: r.dates };
     summaries.add(b.scope.of);
   });
-  // 4. The view's blocks.
-  const view = plan.view;
-  if (
-    view &&
-    (new Set(view.about).size !== view.about.length ||
-      view.about.some((i) => i >= plan.facts.length))
-  )
-    add('view.about', 'view');
-
-  // 5. The lead and the view, fact-free.
-  const showsRecord = plan.facts.some((b) => !isSummary(b));
-  const proseOf = (text: string, where: 'lead' | 'view') =>
-    proseViolations({
-      text,
-      ledger,
-      where,
-      showsRecord,
-      ...(input.question !== undefined ? { question: input.question } : {}),
-    }).forEach((c) => add(c, where));
-  proseOf(plan.lead, 'lead');
-  if (view) proseOf(view.text, 'view');
   const days = facts.flatMap((f) => f?.dates ?? []);
-  if (plan.lead.includes(WHEN) && days.length === 0) add('prose.time', 'lead');
 
-  // 6. Sensitive strings, anywhere.
+  // 4. The lead: allowed for these blocks and this message.
+  const lead = LEADS[plan.lead];
+  const message = classifyMessage(input.question);
+  const records = plan.facts.filter((b) => !isSummary(b));
+  const n = plan.facts.length;
+  const leadOk = (() => {
+    if (lead.kind === 'social') return n === 0 && !plan.view && message.known && !message.question;
+    if (lead.kind === 'uncertain') return n === 0 && !plan.view;
+    if (n === 0) return false;
+    if (lead.when && days.length === 0) return false;
+    if (lead.one && !(n === 1 && records.length === 1)) return false;
+    if (lead.record && records.length === 0) return false;
+    if (lead.flagged && !records.some((b) => b.kind === 'conflict' || b.kind === 'insight'))
+      return false;
+    if (lead.affirming && (!message.known || message.yesNo || message.availability)) return false;
+    return true;
+  })();
+  if (!leadOk) add('lead.unsupported', 'lead');
+
+  // 5. Kev's view: its blocks exist and support its phrase.
+  const view = plan.view;
+  if (view) {
+    if (
+      new Set(view.about).size !== view.about.length ||
+      view.about.some((i) => i >= plan.facts.length)
+    )
+      add('view.about', 'view');
+    else {
+      const about: AboutBlock[] = view.about.map((i) => {
+        const block = plan.facts[i]!;
+        return {
+          block,
+          entry: used[i] ?? null,
+          show: isSummary(block)
+            ? []
+            : block.show.length > 0
+              ? block.show
+              : DEFAULT_SHOW[block.kind],
+        };
+      });
+      const needs = VIEW_PHRASES[view.phrase].support;
+      if (
+        n === 0 ||
+        (needs !== 'none' && view.about.length === 0) ||
+        view.about.some((i) => facts[i] === null) ||
+        !supports(view.phrase, about, ledger.readerId)
+      )
+        add('view.unsupported', 'view');
+    }
+  }
+
+  // 6. Sensitive strings, in what HOME rendered.
   const sensitive = (input.sensitive ?? [])
     .map((s) => s.normalize('NFKC').toLowerCase().trim())
     .filter((s) => s.length >= 4);
-  const leaks = (t: string) => sensitive.some((s) => t.normalize('NFKC').toLowerCase().includes(s));
-  if (leaks(plan.lead)) add('sensitive.leak', 'lead');
-  if (view && leaks(view.text)) add('sensitive.leak', 'view');
   facts.forEach((f, i) => {
-    if (f && leaks(f.text)) add('sensitive.leak', i);
+    if (f && sensitive.some((s) => f.text.normalize('NFKC').toLowerCase().includes(s)))
+      add('sensitive.leak', i);
   });
 
   const factsOk = !out.some((v) => typeof v.where === 'number' || v.where === 'answer');
-  const render = (lead: string, withView: boolean): RenderedAnswer => {
+  const render = (say: string, withView: boolean): RenderedAnswer => {
     const blocks: AnswerBlock[] = facts.map((f) => ({
       kind: 'fact' as const,
       text: f!.text,
@@ -206,14 +255,14 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
     if (withView && view)
       blocks.push({
         kind: 'view',
-        text: normaliseProse(view.text),
+        text: VIEW_PHRASES[view.phrase].text,
         cites: uniqueRefs(view.about.flatMap((i) => facts[i]?.cites ?? [])),
       });
     return {
-      say: lead,
+      say,
       blocks,
       cites: uniqueRefs(blocks.flatMap((b) => b.cites)).slice(0, MAX_CITES),
-      shown: { types, summaries, gapsPartial },
+      shown: { types, summaries, gapsPartial, ...(forecastAt ? { forecastAt } : {}) },
     };
   };
   if (out.length > 0)
@@ -221,12 +270,9 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
       ok: false,
       plan,
       violations: sortViolations(out),
-      salvage: factsOk ? render(SALVAGE_LEAD, false) : null,
+      salvage: factsOk && n > 0 ? render(leadText(SALVAGE_LEAD_ID, days, today), false) : null,
     };
-  const lead = normaliseProse(plan.lead);
-  const filled = lead.includes(WHEN) ? lead.replace(WHEN, daysPhrase(days, today, 'bare')) : lead;
-  const say = lead.startsWith(WHEN) ? capitalise(filled) : filled;
-  return { ok: true, plan, rendered: render(say, true) };
+  return { ok: true, plan, rendered: render(leadText(plan.lead, days, today), true) };
 }
 
 /** Refs in order, each once. */
@@ -249,20 +295,9 @@ export function codesOf(violations: readonly Violation[]): ValidatorCode[] {
   return ORDER.filter((c) => violations.some((v) => v.code === c));
 }
 
-/** Codes a salvage may drop with the lead and view: only ever about the model's own words. */
-export const PROSE_CODES: ReadonlySet<ValidatorCode> = new Set<ValidatorCode>([
-  'text.unsafe',
-  'markup',
-  'prose.time',
-  'prose.number',
-  'prose.person',
-  'prose.record',
-  'prose.claim',
-  'availability.claim',
-  'conflict.unsupported',
-  'authority.claim',
-  'phrase.forbidden',
-  'tone.filler',
-  'sensitive.leak',
+/** Codes a salvage may drop with the lead and view: only ever about the model's selections of HOME's words. */
+export const SALVAGE_CODES: ReadonlySet<ValidatorCode> = new Set<ValidatorCode>([
+  'lead.unsupported',
   'view.about',
+  'view.unsupported',
 ]);

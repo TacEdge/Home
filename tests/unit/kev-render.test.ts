@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { temperatureWords as screenTemperature } from '@/app/_insights/weather/weather-today';
-import { forbiddenIn } from '@/kev/answer/language';
+import { TASK_STATUS_LABEL } from '@/app/(home)/tasks/copy';
+import { catalogueCopy, LEADS, SALVAGE_LEAD_ID } from '@/kev/answer/catalogue';
+import { SEARCH_ELSE_TEXT, SEARCH_NONE_TEXT } from '@/kev/answer/coverage';
+import { fixedCopy, forbiddenIn, SALVAGE_LEAD } from '@/kev/answer/language';
 import { Ledger } from '@/kev/answer/ledger';
 import {
   daysPhrase,
@@ -170,7 +173,7 @@ describe('every other kind, from its own record', () => {
   it('a task: its status as recorded (open is never done), estimate, needs, assignee, due date', () => {
     const t = text(paint, ['status', 'estimate', 'needs', 'assignee']);
     expect(t).toBe(
-      '“Paint the back fence”: open, about three hours, in dry weather and daylight, assigned to Sam.',
+      '“Paint the back fence”: to do, about three hours, in dry weather and daylight, assigned to Sam.',
     );
     expect(t).not.toMatch(/done|painted|complete/);
     expect(
@@ -196,7 +199,7 @@ describe('every other kind, from its own record', () => {
 
   it('a gap in M7’s words, with its neighbour and band', () => {
     expect(text(gap, ['neighbours', 'forecast'])).toBe(
-      'Nothing is recorded for the household on Saturday 17 October, 10:00–19:30. After “Football”. The forecast for then: looks dry.',
+      'Nothing is recorded for the household on Saturday 17 October, 10:00–19:30. That’s after “Football”. The forecast for then: looks dry.',
     );
   });
 
@@ -359,6 +362,26 @@ describe('HOME’s copy', () => {
       text(dinosaurs, [], l),
     ].map((t) => t.replace(/“[^”]*”/g, '"title"'));
     for (const t of all) expect(forbiddenIn(t), t).toEqual([]);
+  });
+
+  it('HOME’s catalogue (every lead and every view phrase) and its fixed lines say nothing the four lists forbid', () => {
+    for (const t of [...catalogueCopy(), SEARCH_NONE_TEXT, SEARCH_ELSE_TEXT])
+      expect(forbiddenIn(t), t).toEqual([]);
+    // Fixed lines' "can't" is about Kev itself, the one exemption (\u00A78.6).
+    for (const t of fixedCopy())
+      expect(
+        forbiddenIn(t).filter((p) => p !== "can't"),
+        t,
+      ).toEqual([]);
+    // The salvage's lead is the catalogue's `home_has`.
+    expect(LEADS[SALVAGE_LEAD_ID].text).toBe(SALVAGE_LEAD);
+  });
+
+  it('a task’s status in the Tasks screen’s words (parity with its labels)', () => {
+    const l = ledger();
+    expect(text(paint, ['status'], l)).toBe(
+      `“Paint the back fence”: ${TASK_STATUS_LABEL.open.toLowerCase()}.`,
+    );
   });
 
   it('an all-day item over several days names its span', () => {

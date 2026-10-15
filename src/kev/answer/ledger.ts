@@ -104,11 +104,16 @@ export type CoverageSpan = {
   persons: ReadonlySet<string> | null;
   /** `forecast`: whether a forecast is set up at all. */
   configured?: boolean;
-  /** `search`: what was searched for, trimmed. */
-  query?: string;
 };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * A one-off conflict's key ends in its overlap's own instants
+ * (`…:{startUTC}-{endUTC}`, src/domain/engines/conflicts.ts); a standing
+ * one's in its wall clock (`…:w{HHMM}-{HHMM}`). Anything else is treated as
+ * standing: conservative.
+ */
+const ONE_OFF_CONFLICT = /:\d{8}T\d{4}Z-\d{8}T\d{4}Z$/;
 /** Keys of recorded text whose words are a record's own (titles, names, labels, notes …). */
 const RECORD_TEXT_KEYS = new Set([
   'title',
@@ -245,6 +250,21 @@ export class Ledger {
     return Number.isFinite(t) ? isoDateInZone(new Date(t), this.#timeZone) : null;
   }
 
+  /**
+   * Every home date a timed span touches (final review, Coverage 1): a
+   * conference from Tuesday 18:00 to Thursday 10:00 is on Tuesday,
+   * Wednesday and Thursday; one ending at midnight is not on the next day.
+   */
+  #spanDates(start: unknown, end: unknown): IsoDate[] {
+    const s = Date.parse(str(start) ?? '');
+    if (!Number.isFinite(s)) return [];
+    const e = Date.parse(str(end) ?? '');
+    const last = Number.isFinite(e) && e > s ? e - 1 : s;
+    const first = isoDateInZone(new Date(s), this.#timeZone);
+    const lastDay = isoDateInZone(new Date(last), this.#timeZone);
+    return [...daysFrom(first, lastDay)];
+  }
+
   /** The dates, people and span an object records (see the header). */
   #facts(
     o: Record<string, unknown> | null,
@@ -273,9 +293,15 @@ export class Ledger {
       switch (shape) {
         case 'agenda_event': {
           if (o.all_day !== true) {
-            addInstant(o.start);
-            addInstant(o.end);
+            for (const d of this.#spanDates(o.start, o.end)) dates.add(d);
             span = spanOf(o.start, o.end);
+          } else if (typeof o.days === 'number' && o.days > 1) {
+            // An all-day occurrence over several days is on every one of
+            // them, wherever it is listed: from its start (its ref's `at`,
+            // or the listed day less the days before it) for `days` days.
+            const listedAs = typeof o.day === 'number' ? o.day : 1;
+            const start = this.#dateOf(ref.at) ?? (day ? addDays(day, -(listedAs - 1)) : undefined);
+            if (start) for (let i = 0; i < o.days && i < 92; i++) dates.add(addDays(start, i));
           }
           people = new Set(
             (Array.isArray(o.people) ? o.people : [])
@@ -285,15 +311,14 @@ export class Ledger {
           break;
         }
         case 'commitment':
-          addInstant(o.start);
-          addInstant(o.end);
+          for (const d of this.#spanDates(o.start, o.end)) dates.add(d);
           span = spanOf(o.start, o.end);
           break;
         case 'task': {
           add(o.due);
           const s = o.scheduled as { start?: unknown; end?: unknown } | null;
           if (s) {
-            addInstant(s.start);
+            for (const d of this.#spanDates(s.start, s.end)) dates.add(d);
             span = spanOf(s.start, s.end);
           }
           const a = refOf(o.assignee);
@@ -304,7 +329,7 @@ export class Ledger {
           add(o.due);
           break;
         case 'task_scheduled':
-          addInstant(o.start);
+          for (const d of this.#spanDates(o.start, o.end)) dates.add(d);
           span = spanOf(o.start, o.end);
           break;
         case 'todo':
@@ -442,6 +467,24 @@ export class Ledger {
         for (const r of v) if (isRef(r)) this.#add(r, source, null, 'ref_only', {});
         continue;
       }
+      // Today's evening: its tomorrow-morning items are tomorrow's.
+      if (isToday && k === 'evening' && typeof v === 'object' && v !== null) {
+        const ev = v as Record<string, unknown>;
+        this.#walk(
+          ev.tomorrow_morning,
+          source,
+          context,
+          addDays(ownDate, 1),
+          'tomorrow_morning',
+          today,
+        );
+        this.#walk(ev.before_then, source, context, undefined, 'before_then', today);
+        continue;
+      }
+      // A day reaches the items listed under it, and through a person's line
+      // (a ref-carrying `{ref, name, items}` under Today's `people`) to that
+      // person's items (final review, Coverage 1): no other key of a
+      // ref-carrying object inherits it.
       const childDay = isAgendaDay
         ? k === 'items'
           ? ownDate
@@ -451,7 +494,9 @@ export class Ledger {
             ? ownDate
             : undefined
           : ref
-            ? undefined
+            ? k === 'items' && Array.isArray(v)
+              ? day
+              : undefined
             : day;
       this.#walk(v, source, context, childDay, k, today);
     }
@@ -508,7 +553,19 @@ export class Ledger {
         : null;
       this.#cover({ kind: 'agenda', days: daysFrom(from, to), persons });
     } else if (source === 'get_conflicts' && from && to) {
-      this.#cover({ kind: 'conflicts', days: daysFrom(from, to), persons: null });
+      // Each conflict is listed once, at its first overlap in the range. A
+      // standing conflict (a recurring pair) repeats, and its later
+      // instances are not listed: the read covers no day after that first
+      // instance (final review, Coverage 2). A one-off's key names its one
+      // overlap, so it says nothing about later days.
+      let days = daysFrom(from, to);
+      for (const c of Array.isArray(d.conflicts) ? d.conflicts : []) {
+        const key = str((c as { key?: unknown }).key) ?? '';
+        const when = str((c as { when?: unknown }).when);
+        if (ONE_OFF_CONFLICT.test(key)) continue;
+        days = new Set(when ? [...days].filter((x) => x <= when) : []);
+      }
+      this.#cover({ kind: 'conflicts', days, persons: null });
     } else if (source === 'get_today' && typeof d.date === 'string' && DATE.test(d.date)) {
       this.#cover({ kind: 'agenda', days: new Set([d.date as IsoDate]), persons: null });
     } else if (source === 'get_weather') {
@@ -524,9 +581,8 @@ export class Ledger {
             );
       this.#cover({ kind: 'forecast', days, persons: null, configured: !unconfigured });
     } else if (source === 'search') {
-      const q = (input as { query?: unknown } | undefined)?.query;
-      if (typeof q === 'string')
-        this.#cover({ kind: 'search', days: new Set(), persons: null, query: q.trim() });
+      // What was searched for is the model's text: never kept, never shown.
+      this.#cover({ kind: 'search', days: new Set(), persons: null });
     }
   }
 

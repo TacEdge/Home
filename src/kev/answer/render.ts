@@ -1,6 +1,6 @@
 import 'server-only';
 import { capitalise, nameList, numberWord } from '@/domain/engines/day-facts';
-import { bandWords, type Band } from '@/domain/engines/weather';
+import { asOfTime, bandWords, forecastAge, type Band } from '@/domain/engines/weather';
 import {
   addDays,
   clockOf,
@@ -28,7 +28,8 @@ import { DEFAULT_SHOW, type RecordBlock, type ShowField } from './schema';
 // - people and roles are the record's own (a person record is never
 //   attached to an event; a conflict's commitments render from the
 //   conflict's own data);
-// - status is as recorded: an open task reads "open", never "done";
+// - status is as recorded, in the Tasks screen's words: an open task reads
+//   "to do", never "done";
 // - titles, labels, notes and context are quoted recorded text, cleaned of
 //   control and format characters and never interpreted ("Football
 //   CANCELLED" is a title); a person's name reads plainly when it looks like
@@ -203,8 +204,9 @@ const NEED_WORDS: Readonly<Record<string, string>> = {
   two_people: 'two people',
   shops_open: 'shops open',
 };
+/** The Tasks screen's status labels, lower case (src/app/(home)/tasks/copy.ts, held equal by a parity test). */
 const TASK_STATUS: Readonly<Record<string, string>> = {
-  open: 'open',
+  open: 'to do',
   done: 'done',
   dropped: 'dropped',
 };
@@ -244,6 +246,17 @@ const PREFERENCE: Readonly<Partial<Record<Ref['type'], readonly Shape[]>>> = {
 
 function pick(entries: readonly LedgerEntry[], type: Ref['type']): LedgerEntry | null {
   for (const shape of PREFERENCE[type] ?? [])
+    for (const e of entries) if (e.shape === shape && e.record) return e;
+  return null;
+}
+
+/**
+ * The entry a block is rendered from (for a person: their own record, the
+ * richest first), for the checks over what a block shows (Kev's view).
+ */
+export function pickEntry(entries: readonly LedgerEntry[], type: Ref['type']): LedgerEntry | null {
+  if (type !== 'person') return pick(entries, type);
+  for (const shape of ['people_person', 'birthday', 'bundle_person'] as const)
     for (const e of entries) if (e.shape === shape && e.record) return e;
   return null;
 }
@@ -576,9 +589,10 @@ function gap(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
   if (show.includes('neighbours')) {
     const before = o.before as { title?: unknown } | null;
     const after = o.after as { title?: unknown } | null;
-    if (before && after) text += ` Between ${quoted(before.title)} and ${quoted(after.title)}.`;
-    else if (before) text += ` After ${quoted(before.title)}.`;
-    else if (after) text += ` Before ${quoted(after.title)}.`;
+    if (before && after)
+      text += ` That’s between ${quoted(before.title)} and ${quoted(after.title)}.`;
+    else if (before) text += ` That’s after ${quoted(before.title)}.`;
+    else if (after) text += ` That’s before ${quoted(after.title)}.`;
   }
   if (show.includes('forecast'))
     text +=
@@ -617,10 +631,22 @@ function forecast(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
       }
     }
   }
+  const day = `${dayWord(date, ctx.today)}: ${out.join(' ')}`.trim();
+  // M7's freshness rule (contract §5.1; src/domain/engines/weather.ts): an
+  // older forecast (3 to 12 hours) begins "As of {time}, ", its own fetch
+  // time against this answer's `now`.
+  const at = forecastFetchedAt(e);
+  const older = at !== null && forecastAge(at, ctx.now) === 'older';
   return {
-    text: `${capitalise(dayWord(date, ctx.today))}: ${out.join(' ')}`.trim(),
+    text: older ? `As of ${asOfTime(at, ctx.now, ctx.timeZone)}, ${day}` : capitalise(day),
     dates: [date],
   };
+}
+
+/** A forecast day's fetch time, from the read that returned it (null when it did not say). */
+export function forecastFetchedAt(e: LedgerEntry): Date | null {
+  const t = Date.parse(e.context.fetchedAt ?? '');
+  return Number.isFinite(t) ? new Date(t) : null;
 }
 
 function calendarBlock(e: LedgerEntry, ctx: Ctx): Out {

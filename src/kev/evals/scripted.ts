@@ -125,7 +125,7 @@ function step(spec: StepSpec, ids: FixtureIds): ScriptEntry {
     kind: 'answer',
     text: [
       JSON.stringify({
-        lead: p.lead,
+        lead: p.words ?? p.lead,
         facts: p.facts.map((f) => fact(f, req)),
         view: p.view ?? null,
         decline: null,

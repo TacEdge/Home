@@ -59,9 +59,11 @@ export const LIMIT_CODES = [
 
 /**
  * The checker's codes (contract §8.3, as amended by the owner on
- * 2026-10-15, ADR 0012 §46: the model selects records and HOME renders
- * every fact, so the codes are about the plan's structure and the model's
- * fact-free words). Application schema only; no migration.
+ * 2026-10-15, ADR 0012 §46: the model selects records, a lead from HOME's
+ * catalogue and a typed view; HOME writes every word, so the codes are
+ * about the plan's structure and whether each selection is supported).
+ * Application schema only; no migration (no Kev message is stored anywhere
+ * but tests: Kev is off, with no provider key).
  */
 export const VALIDATOR_CODES = [
   'answer.schema',
@@ -69,19 +71,9 @@ export const VALIDATOR_CODES = [
   'fact.kind',
   'fact.field',
   'absence.unsupported',
+  'lead.unsupported',
   'view.about',
-  'text.unsafe',
-  'markup',
-  'prose.time',
-  'prose.number',
-  'prose.person',
-  'prose.record',
-  'prose.claim',
-  'availability.claim',
-  'conflict.unsupported',
-  'authority.claim',
-  'phrase.forbidden',
-  'tone.filler',
+  'view.unsupported',
   'sensitive.leak',
 ] as const;
 
@@ -112,6 +104,43 @@ export const PLAN_SHOW_FIELDS = [
   'parts',
 ] as const;
 export const PLAN_SCOPE_KINDS = ['agenda', 'conflicts', 'forecast', 'search'] as const;
+/** HOME's lead catalogue and Kev's view vocabulary, by identifier (src/kev/answer/catalogue.ts, version 1). */
+export const PLAN_LEAD_IDS = [
+  'home_has',
+  'when',
+  'righto_when',
+  'here_you_go',
+  'good_question',
+  'found',
+  'have_a_look',
+  'ka_pai',
+  'no_worries',
+  'flagged',
+  'welcome',
+  'kia_ora',
+  'morena',
+  'ka_kite',
+  'cheers',
+  'unsure',
+] as const;
+export const PLAN_VIEW_TYPES = ['consideration', 'suggestion', 'follow_up', 'uncertainty'] as const;
+export const PLAN_VIEW_PHRASES = [
+  'leave_early',
+  'check_with_others',
+  'double_check',
+  'plan_b',
+  'present',
+  'raincoat',
+  'jacket',
+  'nudge',
+  'stretch_estimate',
+  'who_goes_where',
+  'check_calendar',
+  'ask_more',
+  'recorded_only',
+  'forecast_can_change',
+  'may_have_changed',
+] as const;
 
 /** Why a turn ended in the error state (contract §9.9, §11.3). */
 export const KEV_ERROR_CODES = [
@@ -158,12 +187,13 @@ export const answerBlockSchema = z
 
 /**
  * The validated answer plan, as stored beside what was rendered (contract
- * §7.6, as amended): the model's selections and its lead and view, never a
- * rendered fact (those are `blocks`). Bounded like the plan itself.
+ * §7.6, as amended): the model's selections (its lead and view by
+ * identifier), never a rendered fact or word (those are `say` and
+ * `blocks`). Bounded like the plan itself.
  */
 export const storedPlanSchema = z
   .object({
-    lead: z.string().min(1).max(120),
+    lead: z.enum(PLAN_LEAD_IDS),
     facts: z
       .array(
         z.union([
@@ -194,8 +224,9 @@ export const storedPlanSchema = z
       .max(10),
     view: z
       .object({
-        text: z.string().min(1).max(300),
-        about: z.array(z.number().int().min(0).max(9)).min(1).max(10),
+        type: z.enum(PLAN_VIEW_TYPES),
+        phrase: z.enum(PLAN_VIEW_PHRASES),
+        about: z.array(z.number().int().min(0).max(9)).max(10),
       })
       .strict()
       .nullable(),
@@ -272,6 +303,12 @@ export const kevContentV2 = z
     plan: storedPlanSchema.optional(),
     /** The plan's lead or view failed the check; its validated facts are shown with HOME's lead (§8.5). */
     salvaged: z.literal(true).optional(),
+    /**
+     * The fetch time of the forecast the answer shows, as it was when the
+     * answer was checked: the screen's "Forecast as of {time}" is written
+     * from this, never from a later cache (final review, Rendering 5).
+     */
+    forecastAt: isoInstant.optional(),
     cites: z.array(refSchema).max(50),
     limits: z.array(z.enum(LIMIT_CODES)).max(LIMIT_CODES.length),
     trace: z.array(traceEntrySchema).max(16),

@@ -61,6 +61,7 @@ const sse =
   };
 const usage = { input_tokens: 2_000, cache_creation_input_tokens: 0 };
 /** An answer plan (owner amendment, ADR 0012 §46): a lead and the records chosen, by ref. */
+/** A lead by HOME's catalogue id ('when'); any other string is a model's own words (refused whole). */
 const planOf = (lead: string, refs: { type: string; id: string; at?: string }[]) => ({
   lead,
   facts: refs.map((r) => ({
@@ -129,7 +130,7 @@ describe('N15: the grow-only request, on the wire', () => {
       ),
       sse(
         messageStart(FAST, usage) +
-          textBlock(0, answerJson('Here’s {when}.', [football])) +
+          textBlock(0, answerJson('when', [football])) +
           messageEnd('end_turn', 60),
       ),
     );
@@ -224,7 +225,7 @@ describe('N15: the grow-only request, on the wire', () => {
       content: { type: string; text: string }[];
     };
     expect(note.role).toBe('user');
-    expect(note.content.at(-1)!.text).toContain('prose.number in the lead');
+    expect(note.content.at(-1)!.text).toContain('answer.schema in the answer');
     expect(note.content.at(-1)!.text).not.toContain('at 4');
 
     // Nothing provider-shaped was stored (N13).
@@ -262,7 +263,7 @@ describe('N15: the grow-only request, on the wire', () => {
       ),
       sse(
         messageStart(FAST, usage) +
-          toolBlock(0, 'toolu_late_5', 'answer', answerInput('Here’s {when}.')) +
+          toolBlock(0, 'toolu_late_5', 'answer', answerInput('when')) +
           messageEnd('tool_use', 60),
       ),
     );
@@ -304,7 +305,7 @@ describe('N15: the grow-only request, on the wire', () => {
     const lastUser = (b: Record<string, unknown>) => bytes((b.messages as unknown[]).at(-1));
     // After the third round, HOME asks for the answer tool; the regeneration says so again.
     expect(lastUser(bodies[3]!)).toContain('Give your answer now with the answer tool');
-    expect(lastUser(bodies[4]!)).toContain('prose.number in the lead');
+    expect(lastUser(bodies[4]!)).toContain('answer.schema in the answer');
     expect(lastUser(bodies[4]!)).toContain('Give your answer now with the answer tool');
   });
 });

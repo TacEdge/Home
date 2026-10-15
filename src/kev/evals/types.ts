@@ -14,7 +14,8 @@ import 'server-only';
 // fabricates) so that the code-enforced checks are what is tested. Package
 // 5's live runner ignores `script` and asks the real models.
 //
-// Pure data and types: no imports from the database, the app or a provider.
+// Pure data and types: no imports from the database, the app or a provider
+// (lead and phrase identifiers are strings here; the checker holds them).
 
 export const SCENARIO_CLASSES = [
   'realistic',
@@ -76,11 +77,17 @@ export type ScopeSpec = {
 export type FactSpec =
   { record: RefSpec; show?: string[] } | { absence: ScopeSpec } | { count: ScopeSpec };
 
-/** A scripted answer plan: the model's lead, its selections and its view. */
+/**
+ * A scripted answer plan: the model's lead and view, by HOME's catalogue
+ * identifiers (src/kev/answer/catalogue.ts), and its selections. `words`:
+ * a misbehaving model that writes its own sentence in the lead's place (the
+ * provider's schema forbids it; the checker refuses it as `answer.schema`).
+ */
 export type PlanSpec = {
   lead: string;
+  words?: string;
   facts: FactSpec[];
-  view?: { text: string; about: number[] };
+  view?: { type: string; phrase: string; about: number[] };
 };
 
 /**

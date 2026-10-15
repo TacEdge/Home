@@ -3,7 +3,7 @@ import type { LIMIT_CODES } from '@/domain/kev-bookkeeping/schema';
 import type { Ref, RefType } from '../tools/types';
 import { FALLBACK_LEAD, FALLBACK_WITH_ROWS } from './language';
 import { fullKeyOf, type Ledger } from './ledger';
-import { renderRecord } from './render';
+import { forecastFetchedAt, pickEntry, renderRecord } from './render';
 import { MAX_FACTS, type AnswerBlock } from './schema';
 import type { RenderedAnswer, Shown } from './validate';
 
@@ -49,6 +49,7 @@ export function buildFallback(ledger: Ledger, now: Date): RenderedAnswer {
   const blocks: AnswerBlock[] = [];
   const types = new Set<RefType>();
   let gapsPartial = false;
+  let forecastAt: string | undefined;
   for (const r of rows) {
     if (blocks.length === MAX_FACTS) break;
     const k = fullKeyOf(r);
@@ -63,13 +64,17 @@ export function buildFallback(ledger: Ledger, now: Date): RenderedAnswer {
     types.add(r.type);
     if (r.type === 'gap' && ledger.resolve(r).some((e) => e.context.gapCoverage === 'partial'))
       gapsPartial = true;
+    if (r.type === 'forecast' && !forecastAt) {
+      const e = pickEntry(ledger.resolve(r), 'forecast');
+      if (e && forecastFetchedAt(e)) forecastAt = e.context.fetchedAt!;
+    }
   }
   const cites: Ref[] = blocks.flatMap((b) => b.cites);
   return {
     say: blocks.length > 0 ? FALLBACK_WITH_ROWS : FALLBACK_LEAD,
     blocks,
     cites,
-    shown: { types, summaries: new Set(), gapsPartial },
+    shown: { types, summaries: new Set(), gapsPartial, ...(forecastAt ? { forecastAt } : {}) },
   };
 }
 
@@ -85,6 +90,14 @@ export type Coverage = {
 
 /** Blocks that rest on calendar records (§8.4, amended). */
 const CALENDAR_RECORDS: readonly RefType[] = ['event', 'conflict', 'gap', 'insight'];
+/**
+ * Statements over what calendars hold (final review, minors): an absence or
+ * count over the agenda or overlaps, and a search's "nothing has a matching
+ * title" (a search reads events' titles too). Each is qualified like a cited
+ * event: "As far as HOME knows." with a stale calendar, the coverage
+ * sentence with none at all.
+ */
+const CALENDAR_SUMMARIES = ['agenda', 'conflicts', 'search'] as const;
 
 /**
  * The code's sentences for what an answer shows (§8.4), as limit codes. The
@@ -103,15 +116,15 @@ const CALENDAR_RECORDS: readonly RefType[] = ['event', 'conflict', 'gap', 'insig
  */
 export function limitsFor(shown: Shown, coverage: Coverage): LimitCode[] {
   const has = (t: RefType) => shown.types.has(t);
-  const calendarFacts =
-    CALENDAR_RECORDS.some(has) || shown.summaries.has('agenda') || shown.summaries.has('conflicts');
+  const summaries = CALENDAR_SUMMARIES.some((k) => shown.summaries.has(k));
+  const calendarFacts = CALENDAR_RECORDS.some(has) || summaries;
   const out: LimitCode[] = [];
   if (has('gap')) out.push('gap_limit');
   if ((calendarFacts && coverage.calendarsUnhealthy) || shown.gapsPartial)
     out.push('calendar_stale');
-  if (has('forecast')) out.push('forecast_credit');
+  if (has('forecast') || shown.forecastAt) out.push('forecast_credit');
   if (
-    (has('event') || has('gap') || shown.summaries.has('agenda')) &&
+    (has('event') || has('gap') || has('conflict') || summaries) &&
     (coverage.noCalendars || (has('gap') && coverage.gapsUnknown))
   )
     out.push('coverage_unknown');

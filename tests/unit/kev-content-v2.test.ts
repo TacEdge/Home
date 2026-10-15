@@ -67,7 +67,22 @@ describe('content v2', () => {
         ...answer,
         plan: { lead: 'Here’s today.', facts: [{ kind: 'event', text: 'x' }], view: null },
       },
-      { ...answer, plan: { lead: 'x'.repeat(121), facts: [], view: null } },
+      // The lead and the view are identifiers from HOME's catalogue: never words.
+      { ...answer, plan: { lead: 'Here’s today.', facts: [], view: null } },
+      {
+        ...answer,
+        plan: {
+          lead: 'when',
+          facts: [],
+          view: { text: 'Might be worth leaving early.', about: [0] },
+        },
+      },
+      {
+        ...answer,
+        plan: { lead: 'when', facts: [], view: { type: 'opinion', phrase: 'raincoat', about: [] } },
+      },
+      { ...answer, violations: ['prose.time'] },
+      { ...answer, forecastAt: 'yesterday 21:00' },
     ];
     expect(
       kevContentV2.safeParse({ ...answer, blocks: Array(11).fill(answer.blocks[0]) }).success,
@@ -75,9 +90,14 @@ describe('content v2', () => {
     expect(
       kevContentV2.safeParse({
         ...answer,
-        plan: { lead: 'Here’s {when}.', facts: [], view: null },
+        plan: {
+          lead: 'when',
+          facts: [],
+          view: { type: 'suggestion', phrase: 'raincoat', about: [0] },
+        },
         salvaged: true,
-        violations: ['prose.time'],
+        violations: ['lead.unsupported', 'view.unsupported'],
+        forecastAt: '2026-10-14T06:55:00+13:00',
       }).success,
     ).toBe(true);
     for (const b of bad) expect(kevContentV2.safeParse(b).success, JSON.stringify(b)).toBe(false);

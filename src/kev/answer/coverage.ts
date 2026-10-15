@@ -1,8 +1,9 @@
 import 'server-only';
 import { capitalise, nameList, numberWord } from '@/domain/engines/day-facts';
-import { clockOf, isoDateInZone, type IsoDate } from '@/lib/dates';
+import { atHome } from '@/domain/engines/weather';
+import { addDays, clockOf, isoDateInZone, type IsoDate } from '@/lib/dates';
 import { daysFrom, fullKeyOf, partOf, type DayPart, type Ledger, type LedgerEntry } from './ledger';
-import { clean, daysPhrase, nameText } from './render';
+import { daysPhrase, nameText } from './render';
 import type { Scope, SummaryBlock } from './schema';
 
 // Absence and counts (M8 contract §8.3; owner amendment, ADR 0012 §46). The
@@ -22,6 +23,10 @@ import type { Scope, SummaryBlock } from './schema';
 // `else` also needs at least one. A count is the number of events (or
 // overlaps) the ledger holds in scope, over the same coverage, and only
 // when who is on each is known. Code writes the sentence.
+
+/** A search found nothing: HOME's words, with no echo of what was searched for. */
+export const SEARCH_NONE_TEXT = 'Nothing you can see in HOME has a matching title.';
+export const SEARCH_ELSE_TEXT = 'Nothing else you can see in HOME has a matching title.';
 
 export type SummaryOutcome =
   { ok: true; text: string; dates: IsoDate[] } | { ok: false; code: 'absence.unsupported' };
@@ -55,6 +60,21 @@ function partsOf(span: { from: number; to: number }, timeZone: string): Set<DayP
   return out;
 }
 
+/**
+ * The parts of one home day a span touches: the span clipped to that day
+ * (final review, minor: an event from Saturday 22:00 to Sunday 02:00 is in
+ * Saturday's evening and Sunday's morning, and nothing else).
+ */
+function partsOn(span: { from: number; to: number }, day: IsoDate, timeZone: string): Set<DayPart> {
+  const start = atHome(day, '00:00', timeZone).getTime();
+  const end = atHome(addDays(day, 1), '00:00', timeZone).getTime();
+  if (span.to <= span.from)
+    return span.from >= start && span.from < end ? partsOf(span, timeZone) : new Set();
+  const from = Math.max(span.from, start);
+  const to = Math.min(span.to, end);
+  return to > from ? partsOf({ from, to }, timeZone) : new Set();
+}
+
 const PART_WORDS: Readonly<Record<DayPart, string>> = {
   morning: 'in the morning',
   afternoon: 'in the afternoon',
@@ -79,21 +99,20 @@ export function renderSummary(
   const isShown = (e: LedgerEntry) =>
     shown.has(fullKeyOf(e.ref)) || shown.has(`${e.ref.type}|${e.ref.id}|`);
 
-  // Search: what complete searches found, by what was searched for.
+  // Search: what this attempt's complete searches found. HOME's fixed
+  // words, never the query: the query is the model's text (final review,
+  // Rendering 4), so it is never shown.
   if (scope.of === 'search') {
     if (count || scope.from || scope.to || scope.people.length > 0 || scope.part) return fail;
-    const searches = ledger.coverage.filter((c) => c.kind === 'search' && c.query);
+    const searches = ledger.coverage.filter((c) => c.kind === 'search');
     if (searches.length === 0) return fail;
     const reads = new Set(searches.map((c) => c.read));
     const found = ledger.entries.filter((e) => e.source === 'search' && reads.has(e.read));
     if (scope.else ? found.length === 0 || found.some((e) => !isShown(e)) : found.length > 0)
       return fail;
-    const queries = [...new Set(searches.map((c) => clean(c.query!)))];
-    if (queries.some((q) => q.length === 0)) return fail;
-    const quotedQs = queries.map((q) => `“${q}”`);
     return {
       ok: true,
-      text: `Nothing ${scope.else ? 'else ' : ''}you can see in HOME has a title matching ${quotedQs.length > 1 ? `${quotedQs.slice(0, -1).join(', ')} or ${quotedQs.at(-1)}` : quotedQs[0]}.`,
+      text: scope.else ? SEARCH_ELSE_TEXT : SEARCH_NONE_TEXT,
       dates: [],
     };
   }
@@ -108,6 +127,9 @@ export function renderSummary(
     (scope.people.length > 0 || scope.part)
   )
     return fail;
+  // Overlaps are found from today on: a day before today holds none, by
+  // construction, so it is never stated (final review, Coverage 3).
+  if (scope.of === 'conflicts' && dayList.some((d) => d < today)) return fail;
   const persons = [...new Set(scope.people)];
   if (persons.some((p) => !ledger.namesById.has(p))) return fail;
 
@@ -143,7 +165,11 @@ export function renderSummary(
       // Who is on it is unknown: possibly theirs (conservative).
       if (on !== null && !persons.some((p) => on.has(p))) return false;
     }
-    if (scope.part && e.span && !partsOf(e.span, tz).has(scope.part)) return false;
+    if (scope.part && e.span) {
+      const part = scope.part;
+      const on = [...e.dates].filter((d) => days.has(d));
+      if (!on.some((d) => partsOn(e.span!, d, tz).has(part))) return false;
+    }
     return true;
   });
 

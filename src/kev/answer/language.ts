@@ -90,9 +90,10 @@ export const KEEPABLE_ERRORS: ReadonlySet<KevTurnErrorCode> = new Set([
 ]);
 
 /**
- * The lead HOME shows when the model's own words failed the check but the
- * facts it chose passed (§8.5, owner amendment ADR 0012 §46): the rendered
- * facts, with this lead and no view.
+ * The lead HOME shows when the model's lead or view failed the check but
+ * the facts it chose passed (§8.5, owner amendment ADR 0012 §46): the
+ * rendered facts, with this lead and no view. The catalogue's `home_has`
+ * (./catalogue.ts), held equal by a test.
  */
 export const SALVAGE_LEAD = 'Here’s what HOME has.';
 
@@ -105,7 +106,8 @@ export const LIMIT_TEXT = Object.freeze({
   gap_limit:
     'This is only what HOME has recorded that you can see. It isn’t a check of anyone’s plans.',
   calendar_stale: 'As far as HOME knows.',
-  // `{time}` is the forecast's fetch time, filled by the screen from the cite.
+  // `{time}` is the forecast's fetch time, filled by the screen from the
+  // answer's stored `forecastAt` (the `done` event's), never from a later cache.
   forecast_credit: 'Forecast as of {time} · Open-Meteo',
   coverage_unknown: 'HOME has no calendar connected, so this is only what’s been entered here.',
 } as const);

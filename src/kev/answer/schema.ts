@@ -1,17 +1,19 @@
 import 'server-only';
 import { z } from 'zod';
 import { REF_TYPES, refSchema, type Ref, type RefType } from '../tools/types';
+import { LEAD_IDS, VIEW_PHRASE_IDS, VIEW_PHRASES, VIEW_TYPES } from './catalogue';
 import { DECLINE_CODES, type DeclineCode } from './language';
 
-// The answer plan (M8 contract §4.4, §8.1; owner amendment of 2026-10-15,
+// The answer plan (M8 contract §4.4, §8.1; owner amendments of 2026-10-15,
 // ADR 0012 §46): what the model must return at the end of an attempt. The
-// model no longer writes facts. It selects records and organises them:
-// - `lead`: one short conversational sentence, fact-free (checked in
-//   ./prose.ts); it may hold `{when}` once, which code fills;
+// model writes no text at all. It selects:
+// - `lead`: an identifier from HOME's lead catalogue (./catalogue.ts); code
+//   writes its words and fills `{when}`;
 // - `facts`: at most ten typed selections, never display text: a record
 //   (its type, its ref exactly as a read returned it, and which of its own
 //   fields to show), or an `absence` or `count` over a mandatory scope;
-// - `view`: Kev's view, fact-free, about some of the blocks (by index);
+// - `view`: Kev's view, a typed interpretation (a type, a phrase from that
+//   type's approved vocabulary, and the blocks it is about, by index);
 // or a closed decline code, which code renders from §3.2's templates.
 // HOME's renderer (./render.ts) writes every fact from the cited record.
 //
@@ -23,18 +25,15 @@ import { DECLINE_CODES, type DeclineCode } from './language';
 //   every field is required, unions expressed by nulls, because strict
 //   schemas need `required` and `additionalProperties: false` throughout.
 //   Static, byte-stable, with no record value in it (T22): only HOME's
-//   closed sets. Lengths and counts are the Zod schema's alone.
+//   closed sets (the catalogue's lead and phrase ids among them). Lengths
+//   and counts, and which phrase belongs to which type, are the Zod
+//   schema's alone.
 
-/** The lead: one sentence, at most 120 characters. */
-export const LEAD_MAX_CHARS = 120;
-/** Kev's view: at most 300 characters. */
-export const VIEW_MAX_CHARS = 300;
 /** At most ten fact blocks. */
 export const MAX_FACTS = 10;
 /** The answer's citations, all blocks together (content v2). */
 export const MAX_CITES = 50;
-/** The one placeholder a lead may hold: the days the plan's blocks are on, filled by code. */
-export const WHEN = '{when}';
+export { WHEN } from './catalogue';
 
 /** The fields a record block may ask for, by the record's type (contract §8.1). */
 export const FIELDS_BY_KIND = Object.freeze({
@@ -137,9 +136,11 @@ export type FactBlock = RecordBlock | SummaryBlock;
 export const isSummary = (b: FactBlock): b is SummaryBlock =>
   b.kind === 'absence' || b.kind === 'count';
 
+/** Kev's view: a type, one of that type's phrases, and the blocks it is about. */
 export const viewSchema = z
   .object({
-    text: z.string().min(1).max(VIEW_MAX_CHARS),
+    type: z.enum(VIEW_TYPES),
+    phrase: z.enum(VIEW_PHRASE_IDS),
     about: z
       .array(
         z
@@ -148,15 +149,16 @@ export const viewSchema = z
           .min(0)
           .max(MAX_FACTS - 1),
       )
-      .min(1)
       .max(MAX_FACTS),
   })
-  .strict();
+  .strict()
+  .refine((v) => VIEW_PHRASES[v.phrase].type === v.type, 'a phrase of another type');
+export type View = z.output<typeof viewSchema>;
 
 export const answerPlanSchema = z.union([
   z
     .object({
-      lead: z.string().min(1).max(LEAD_MAX_CHARS),
+      lead: z.enum(LEAD_IDS),
       facts: z.array(z.union([recordBlockSchema, summaryBlockSchema])).max(MAX_FACTS),
       view: viewSchema.nullable(),
     })
@@ -201,7 +203,7 @@ const scopeJson = {
 export const ANSWER_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
   type: 'object',
   properties: {
-    lead: nullable({ type: 'string' }),
+    lead: nullable({ type: 'string', enum: [...LEAD_IDS] }),
     facts: {
       type: 'array',
       items: {
@@ -219,10 +221,11 @@ export const ANSWER_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.free
     view: nullable({
       type: 'object',
       properties: {
-        text: { type: 'string' },
+        type: { type: 'string', enum: [...VIEW_TYPES] },
+        phrase: { type: 'string', enum: [...VIEW_PHRASE_IDS] },
         about: { type: 'array', items: { type: 'integer' } },
       },
-      required: ['text', 'about'],
+      required: ['type', 'phrase', 'about'],
       additionalProperties: false,
     }),
     decline: nullable({ type: 'string', enum: [...DECLINE_CODES] }),
