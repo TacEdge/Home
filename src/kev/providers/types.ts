@@ -187,3 +187,79 @@ export interface KevProvider {
   readonly kind: 'anthropic' | 'scripted';
   run(request: ProviderRequest, options: RunOptions): Promise<ProviderResult>;
 }
+
+// ---------------------------------------------------------------------------
+// The live verification runner's probe path (M8 live-verification plan §5,
+// owner decision 2, 2026-10-16). Never part of KevProvider: only
+// src/kev/providers/anthropic.ts's probe gateway takes these, and it refuses
+// to exist on a deployed process. Nothing here reaches kev.handle() or the
+// turn route (tests/unit/kev-probe-gateway.test.ts proves it).
+
+/**
+ * What a probe may change about one call, and nothing else. Every probe
+ * call still goes through the same count (G22), fetch policy, US inference
+ * check, budget and settlement as a production call.
+ */
+export type ProbeOptions = Readonly<{
+  /**
+   * Haiku 5.5 instead of the tier's model (G1's and G8's Haiku checks), on
+   * a fast budget only: the call keeps the fast tier's `max_tokens` and is
+   * charged at the fast tier's prices, which are at least Haiku's in every
+   * category, so HOME's record is conservative.
+   */
+  probeModel?: 'haiku55';
+  /** `low` instead of the tier's effort (G1: effort `low` is accepted). */
+  effort?: 'low';
+  /**
+   * G8: one mid-conversation `role: "system"` message, appended straight
+   * after the request's last user turn (so it is the last message).
+   */
+  systemMessage?: string;
+  /** G20: abort the stream after its first event (`message_start`). */
+  abortAfterFirstEvent?: boolean;
+}>;
+
+/** One HTTP exchange of the probe path, as the runner's report records it: never a body or header but the request id. */
+export type ProbeEvidence =
+  | Readonly<{
+      kind: 'count';
+      attemptId: string;
+      model: string;
+      status: number | null;
+      requestId: string | null;
+      /** The preflight count (G22), or null when it failed. */
+      counted: number | null;
+      ms: number;
+    }>
+  | Readonly<{
+      kind: 'message';
+      attemptId: string;
+      model: string;
+      status: number | null;
+      requestId: string | null;
+      /** `ok`, or the closed error code the call failed with. */
+      outcome: 'ok' | ProviderErrorCode;
+      /** The call's stop as the budget recorded it (`partial`, `error`, `refusal` included); null if not recorded. */
+      stop: string | null;
+      usage: CallUsage | null;
+      /** What HOME charged for the call (µ$), or null when nothing was recorded (never sent). */
+      costUsdMicros: bigint | null;
+      /** Content block types in the final message, counted (never their content). */
+      blocks: Readonly<Record<string, number>>;
+      /** Whether this request's system, tools and messages extend the attempt's previous request (G9); null for the first. */
+      growOnly: boolean | null;
+      retried: boolean;
+      ms: number;
+    }>
+  | Readonly<{
+      kind: 'models';
+      model: string;
+      status: number | null;
+      requestId: string | null;
+      outcome: 'ok' | ProviderErrorCode;
+      /** The Models API's id, context window and output limit, as returned. */
+      id: string | null;
+      maxInputTokens: number | null;
+      maxTokens: number | null;
+      ms: number;
+    }>;
