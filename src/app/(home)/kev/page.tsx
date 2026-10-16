@@ -85,12 +85,16 @@ export default async function KevPage({
   const active = conversations
     .filter((c) => c.archivedAt === null)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1))[0];
-  const firstEver = conversations.length === 0;
   const [rows, inFlight, spend] = await Promise.all([
     active ? listMessages(actor, active.id, { since }) : Promise.resolve([]),
     getTurnInFlight(actor),
     getSpendStatus(actor),
   ]);
+  // The first open: nothing in the adult's conversation at all (never asked,
+  // cleared, or all expired), not just a quiet week.
+  const firstOpen =
+    rows.length === 0 &&
+    (active === undefined || (await listMessages(actor, active.id)).length === 0);
   const turns = toTurns(rows, inFlight, zone);
   const days = byDay(turns);
   const refs = turns.flatMap((t) => (t.kev?.kind === 'v2' ? t.kev.content.cites : []));
@@ -126,7 +130,7 @@ export default async function KevPage({
         </p>
       </header>
 
-      {firstEver ? (
+      {firstOpen ? (
         <div className="mt-6" data-testid="kev-intro">
           <p className="font-display text-ink text-[22px] leading-[1.25] font-medium">{INTRO}</p>
           <p className="text-ink-2 mt-2 text-[15px]">

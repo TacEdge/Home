@@ -253,7 +253,6 @@ export function Composer({
         method="post"
         action="/kev/turn"
         className="mt-6"
-        aria-label={COMPOSER_LABEL}
         onSubmit={(e) => {
           e.preventDefault();
           void send(text);

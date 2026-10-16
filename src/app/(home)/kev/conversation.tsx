@@ -186,7 +186,6 @@ function KevMessage({ kev, ctx }: { kev: KevView; ctx: RenderContext }) {
         className="font-display text-ink text-[22px] leading-[1.25] font-medium break-words"
         data-testid="kev-say"
       >
-        <span className="sr-only">{KEV}: </span>
         {c.say}
       </p>
       {facts.length > 0 ? (
