@@ -285,12 +285,15 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
                 },
               ],
               ['get_tasks', { assignee: 'me' }],
+              ['get_weather', { from: SAT, to: SAT }],
             ],
           },
+          // The fence records dry weather: the stretch's band is shown (and
+          // attributed to the forecast read), so the view can rest on it.
           plan(
             'when',
             [
-              rec({ find: '', type: 'gap' }, ['neighbours']),
+              rec({ find: '', type: 'gap' }, ['neighbours', 'forecast']),
               rec({ fixture: 'paint' }, ['estimate', 'needs']),
             ],
             { type: 'suggestion', phrase: 'stretch_estimate', about: [0, 1] },
@@ -300,8 +303,8 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
     ],
     expect: {
       outcome: 'answer',
-      toolsCalled: ['get_gaps', 'get_tasks'],
-      limits: ['gap_limit'],
+      toolsCalled: ['get_gaps', 'get_tasks', 'get_weather'],
+      limits: ['gap_limit', 'forecast_credit'],
       neverShown: ['free', 'best'],
       shows: [
         'That stretch is at least as long as the task’s estimate.',

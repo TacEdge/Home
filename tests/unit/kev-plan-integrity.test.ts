@@ -604,3 +604,79 @@ describe('A-I1: an unusable forecast is never "no forecast yet" (Part 8)', () =>
     ).toBe('HOME doesn’t have a forecast set up.');
   });
 });
+
+describe('the reviewers’ smallest tests for mutations M8 and M9', () => {
+  const FRI = '2026-10-16';
+  it('M8: an event from 18:00 to midnight is on its own day only', () => {
+    const late: Ref = {
+      type: 'event',
+      id: '00000000-0000-4000-8000-000000000080',
+      at: `${FRI}T18:00:00+13:00`,
+    };
+    const l = ledgerOf({
+      tool: 'get_agenda',
+      input: { from: FRI, to: SAT },
+      data: getAgenda.output.parse({
+        from: FRI,
+        to: SAT,
+        days: [
+          {
+            date: FRI,
+            items: [
+              {
+                type: 'event',
+                ref: late,
+                title: u('Quiz night'),
+                all_day: false,
+                start: `${FRI}T18:00:00+13:00`,
+                end: `${SAT}T00:00:00+13:00`,
+                kind: null,
+                people: [],
+              },
+            ],
+          },
+          { date: SAT, items: [] },
+        ],
+        count: 1,
+        truncated: false,
+      }),
+      refs: [late],
+    });
+    expect(outcome(check(plan('here_you_go', [absence({ from: SAT, to: SAT })]), l)).texts).toEqual(
+      ['Here you go.', 'Nothing is recorded for Saturday 17 October.'],
+    );
+    expect(codes(check(plan('here_you_go', [absence({ from: FRI, to: FRI })]), l))).toEqual([
+      'absence.unsupported',
+    ]);
+  });
+
+  it('M9: two forecast days from reads fetched at different times: the first shown is the answer’s time', () => {
+    const satOnly = getWeather.output.parse({
+      ...reads.weekendWeather.data,
+      fetched_at: FRESH,
+      days: reads.weekendWeather.data.configured
+        ? reads.weekendWeather.data.days.filter((d) => d.date === SAT)
+        : [],
+    });
+    const sunOnly = getWeather.output.parse({
+      ...reads.weekendWeather.data,
+      fetched_at: '2026-10-14T05:00:00+13:00',
+      days: reads.weekendWeather.data.configured
+        ? reads.weekendWeather.data.days.filter((d) => d.date === '2026-10-18')
+        : [],
+    });
+    const l = ledgerOf(
+      { tool: 'get_weather', input: { from: SAT, to: SAT }, data: satOnly, refs: [sat] },
+      {
+        tool: 'get_weather',
+        input: { from: '2026-10-18', to: '2026-10-18' },
+        data: sunOnly,
+        refs: [sun],
+      },
+    );
+    expect(outcome(check(plan('when', [rec(sat), rec(sun)]), l)).forecastAt).toBe(FRESH);
+    expect(outcome(check(plan('when', [rec(sun), rec(sat)]), l)).forecastAt).toBe(
+      '2026-10-14T05:00:00+13:00',
+    );
+  });
+});

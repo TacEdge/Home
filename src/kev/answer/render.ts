@@ -11,6 +11,7 @@ import {
   type IsoDate,
 } from '@/lib/dates';
 import type { Ref } from '../tools/types';
+import { LIST_MAX } from './catalogue';
 import type { LedgerEntry, Ledger, Shape } from './ledger';
 import { DEFAULT_SHOW, type RecordBlock, type ShowField } from './schema';
 
@@ -40,7 +41,7 @@ import { DEFAULT_SHOW, type RecordBlock, type ShowField } from './schema';
 
 export type RenderContext = { ledger: Ledger; now: Date; timeZone: string };
 /** At most this many people (or regular-week entries) in one block. */
-export const LIST_MAX = 8;
+export { LIST_MAX };
 /** A rendered block's longest text (content v2's bound). */
 export const FACT_MAX_CHARS = 1500;
 export type RenderFailure = 'fact.kind' | 'fact.field';

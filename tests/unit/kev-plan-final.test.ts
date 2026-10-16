@@ -856,13 +856,26 @@ describe('typed interpretations: support checked by code (owner decision 8)', ()
         check(
           plan(
             'when',
-            [rec(gap), rec(paint, ['estimate'])],
+            [rec(gap, ['neighbours', 'forecast']), rec(paint, ['estimate'])],
             v('suggestion', 'stretch_estimate', [0, 1]),
           ),
           weekend(),
         ),
       ).at(-1),
     ).toBe('That stretch is at least as long as the task’s estimate.');
+    // The task records dry weather as a need: the stretch's band must be shown, and dry (P7a).
+    expect(
+      codes(
+        check(
+          plan(
+            'when',
+            [rec(gap), rec(paint, ['estimate'])],
+            v('suggestion', 'stretch_estimate', [0, 1]),
+          ),
+          weekend(),
+        ),
+      ),
+    ).toEqual(['view.unsupported']);
     // The estimate not shown: the view would rest on something the adult cannot see.
     expect(
       codes(

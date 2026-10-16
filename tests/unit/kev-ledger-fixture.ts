@@ -601,7 +601,7 @@ export const more = {
           ref: insight,
           key: 'birthday.upcoming:nana',
           kind: 'preparation',
-          rule: 'birthday.upcoming',
+          rule: 'preparation.birthday',
           when: '2026-10-20',
           text: u('Nana Jo\u2019s birthday is on Tuesday.'),
           shown_on: 'list',

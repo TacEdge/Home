@@ -292,23 +292,32 @@ export type ViewType = (typeof VIEW_TYPES)[number];
 
 /**
  * What a phrase needs of the blocks it is about (checked by code, over
- * those blocks only, and only over what they show):
+ * those blocks only, and only over what they show). Every block a view is
+ * about must itself support it (owner decision of 2026-10-15, ADR 0012 §47):
+ * no unrelated block can lend support, each record counts once (by its full
+ * identity, occurrence included), and only `none` may rest on an absence or
+ * a count.
  * - `none`: nothing (HOME's own caveat);
- * - `record`: at least one record;
- * - `several`: at least two records;
- * - `tight`: an overlap HOME flagged, or two timed events that overlap or
- *   follow within 30 minutes;
- * - `people`: an overlap, or an event recording someone besides the reader;
- * - `same_day`: an overlap, or two events on the same day;
- * - `wet`: a forecast day, part of a day or stretch shown as showers or rain;
- * - `cool_or_wet`: `wet`, or a forecast low of 12°C or under shown;
- * - `forecast`: a forecast shown;
- * - `birthday`: a birthday shown (a person's, or HOME's birthday insight);
- * - `open_assigned`: a task shown as open, with its assignee;
+ * - `record`: records;
+ * - `several`: two or more distinct records;
+ * - `tight`: overlaps HOME flagged, and timed events each overlapping or
+ *   within 30 minutes of another event it is about;
+ * - `people`: overlaps, and events each showing someone besides the reader;
+ * - `same_day`: overlaps, and events each on a day another event or overlap
+ *   it is about is on;
+ * - `wet`: forecast days, parts of days or stretches each shown as showers
+ *   or rain, and records each on a day one of those is for;
+ * - `cool_or_wet`: as `wet`, a forecast day also qualifying by a low of
+ *   12°C or under, shown;
+ * - `forecast`: forecasts shown (a forecast day, or a stretch's band);
+ * - `birthday`: birthdays shown (someone else's, or HOME's birthday insight
+ *   about someone else);
+ * - `open_assigned`: tasks each shown as open, with its assignee;
  * - `stretch_estimate`: exactly one stretch and one task whose estimate is
- *   shown, the stretch at least as long as the estimate;
- * - `calendar_unhealthy`: a calendar shown as not up to date;
- * - `may_have_changed`: a calendar not up to date, or context flagged stale.
+ *   shown, the stretch at least as long as the estimate, and, when the task
+ *   records dry weather as a need, the stretch's band shown as dry;
+ * - `calendar_unhealthy`: calendars each shown as not up to date;
+ * - `may_have_changed`: calendars not up to date, or context flagged stale.
  */
 export type Support =
   | 'none'
@@ -399,15 +408,23 @@ const isSummary = (b: FactBlock) => b.kind === 'absence' || b.kind === 'count';
 const TIGHT_MS = 30 * 60_000;
 const WET = new Set(['showers', 'rain']);
 const COOL_C = 12;
+/** HOME's birthday insight (src/domain/engines/insights). */
+const BIRTHDAY_RULES = new Set(['preparation.birthday']);
+/** How many people an event block lists (the renderer's limit). */
+export const LIST_MAX = 8;
 
 const shows = (a: AboutBlock, f: string) => a.show.includes(f);
-const recOf = (a: AboutBlock) => a.entry?.record ?? null;
+const recOf = (a: AboutBlock) => a.entry!.record!;
+const kindOf = (a: AboutBlock) => a.block.kind;
+/** A record's full identity: its type, id and occurrence. */
+const identity = (a: AboutBlock) =>
+  `${a.entry!.ref.type}|${a.entry!.ref.id}|${a.entry!.ref.at ?? ''}`;
+const shareDate = (a: AboutBlock, b: AboutBlock) =>
+  [...a.entry!.dates].some((d) => b.entry!.dates.has(d));
 
 function wetShown(a: AboutBlock): boolean {
-  const b = a.block;
   const o = recOf(a);
-  if (isSummary(b) || !o) return false;
-  if (b.kind === 'forecast') {
+  if (kindOf(a) === 'forecast') {
     const phrase = typeof o.phrase === 'string' ? o.phrase : '';
     const phraseWet =
       shows(a, 'phrase') &&
@@ -416,15 +433,72 @@ function wetShown(a: AboutBlock): boolean {
     const partWet = shows(a, 'parts') && parts.some((p) => WET.has(String(p.band)));
     return phraseWet || partWet;
   }
-  if (b.kind === 'gap') return shows(a, 'forecast') && WET.has(String(o.forecast_band));
+  if (kindOf(a) === 'gap') return shows(a, 'forecast') && WET.has(String(o.forecast_band));
   return false;
 }
 
-function forecastShown(a: AboutBlock): boolean {
-  const b = a.block;
-  if (isSummary(b) || !recOf(a)) return false;
-  return b.kind === 'forecast' || (b.kind === 'gap' && shows(a, 'forecast'));
+const coolShown = (a: AboutBlock) =>
+  kindOf(a) === 'forecast' &&
+  shows(a, 'temperature') &&
+  typeof recOf(a).low_c === 'number' &&
+  (recOf(a).low_c as number) <= COOL_C;
+
+const forecastShown = (a: AboutBlock) =>
+  kindOf(a) === 'forecast' ||
+  (kindOf(a) === 'gap' && shows(a, 'forecast') && typeof recOf(a).forecast_band === 'string');
+
+/**
+ * Weather support: at least one forecast day or stretch, every one of them
+ * qualifying, and every other block a record on a day one of them is for
+ * (a raincoat beside Saturday's football needs Saturday's wet forecast).
+ */
+function weatherSupports(about: readonly AboutBlock[], qualifies: (a: AboutBlock) => boolean) {
+  const weather = about.filter((a) => kindOf(a) === 'forecast' || kindOf(a) === 'gap');
+  if (weather.length === 0 || !weather.every(qualifies)) return false;
+  return about.every((a) => weather.includes(a) || weather.some((w) => shareDate(a, w)));
 }
+
+const isConflict = (a: AboutBlock) => kindOf(a) === 'conflict' && a.entry!.shape === 'conflict';
+const isEvent = (a: AboutBlock) => kindOf(a) === 'event';
+const timed = (a: AboutBlock) => isEvent(a) && a.entry!.span !== null;
+/** Two spans overlap, or the later starts within 30 minutes of the earlier's end. */
+const close = (a: AboutBlock, b: AboutBlock) => {
+  const x = a.entry!.span!;
+  const y = b.entry!.span!;
+  return Math.max(x.from, y.from) - Math.min(x.to, y.to) <= TIGHT_MS;
+};
+
+function birthdayShown(a: AboutBlock, reader: string | null): boolean {
+  const o = recOf(a);
+  if (kindOf(a) === 'person')
+    return (
+      a.entry!.ref.id !== reader &&
+      shows(a, 'birthday') &&
+      (a.entry!.shape === 'birthday' ||
+        (a.entry!.shape === 'people_person' &&
+          typeof (o.next_birthday as { date?: unknown } | null)?.date === 'string'))
+    );
+  if (kindOf(a) === 'insight') {
+    const about = Array.isArray(o.refs) ? (o.refs as { type?: string; id?: string }[]) : [];
+    return (
+      BIRTHDAY_RULES.has(String(o.rule)) &&
+      !about.some((r) => r.type === 'person' && r.id === reader)
+    );
+  }
+  return false;
+}
+
+const openAssigned = (a: AboutBlock) =>
+  kindOf(a) === 'task' &&
+  a.entry!.shape === 'task' &&
+  shows(a, 'status') &&
+  shows(a, 'assignee') &&
+  recOf(a).status === 'open' &&
+  recOf(a).assignee !== null &&
+  recOf(a).assignee !== undefined;
+
+const unhealthyCalendar = (a: AboutBlock) =>
+  kindOf(a) === 'calendar' && recOf(a).status !== 'healthy';
 
 /**
  * Whether the blocks a view is about support its phrase (above). `reader`:
@@ -435,83 +509,66 @@ export function supports(
   about: readonly AboutBlock[],
   reader: string | null,
 ): boolean {
-  const records = about.filter((a) => !isSummary(a.block) && a.entry?.record);
-  const of = (kind: string) => records.filter((a) => a.block.kind === kind);
-  const timedEvents = of('event').filter((a) => a.entry!.span !== null);
-  switch (VIEW_PHRASES[phrase].support) {
-    case 'none':
-      return true;
+  const need = VIEW_PHRASES[phrase].support;
+  if (need === 'none') return true;
+  // Records only, each rendered from a record HOME read, each record once.
+  if (about.length === 0) return false;
+  if (about.some((a) => isSummary(a.block) || !a.entry?.record)) return false;
+  if (new Set(about.map(identity)).size !== about.length) return false;
+  const all = (f: (a: AboutBlock) => boolean) => about.every(f);
+  const others = (a: AboutBlock) => about.filter((b) => b !== a);
+  switch (need) {
     case 'record':
-      return records.length > 0;
+      return true;
     case 'several':
-      return records.length >= 2;
-    case 'tight': {
-      if (of('conflict').length > 0) return true;
-      const spans = timedEvents.map((a) => a.entry!.span!).sort((x, y) => x.from - y.from);
-      return spans.some((s, i) => i > 0 && s.from - spans[i - 1]!.to <= TIGHT_MS);
-    }
+      return about.length >= 2;
+    case 'tight':
+      return all(
+        (a) => isConflict(a) || (timed(a) && others(a).some((b) => timed(b) && close(a, b))),
+      );
     case 'people':
-      return (
-        of('conflict').length > 0 ||
-        of('event').some(
-          (a) =>
+      return all(
+        (a) =>
+          isConflict(a) ||
+          (isEvent(a) &&
             a.entry!.shape === 'agenda_event' &&
             shows(a, 'people') &&
-            [...(a.entry!.people ?? [])].some((p) => p !== reader),
-        )
+            (Array.isArray(recOf(a).people) ? (recOf(a).people as { ref?: { id?: string } }[]) : [])
+              .slice(0, LIST_MAX)
+              .some((p) => typeof p.ref?.id === 'string' && p.ref.id !== reader)),
       );
-    case 'same_day': {
-      if (of('conflict').length > 0) return true;
-      const seen = new Set<IsoDate>();
-      for (const a of of('event'))
-        for (const d of a.entry!.dates) {
-          if (seen.has(d)) return true;
-          seen.add(d);
-        }
-      return false;
-    }
-    case 'wet':
-      return about.some(wetShown);
-    case 'cool_or_wet':
-      return (
-        about.some(wetShown) ||
-        of('forecast').some(
-          (a) =>
-            shows(a, 'temperature') &&
-            typeof recOf(a)!.low_c === 'number' &&
-            (recOf(a)!.low_c as number) <= COOL_C,
-        )
-      );
-    case 'forecast':
-      return about.some(forecastShown);
-    case 'birthday':
-      return (
-        of('person').some(
-          (a) =>
-            shows(a, 'birthday') &&
-            (a.entry!.shape === 'birthday' ||
-              (a.entry!.shape === 'people_person' &&
-                (recOf(a)!.next_birthday as { date?: unknown } | null)?.date !== undefined)),
-        ) || of('insight').some((a) => /(?:^|\.)birthday(?:\.|$)/.test(String(recOf(a)!.rule)))
-      );
-    case 'open_assigned':
-      return of('task').some(
+    case 'same_day':
+      return all(
         (a) =>
-          a.entry!.shape === 'task' &&
-          shows(a, 'status') &&
-          shows(a, 'assignee') &&
-          recOf(a)!.status === 'open' &&
-          recOf(a)!.assignee !== null &&
-          recOf(a)!.assignee !== undefined,
+          isConflict(a) ||
+          (isEvent(a) && others(a).some((b) => (isEvent(b) || isConflict(b)) && shareDate(a, b))),
       );
+    case 'wet':
+      return weatherSupports(about, wetShown);
+    case 'cool_or_wet':
+      return weatherSupports(about, (a) => wetShown(a) || coolShown(a));
+    case 'forecast':
+      return all(forecastShown);
+    case 'birthday':
+      return all((a) => birthdayShown(a, reader));
+    case 'open_assigned':
+      return all(openAssigned);
     case 'stretch_estimate': {
-      const gaps = of('gap');
-      const tasks = of('task').filter((a) => a.entry!.shape === 'task' && shows(a, 'estimate'));
-      if (gaps.length !== 1 || tasks.length !== 1) return false;
-      const g = recOf(gaps[0]!)!;
-      const est = recOf(tasks[0]!)!.estimate_minutes;
-      const from = Date.parse(String(g.from));
-      const to = Date.parse(String(g.to));
+      if (about.length !== 2) return false;
+      const g = about.find((a) => kindOf(a) === 'gap');
+      const t = about.find(
+        (a) => kindOf(a) === 'task' && a.entry!.shape === 'task' && shows(a, 'estimate'),
+      );
+      if (!g || !t) return false;
+      const est = recOf(t).estimate_minutes;
+      const from = Date.parse(String(recOf(g).from));
+      const to = Date.parse(String(recOf(g).to));
+      const needs = Array.isArray(recOf(t).needs) ? (recOf(t).needs as unknown[]) : [];
+      if (
+        needs.includes('dry_weather') &&
+        !(shows(g, 'forecast') && recOf(g).forecast_band === 'dry')
+      )
+        return false;
       return (
         typeof est === 'number' &&
         Number.isFinite(from) &&
@@ -520,11 +577,10 @@ export function supports(
       );
     }
     case 'calendar_unhealthy':
-      return of('calendar').some((a) => recOf(a)!.status !== 'healthy');
+      return all(unhealthyCalendar);
     case 'may_have_changed':
-      return (
-        of('calendar').some((a) => recOf(a)!.status !== 'healthy') ||
-        of('context').some((a) => recOf(a)!.stale === true)
+      return all(
+        (a) => unhealthyCalendar(a) || (kindOf(a) === 'context' && recOf(a).stale === true),
       );
   }
 }
