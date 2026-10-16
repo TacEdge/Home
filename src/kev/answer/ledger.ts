@@ -105,6 +105,9 @@ export type CoverageSpan = {
   persons: ReadonlySet<string> | null;
   /** `forecast`: whether a forecast is set up at all. */
   configured?: boolean;
+  /** `forecast`: the read's freshness and fetch time (M7 §5.1), for what its absence may say. */
+  freshness?: string;
+  fetchedAt?: string | null;
 };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -562,7 +565,14 @@ export class Ledger {
                 (x): x is IsoDate => typeof x === 'string' && DATE.test(x),
               ),
             );
-      this.#cover({ kind: 'forecast', days, persons: null, configured: !unconfigured });
+      this.#cover({
+        kind: 'forecast',
+        days,
+        persons: null,
+        configured: !unconfigured,
+        ...(str(d.freshness) ? { freshness: str(d.freshness)! } : {}),
+        fetchedAt: str(d.fetched_at) ?? null,
+      });
     }
   }
 

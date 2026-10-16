@@ -3,7 +3,7 @@ import type { LIMIT_CODES } from '@/domain/kev-bookkeeping/schema';
 import type { Ref, RefType } from '../tools/types';
 import { FALLBACK_LEAD, FALLBACK_WITH_ROWS } from './language';
 import { fullKeyOf, type Ledger } from './ledger';
-import { forecastFetchedAt, pickEntry, renderRecord } from './render';
+import { isOpening, pickEntry, renderRecord } from './render';
 import { MAX_FACTS, type AnswerBlock } from './schema';
 import type { RenderedAnswer, Shown } from './validate';
 
@@ -49,6 +49,7 @@ export function buildFallback(ledger: Ledger, now: Date): RenderedAnswer {
   const blocks: AnswerBlock[] = [];
   const types = new Set<RefType>();
   let gapsPartial = false;
+  let openings = false;
   let forecastAt: string | undefined;
   for (const r of rows) {
     if (blocks.length === MAX_FACTS) break;
@@ -64,17 +65,23 @@ export function buildFallback(ledger: Ledger, now: Date): RenderedAnswer {
     types.add(r.type);
     if (r.type === 'gap' && ledger.resolve(r).some((e) => e.context.gapCoverage === 'partial'))
       gapsPartial = true;
-    if (r.type === 'forecast' && !forecastAt) {
-      const e = pickEntry(ledger.resolve(r), 'forecast');
-      if (e && forecastFetchedAt(e)) forecastAt = e.context.fetchedAt!;
-    }
+    if (isOpening(pickEntry(ledger.resolve(r), r.type))) openings = true;
+    // A row whose forecast words have no attributable read did not render
+    // (`fact.field`) and is left out: the fallback drops those words.
+    if (out.forecastAt && !forecastAt) forecastAt = out.forecastAt;
   }
   const cites: Ref[] = blocks.flatMap((b) => b.cites);
   return {
     say: blocks.length > 0 ? FALLBACK_WITH_ROWS : FALLBACK_LEAD,
     blocks,
     cites,
-    shown: { types, summaries: new Set(), gapsPartial, ...(forecastAt ? { forecastAt } : {}) },
+    shown: {
+      types,
+      summaries: new Set(),
+      gapsPartial,
+      openings,
+      ...(forecastAt ? { forecastAt } : {}),
+    },
   };
 }
 
@@ -102,28 +109,36 @@ const CALENDAR_SUMMARIES = ['agenda', 'conflicts'] as const;
  * The code's sentences for what an answer shows (§8.4), as limit codes. The
  * model neither chooses nor removes them (V16). Run on every outcome that
  * shows records, the safe fallback's rows included (I-15).
- * - any gap: M7's limit sentence;
+ * - any gap, any opening insight, and any absence or count over the agenda
+ *   (person-filtered and part-of-day ones included): M7's limit sentence
+ *   (ADR 0012 §47);
  * - a record from a calendar (an event, a conflict, a gap, an insight) or an
  *   absence or count over the agenda or overlaps, while a visible calendar
  *   is stale, failed or never refreshed, or a gap from a partly covered
  *   read: "As far as HOME knows." (records do not carry their calendar, so
  *   this is said whenever such a calendar exists: conservative);
- * - the forecast: its time and credit;
+ * - any forecast words shown (a forecast day, a gap's band, an opening's
+ *   clause): the time of the read they are attributed to, and the credit;
  * - coverage `unknown` (no calendar at all, or a gap read that said so) with
- *   an event, a gap or an agenda absence or count: "HOME has no calendar
- *   connected…".
+ *   an event, a gap, an opening or an agenda absence or count: "HOME has no
+ *   calendar connected…".
  */
 export function limitsFor(shown: Shown, coverage: Coverage): LimitCode[] {
   const has = (t: RefType) => shown.types.has(t);
   const summaries = CALENDAR_SUMMARIES.some((k) => shown.summaries.has(k));
   const calendarFacts = CALENDAR_RECORDS.some(has) || summaries;
+  const openings = shown.openings === true;
   const out: LimitCode[] = [];
-  if (has('gap')) out.push('gap_limit');
+  // M7's limit sentence: any gap, any opening, and any statement over the
+  // agenda (an absence or count, for anyone, any part of the day): each is
+  // only what HOME has recorded, never a check of anyone's plans (§3.2 row
+  // 1; ADR 0012 §47).
+  if (has('gap') || openings || shown.summaries.has('agenda')) out.push('gap_limit');
   if ((calendarFacts && coverage.calendarsUnhealthy) || shown.gapsPartial)
     out.push('calendar_stale');
   if (has('forecast') || shown.forecastAt) out.push('forecast_credit');
   if (
-    (has('event') || has('gap') || has('conflict') || summaries) &&
+    (has('event') || has('gap') || has('conflict') || openings || summaries) &&
     (coverage.noCalendars || (has('gap') && coverage.gapsUnknown))
   )
     out.push('coverage_unknown');

@@ -49,6 +49,11 @@ export type RenderedFact = {
   cites: Ref[];
   /** The home dates the block is about (for `{when}`). */
   dates: IsoDate[];
+  /**
+   * When the block shows forecast words, the fetch time of the forecast read
+   * they are attributed to (the credit's "as of"; ADR 0012 §47).
+   */
+  forecastAt?: string;
 };
 export type RenderOutcome =
   ({ ok: true } & RenderedFact) | { ok: false; code: RenderFailure | 'cite.unknown' };
@@ -262,7 +267,7 @@ export function pickEntry(entries: readonly LedgerEntry[], type: Ref['type']): L
 }
 
 type Ctx = RenderContext & { today: IsoDate; explicit: ReadonlySet<ShowField> };
-type Out = { text: string; dates: IsoDate[] } | RenderFailure;
+type Out = { text: string; dates: IsoDate[]; forecastAt?: string } | RenderFailure;
 
 const personName = (ctx: Ctx, id: string, fallback?: unknown): string => {
   const n = ctx.ledger.namesById.get(id) ?? textOf(fallback)?.untrusted_text;
@@ -594,13 +599,70 @@ function gap(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
     else if (before) text += ` That’s after ${quoted(before.title)}.`;
     else if (after) text += ` That’s before ${quoted(after.title)}.`;
   }
-  if (show.includes('forecast'))
+  // Forecast words only with their attribution (owner decision, ADR 0012
+  // §47): a gap carries its band but no fetch time, so the band is shown
+  // only beside a usable forecast read for that day in this attempt, whose
+  // fetch time the credit carries; an older one (M7's 3–12 hours) begins
+  // "As of {time}, ". No band, or no such read: no forecast words at all
+  // (never "no forecast" for a forecast HOME has but cannot attribute).
+  if (show.includes('forecast')) {
+    const read = forecastReadFor(ctx.ledger, date, ctx.now);
+    if (typeof o.forecast_band !== 'string' || !read) return 'fact.field';
+    const band = bandWords(o.forecast_band as Band).toLowerCase();
     text +=
-      typeof o.forecast_band === 'string'
-        ? ` The forecast for then: ${bandWords(o.forecast_band as Band).toLowerCase()}.`
-        : ' HOME has no forecast for then.';
+      forecastAge(read.at, ctx.now) === 'older'
+        ? ` As of ${asOfTime(read.at, ctx.now, ctx.timeZone)}, the forecast for then: ${band}.`
+        : ` The forecast for then: ${band}.`;
+    return { text, dates: [date], forecastAt: read.iso };
+  }
   return { text, dates: [date] };
 }
+
+/**
+ * The forecast read that attributes forecast words for a home date: the
+ * first forecast day for that date this attempt's `get_weather` returned,
+ * with a fetch time still usable at `now` (M7 §5.1: not over 12 hours).
+ */
+export function forecastReadFor(
+  ledger: Ledger,
+  date: IsoDate,
+  now: Date,
+): { at: Date; iso: string } | null {
+  for (const e of ledger.entries) {
+    if (e.source !== 'get_weather' || e.shape !== 'forecast' || !e.dates.has(date)) continue;
+    const at = forecastFetchedAt(e);
+    if (at && forecastAge(at, now) !== 'unusable') return { at, iso: e.context.fetchedAt! };
+  }
+  return null;
+}
+
+/** An opening's own "as of" time, as M7 wrote it ("as of 06:55", "as of yesterday 22:03"). */
+const OPENING_AS_OF = /\bas of ((?:yesterday )?\d{2}:\d{2})\b/g;
+
+/**
+ * An insight's sentence, with its forecast words attributed (owner decision,
+ * ADR 0012 §47): an opening (`open_window.*`) that speaks of the forecast is
+ * shown only beside a usable forecast read for its day in this attempt, and
+ * only when the "as of" time M7 wrote in it is that read's own. Insights
+ * carry no fetch time of their own, and Package 2's schema is unchanged.
+ */
+function insightBlock(e: LedgerEntry, ctx: Ctx): Out {
+  const o = e.record!;
+  const t = textOf(o.text);
+  if (!t) return 'fact.kind';
+  const when = typeof o.when === 'string' ? (o.when as IsoDate) : null;
+  const text = `Worth knowing: ${sentence(clean(t.untrusted_text))}`;
+  const dates = when ? [when] : [];
+  if (!isOpening(e) || !/\bforecast\b/i.test(t.untrusted_text)) return { text, dates };
+  const read = when ? forecastReadFor(ctx.ledger, when, ctx.now) : null;
+  const asOf = [...t.untrusted_text.matchAll(OPENING_AS_OF)].at(-1)?.[1];
+  if (!read || asOf !== asOfTime(read.at, ctx.now, ctx.timeZone)) return 'fact.field';
+  return { text, dates, forecastAt: read.iso };
+}
+
+/** An opening insight (M7's `open_window.*`): a stretch where nothing is recorded. */
+export const isOpening = (e: LedgerEntry | null): boolean =>
+  e?.shape === 'insight' && /^open_window\./.test(String(e.record?.rule));
 
 function forecast(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
   const o = e.record!;
@@ -640,6 +702,7 @@ function forecast(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
   return {
     text: older ? `As of ${asOfTime(at, ctx.now, ctx.timeZone)}, ${day}` : capitalise(day),
     dates: [date],
+    ...(at ? { forecastAt: e.context.fetchedAt! } : {}),
   };
 }
 
@@ -720,14 +783,9 @@ export function renderRecord(block: RecordBlock, ctx: RenderContext): RenderOutc
       case 'conflict':
         out = conflict(e, c);
         break;
-      case 'insight': {
-        const t = textOf(e.record!.text);
-        const when = typeof e.record!.when === 'string' ? [e.record!.when as IsoDate] : [];
-        out = t
-          ? { text: `Worth knowing: ${sentence(clean(t.untrusted_text))}`, dates: when }
-          : 'fact.kind';
+      case 'insight':
+        out = insightBlock(e, c);
         break;
-      }
       case 'gap':
         out = gap(e, show, c);
         break;
@@ -745,5 +803,11 @@ export function renderRecord(block: RecordBlock, ctx: RenderContext): RenderOutc
   if (typeof out === 'string') return { ok: false, code: out };
   if (out.text.length > FACT_MAX_CHARS) return { ok: false, code: 'fact.field' };
   const ref = entries[0]!.ref;
-  return { ok: true, text: out.text, cites: [ref], dates: out.dates };
+  return {
+    ok: true,
+    text: out.text,
+    cites: [ref],
+    dates: out.dates,
+    ...(out.forecastAt ? { forecastAt: out.forecastAt } : {}),
+  };
 }

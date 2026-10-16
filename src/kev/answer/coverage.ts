@@ -1,6 +1,6 @@
 import 'server-only';
 import { capitalise, nameList, numberWord } from '@/domain/engines/day-facts';
-import { atHome } from '@/domain/engines/weather';
+import { atHome, staleSentence } from '@/domain/engines/weather';
 import { addDays, clockOf, isoDateInZone, type IsoDate } from '@/lib/dates';
 import { daysFrom, fullKeyOf, partOf, type DayPart, type Ledger, type LedgerEntry } from './ledger';
 import { daysPhrase, nameText } from './render';
@@ -120,6 +120,16 @@ export function renderSummary(
     const relevant = spans.filter((c) => dayList.some((d) => c.days.has(d)));
     if (relevant.length > 0 && relevant.every((c) => c.configured === false))
       return { ok: true, text: 'HOME doesn’t have a forecast set up.', dates: dayList };
+    // A forecast HOME has but can no longer use (over 12 hours old) is never
+    // "no forecast yet": M7's own sentence with its fetch time, and nothing
+    // when that time is not known (owner decision, ADR 0012 §47).
+    const unusable = relevant.filter((c) => c.configured !== false && c.freshness === 'unusable');
+    if (unusable.length > 0) {
+      const times = new Set(unusable.map((c) => c.fetchedAt ?? ''));
+      const at = times.size === 1 ? Date.parse([...times][0]!) : NaN;
+      const stale = Number.isFinite(at) ? staleSentence(new Date(at), now, tz) : null;
+      return stale ? { ok: true, text: stale.text, dates: dayList } : fail;
+    }
     return {
       ok: true,
       text: `HOME doesn’t have a forecast ${daysPhrase(days, today, 'for')} yet.`,

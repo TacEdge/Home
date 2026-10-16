@@ -844,7 +844,7 @@ describe('the code’s sentences and the fallback (V16, V18)', () => {
     expect(limitsFor(shown(['conflict']), stale)).toEqual(['calendar_stale']);
     expect(limitsFor(shown(['insight']), stale)).toEqual(['calendar_stale']);
     expect(limitsFor(shown(['gap']), stale)).toEqual(['gap_limit', 'calendar_stale']);
-    expect(limitsFor(shown([], ['agenda']), stale)).toEqual(['calendar_stale']);
+    expect(limitsFor(shown([], ['agenda']), stale)).toEqual(['gap_limit', 'calendar_stale']);
     expect(limitsFor(shown(['forecast']), stale)).toEqual(['forecast_credit']);
     expect(limitsFor(shown(['task']), stale)).toEqual([]);
     expect(
@@ -853,7 +853,7 @@ describe('the code’s sentences and the fallback (V16, V18)', () => {
         noCalendars: true,
         gapsUnknown: false,
       }),
-    ).toEqual(['coverage_unknown']);
+    ).toEqual(['gap_limit', 'coverage_unknown']);
     expect(
       limitsFor(
         { types: new Set(['gap']), summaries: new Set(), gapsPartial: true },

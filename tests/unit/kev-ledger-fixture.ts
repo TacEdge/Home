@@ -413,7 +413,7 @@ export const note: Ref = { type: 'note', id: NOTE.colour };
 export const dinosaurs: Ref = { type: 'context', id: CTX.dinosaurs };
 export const insight: Ref = { type: 'insight', id: 'birthday.upcoming:nana' };
 
-const on = (pid: string, name: string, role: 'attending' | 'responsible') => ({
+export const on = (pid: string, name: string, role: 'attending' | 'responsible') => ({
   ref: person(pid),
   name: u(name),
   role,
@@ -463,7 +463,7 @@ export const busyBundle = bundleSchema.parse({
 });
 export const busyBundleRefs: Ref[] = [...bundleRefs, dentistToday, teacherOnly];
 
-const agenda = (
+export const agenda = (
   from: string,
   to: string,
   days: { date: string; items: unknown[] }[],

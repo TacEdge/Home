@@ -763,6 +763,8 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
       outcome: 'answer',
       neverShown: ['free', 'available'],
       shows: ['Nothing is recorded for Alex tomorrow, in the evening.'],
+      // §3.2 row 1: then the code's limit sentence (ADR 0012 §47).
+      limits: ['gap_limit'],
     },
   },
   {

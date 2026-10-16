@@ -14,7 +14,7 @@ import {
 } from './catalogue';
 import { renderSummary } from './coverage';
 import { fullKeyOf, type Ledger, type LedgerEntry } from './ledger';
-import { daysPhrase, forecastFetchedAt, pickEntry, renderRecord } from './render';
+import { daysPhrase, isOpening, pickEntry, renderRecord } from './render';
 import {
   DEFAULT_SHOW,
   isSummary,
@@ -80,6 +80,8 @@ export type Shown = {
   summaries: ReadonlySet<ScopeKind>;
   /** A gap shown came from a read whose calendars were only partly covered. */
   gapsPartial: boolean;
+  /** An opening insight (M7's `open_window.*`) is shown: qualified like a gap (ADR 0012 §47). */
+  openings?: boolean;
   /** The fetch time of the forecast shown (stored with the answer: the screen's "as of" time). */
   forecastAt?: string;
 };
@@ -159,6 +161,7 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
   const shown = new Set<string>();
   const types = new Set<RefType>();
   let gapsPartial = false;
+  let openings = false;
   let forecastAt: string | undefined;
   plan.facts.forEach((b, i) => {
     if (isSummary(b)) return;
@@ -170,10 +173,10 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
     types.add(b.kind);
     if (b.kind === 'gap' && ledger.resolve(b.ref).some((e) => e.context.gapCoverage === 'partial'))
       gapsPartial = true;
-    if (b.kind === 'forecast' && !forecastAt) {
-      const at = used[i] ? forecastFetchedAt(used[i]) : null;
-      if (at) forecastAt = used[i]!.context.fetchedAt!;
-    }
+    if (isOpening(used[i])) openings = true;
+    // The first forecast words shown, from whichever block (a forecast day, a
+    // gap's band, an opening's clause), carry the read they are attributed to.
+    if (r.forecastAt && !forecastAt) forecastAt = r.forecastAt;
   });
   // 3. Absence and counts.
   const summaries = new Set<ScopeKind>();
@@ -263,7 +266,13 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
       say,
       blocks,
       cites: uniqueRefs(blocks.flatMap((b) => b.cites)).slice(0, MAX_CITES),
-      shown: { types, summaries, gapsPartial, ...(forecastAt ? { forecastAt } : {}) },
+      shown: {
+        types,
+        summaries,
+        gapsPartial,
+        openings,
+        ...(forecastAt ? { forecastAt } : {}),
+      },
     };
   };
   if (out.length > 0)
