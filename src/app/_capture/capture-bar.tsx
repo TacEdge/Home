@@ -6,7 +6,9 @@ import { useActionState } from 'react';
 import type { FormAction } from '@/app/_forms/action-form';
 import { useRefusalFocus } from '@/app/_forms/focus';
 import { formKey, idle } from '@/app/_forms/state';
+import { BarRow } from '@/ui/bar-row';
 import { Button } from '@/ui/button';
+import { Spark } from '@/ui/spark';
 
 // The capture bar (M3 contract §3.8): on every place, one line, "Tell HOME
 // something…". A plain form, so it works without JavaScript. "✓ Kept · in
@@ -15,10 +17,27 @@ import { Button } from '@/ui/button';
 // there. Nothing is kept on the device. The bar lives in the shell, so its
 // state would otherwise outlive the page: it is keyed by the path, and
 // "Kept" is said on the place where it was said, not the next one.
+//
+// With Kev on, "Ask Kev" ends the row (M8 contract §11.1, D16): a link to
+// Kev's screen with Kev's spark, not a second input, so each place still has
+// one input. On a small phone it is the spark alone, still named "Ask Kev".
+// With Kev off it is not rendered at all.
 
-export function CaptureBar({ action }: { action: FormAction }) {
+export function CaptureBar({ action, askKev = false }: { action: FormAction; askKev?: boolean }) {
   const pathname = usePathname();
-  return <CaptureForm key={pathname} action={action} />;
+  // Kev's screen has an input of its own, so it has no bar row (one input a
+  // screen; M8 contract §11.1, Package 4).
+  if (pathname === '/kev') return null;
+  return (
+    <BarRow>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <CaptureForm key={pathname} action={action} />
+        </div>
+        {askKev ? <AskKev /> : null}
+      </div>
+    </BarRow>
+  );
 }
 
 function CaptureForm({ action }: { action: FormAction }) {
@@ -65,5 +84,21 @@ function CaptureForm({ action }: { action: FormAction }) {
         ) : null}
       </p>
     </form>
+  );
+}
+
+function AskKev() {
+  return (
+    <Link
+      href="/kev"
+      aria-label="Ask Kev"
+      data-testid="ask-kev"
+      className="text-ink border-line hover:bg-paper-2 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-[22px] border px-3 font-medium"
+    >
+      <Spark />
+      <span aria-hidden="true" className="hidden sm:inline">
+        Ask Kev
+      </span>
+    </Link>
   );
 }

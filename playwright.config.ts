@@ -8,7 +8,8 @@ import { weatherEnv } from './tests/fixtures/weather';
 // End-to-end tests run against the dev server with the test mail transport
 // (production refuses it, by design) and the local test database.
 //
-// Three servers: the main one (both fixture users allowed) and a second whose
+// Three servers: the main one (both fixture users allowed; Kev on, scripted,
+// M8 Package 4) and a second whose
 // allowlist omits Sam, and a third (M7 Package 4) with the synthetic home
 // location, a test-only location key and the fake weather provider, for the
 // weather specs alone, so every other spec sees HOME without weather exactly
@@ -42,6 +43,12 @@ const serverEnv = (port: number, allowed: string) => ({
   HOME_ALLOWED_EMAILS: allowed,
 });
 
+// Kev on with the scripted provider (M8 Package 4): local and CI only, no
+// key, no network to any provider (HOME_TEST_KEV is refused anywhere
+// deployed). The main and weather servers run Kev; the narrow server keeps
+// it off, for the screens and the route with Kev off (U2, S9).
+const kevOn = { HOME_KEV: 'on', HOME_TEST_KEV: 'scripted' };
+
 // A browser the environment provides (cloud containers ship one here) when
 // the shell did not say; CI installs its own and has neither.
 const PROVIDED_CHROMIUM = '/opt/pw-browsers/chromium';
@@ -69,7 +76,7 @@ export default defineConfig({
       url: `${MAIN_URL}/sign-in`,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: serverEnv(MAIN_PORT, 'sam@example.test,alex@example.test'),
+      env: { ...serverEnv(MAIN_PORT, 'sam@example.test,alex@example.test'), ...kevOn },
     },
     {
       command: `pnpm dev -p ${NARROW_PORT}`,
@@ -88,6 +95,11 @@ export default defineConfig({
         ...weatherEnv(),
         HOME_TEST_WEATHER: 'fake',
         HOME_NEXT_DIST_DIR: '.next-weather',
+        ...kevOn,
+        // A small household cap (NZ$20), so Usage's 80% and cap states are
+        // reached with a few synthetic usage rows (tests/e2e/kev-budget.spec.ts)
+        // without moving the main server's NZ$100 month much.
+        HOME_KEV_MONTHLY_CAP_NZD: '20',
       },
     },
   ],

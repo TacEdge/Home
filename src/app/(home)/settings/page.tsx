@@ -1,3 +1,4 @@
+import { kevSwitchedOn } from '@/app/_kev/status';
 import { realDataGateOpen } from '@/lib/env';
 import { requireActor } from '@/trust/session';
 import { Button } from '@/ui/button';
@@ -6,7 +7,7 @@ import { Label, Page, Quiet } from '@/ui/page';
 import { signOutAction } from './actions';
 
 // Settings (M3 contract §3.1, M4 contract §5.1): You · Calendars · What Kev
-// knows · Archived · Activity · Export. Usage (M8) is not listed yet.
+// knows · Archived · Activity · Export · Usage (M8 Package 4: with Kev on).
 export default async function SettingsPage() {
   const actor = await requireActor();
   return (
@@ -34,6 +35,9 @@ export default async function SettingsPage() {
         <ItemRow title="Archived" detail="Put away, not deleted" href="/settings/archived" />
         <ItemRow title="Activity" detail="Everything HOME has done" href="/settings/activity" />
         <ItemRow title="Export" detail="Download your HOME data" href="/settings/export" />
+        {kevSwitchedOn() ? (
+          <ItemRow title="Usage" detail="What Kev has cost this month" href="/settings/usage" />
+        ) : null}
       </List>
 
       <Label>Account</Label>

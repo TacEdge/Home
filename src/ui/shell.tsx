@@ -6,7 +6,9 @@ import { Wordmark } from './wordmark';
 
 // The HOME shell (docs/concepts/README.md, docs/BRAND.md §07, M3 contract
 // §3.1): the wordmark, the Today/Forward switch, the ⌂ menu, the page, and a
-// slot for the capture bar at the foot of every place (M3 Package 7). A page
+// slot for the bar row at the foot of every place (M3 Package 7; the row
+// itself, sticky, is the capture bar's, src/ui/bar-row.tsx, so a place with an input
+// of its own, Kev's screen, can leave it out: M8 Package 4). A page
 // that holds a `data-wide` element (Today's second column, M5 Package 3) lets
 // the page grow from 720px to 960px at tablet width; no other page does.
 
@@ -15,7 +17,7 @@ export function Shell({
   capture,
 }: {
   children: React.ReactNode;
-  /** The capture bar (Package 7). */
+  /** The bar row: the capture bar (Package 7) and, with Kev on, Ask Kev (M8 Package 4). */
   capture?: React.ReactNode;
 }) {
   return (
@@ -39,11 +41,7 @@ export function Shell({
       >
         {children}
       </main>
-      {capture ? (
-        <div className="bg-paper border-line sticky bottom-0 z-10 border-t px-5 py-3">
-          <div className="mx-auto w-full max-w-[720px]">{capture}</div>
-        </div>
-      ) : null}
+      {capture ?? null}
     </div>
   );
 }
