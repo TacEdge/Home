@@ -16,7 +16,9 @@ import { handleTurnRequest } from '@/app/(home)/kev/turn/handle';
 import { clearConversation } from '@/domain/kev-bookkeeping/service';
 import { localScript } from '@/kev/evals/local';
 import { createScriptedProvider } from '@/kev/providers/scripted';
+import { clockedPool, dropTestClock } from './clock';
 import { adminDb, testDb } from './db';
+import { clockTo, createTickingClock } from './kev-turn-helpers';
 import { NOW } from './kev-fixture';
 import { buildKevFixture, clearKevFixture, type KevFixture } from './kev-fixture';
 
@@ -204,58 +206,69 @@ describe('the turn route, measured with the scripted provider (not model latency
     async () => {
       const sam = f.kev.sam;
       await admin.db.execute(sql`delete from conversation where user_id = ${sam.userId}`);
-      const first: number[] = [];
-      const answered: number[] = [];
-      const pending: Promise<unknown>[] = [];
-      for (let i = 0; i < 6; i++) {
-        await clearConversation(sam, { db });
-        const l = localScript('What’s happening today?', { now: NOW, timeZone: ZONE });
-        const t0 = performance.now();
-        const res = await handleTurnRequest(
-          new Request('http://localhost:3000/kev/turn', {
-            method: 'POST',
-            headers: {
-              host: 'localhost:3000',
-              origin: 'http://localhost:3000',
-              'content-type': 'application/json',
+      // The turns' bookkeeping runs on a ticking database clock in a month
+      // no other suite uses (2044), so the per-adult limits count only these
+      // six turns, not other suites' turns as the same adult in the same run.
+      await createTickingClock(admin);
+      await clockTo(admin, '2044-03-01T00:00:00Z');
+      const { pool: clockedHandle, db: clocked } = clockedPool(10);
+      try {
+        const first: number[] = [];
+        const answered: number[] = [];
+        const pending: Promise<unknown>[] = [];
+        for (let i = 0; i < 6; i++) {
+          await clearConversation(sam, { db: clocked });
+          const l = localScript('What’s happening today?', { now: NOW, timeZone: ZONE });
+          const t0 = performance.now();
+          const res = await handleTurnRequest(
+            new Request('http://localhost:3000/kev/turn', {
+              method: 'POST',
+              headers: {
+                host: 'localhost:3000',
+                origin: 'http://localhost:3000',
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({ text: 'What’s happening today?' }),
+            }),
+            {
+              getActor: async () => ({ ...sam, via: 'ui' }),
+              now: async () => NOW,
+              after: (t) => void pending.push(t),
+              db: clocked,
+              provider: createScriptedProvider(l.script),
             },
-            body: JSON.stringify({ text: 'What’s happening today?' }),
-          }),
-          {
-            getActor: async () => ({ ...sam, via: 'ui' }),
-            now: async () => NOW,
-            after: (t) => void pending.push(t),
-            db,
-            provider: createScriptedProvider(l.script),
-          },
-        );
-        const reader = res.body!.getReader();
-        const dec = new TextDecoder();
-        let text = '';
-        let sawWorking = false;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          text += dec.decode(value, { stream: true });
-          if (!sawWorking && text.includes('event: working')) {
-            first.push(performance.now() - t0);
-            sawWorking = true;
+          );
+          const reader = res.body!.getReader();
+          const dec = new TextDecoder();
+          let text = '';
+          let sawWorking = false;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            text += dec.decode(value, { stream: true });
+            if (!sawWorking && text.includes('event: working')) {
+              first.push(performance.now() - t0);
+              sawWorking = true;
+            }
           }
+          answered.push(performance.now() - t0);
+          expect(text).toContain('event: answer');
+          await Promise.all(pending.splice(0));
+          await new Promise((r) => setTimeout(r, 1_100));
         }
-        answered.push(performance.now() - t0);
-        expect(text).toContain('event: answer');
-        await Promise.all(pending.splice(0));
-        await new Promise((r) => setTimeout(r, 1_100));
+        const p = (xs: number[], q: number) =>
+          [...xs].sort((a, b) => a - b)[Math.ceil(q * xs.length) - 1]!;
+        const line = `| scripted turn, "What’s happening today?" (local PostgreSQL) | ${p(first, 0.5).toFixed(1)} / ${p(first, 0.95).toFixed(1)} | ${p(answered, 0.5).toFixed(1)} / ${p(answered, 0.95).toFixed(1)} |`;
+        if (process.env.KEV_PERF_OUT)
+          writeFileSync(
+            process.env.KEV_PERF_OUT,
+            `\n| Turn | First working, p50 / p95 (ms) | Checked answer, p50 / p95 (ms) |\n|---|---|---|\n${line}\n`,
+            { flag: 'a' },
+          );
+      } finally {
+        await clockedHandle.end();
+        await dropTestClock(admin);
       }
-      const p = (xs: number[], q: number) =>
-        [...xs].sort((a, b) => a - b)[Math.ceil(q * xs.length) - 1]!;
-      const line = `| scripted turn, "What’s happening today?" (local PostgreSQL) | ${p(first, 0.5).toFixed(1)} / ${p(first, 0.95).toFixed(1)} | ${p(answered, 0.5).toFixed(1)} / ${p(answered, 0.95).toFixed(1)} |`;
-      if (process.env.KEV_PERF_OUT)
-        writeFileSync(
-          process.env.KEV_PERF_OUT,
-          `\n| Turn | First working, p50 / p95 (ms) | Checked answer, p50 / p95 (ms) |\n|---|---|---|\n${line}\n`,
-          { flag: 'a' },
-        );
     },
   );
 });
