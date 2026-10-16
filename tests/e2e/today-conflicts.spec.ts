@@ -1,5 +1,5 @@
 import { expect, test, type Browser } from '@playwright/test';
-import { expectAccessible } from './a11y';
+import { expectAccessibleBarInFlow } from './a11y';
 import { fixtureAdultContext, VIEWPORTS, type Adult } from './fixture-adults';
 import { withDb } from './helpers';
 
@@ -126,7 +126,10 @@ test('tomorrow’s conflict is listed in Worth knowing with the Sun mark; Dismis
   await expect(row.getByRole('button', { name: /^Not useful:/ })).toBeVisible();
   // Today's marks are on this page too: the baseline holds with marks and an open Why.
   await expect(page.locator('[data-conflict]').first()).toBeVisible();
-  await expectAccessible(page, 'Today with conflict marks and a conflict in Worth knowing');
+  await expectAccessibleBarInFlow(
+    page,
+    'Today with conflict marks and a conflict in Worth knowing',
+  );
   await row.getByRole('button', { name: /^Dismiss:/ }).click();
   await expect(
     page.locator('[data-insight="conflict.overlap"]', { hasText: 'tc Art' }),
