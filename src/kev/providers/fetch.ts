@@ -117,9 +117,16 @@ type FetchInit = {
 /**
  * The observer a call may attach: how many requests entered HOME's fetch
  * (none means nothing of the call ever left HOME), and whether any response
- * byte arrived (HOME's retry rule).
+ * byte arrived (HOME's retry rule). `requestId` is the provider's
+ * `request-id` response header, kept in memory for the live verification
+ * runner's report (its probe path only reads it; nothing stores or logs it).
  */
-export type FetchObserver = { requests: number; responseBytes: number; status: number | null };
+export type FetchObserver = {
+  requests: number;
+  responseBytes: number;
+  status: number | null;
+  requestId?: string | null;
+};
 
 export type ProviderFetch = ((
   url: string | URL | Request,
@@ -530,6 +537,7 @@ export function observedFetch(inner: ProviderFetch, observer: FetchObserver): Pr
     observer.requests += 1;
     const res = await inner(input, init);
     observer.status = res.status;
+    observer.requestId = res.headers.get('request-id');
     if (!res.body) return res;
     const reader = res.body.getReader();
     const counted = new ReadableStream<Uint8Array>({

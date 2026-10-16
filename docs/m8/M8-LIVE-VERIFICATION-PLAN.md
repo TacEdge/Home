@@ -76,6 +76,8 @@ A small **live verification runner**, contract §12.4's design, with no live cal
 
 Owner ruling needed: stage B says "no HOME database". The gateway cannot call without a budget reservation, which lives in Postgres. **Recommended reading:** the job's own ephemeral database holding only the fixture family and the ledger counts as "no HOME family-record access"; production and home-dev are never reachable from the job.
 
+*As built (2026-10-16; ADR 0012 §49):* the runner above exists, with no live call made: `scripts/kev-live/run.mts` (a dry run by default), the workflow `.github/workflows/kev-live-verify.yml`, the probe gateway in `anthropic.ts` (the owner chose a reviewed addition for G1, G8 and the Haiku checks), the isolation check and the G16 script. Its plan totals **US$7.28** at most (US$4.39 with no retry). Runbook: `docs/runbooks/KEV-LIVE-VERIFY.md`.
+
 ## 6. Synthetic-data and privacy evidence
 
 From the code (tested): in Production with the gate closed `kevConfig` is `off (gate closed)` whatever the key (`env.ts`, S10), no provider is built and the turn route refuses before any read; Preview's boot guard refuses a database host equal to Production's; every read is actor-bound with visibility in SQL (`kev-non-interference`, `privacy` suites); external text is labelled untrusted; no key reaches the client bundle (S13). **Owner facts the repository cannot prove:** that home-dev holds only synthetic records (people's names reach Kev's context); that **Neon's Vercel integration is not creating Preview branches copied from Production** (the integration's default makes copy-on-write `preview/<branch>` databases from the parent); that no provider key exists in any Vercel environment today.

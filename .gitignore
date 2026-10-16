@@ -19,6 +19,7 @@ test-results/
 playwright-report/
 blob-report/
 verify-logs/
+kev-live-report/
 
 # local databases / tooling
 .postgres/

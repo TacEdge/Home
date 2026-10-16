@@ -147,6 +147,10 @@ describe('tiers by kind of change', () => {
     ['Playwright config', 'playwright.config.ts'],
     ['milestone acceptance', 'docs/m5/M5-ACCEPTANCE.md'],
     ['the production gate runbook', 'docs/runbooks/DEPLOY.md'],
+    ['the Kev live verification workflow', '.github/workflows/kev-live-verify.yml'],
+    ['the Kev live verification runner', 'scripts/kev-live/run.mts'],
+    ['the live runner’s probes', 'scripts/kev-live/probes.ts'],
+    ['the G16 script', 'scripts/kev-live/g16-pooled.mts'],
   ])('%s: critical, full regression', (_, p) => {
     expect(pr(p)).toMatchObject({ tier: 'critical', mode: 'full' });
   });

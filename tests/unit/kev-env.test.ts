@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   EnvError,
@@ -121,6 +123,18 @@ describe('kevConfig and the boot line', () => {
     expect(kevConfig({ HOME_KEV: 'on', HOME_KEV_PROVIDER_KEY: '   ' })).toEqual({
       status: 'no key',
     });
+  });
+
+  it('the evaluation key (KEV_EVAL_PROVIDER_KEY, contract §12.4) is never Kev’s: no file under src/ names it, and with only it set Kev has no key', () => {
+    expect(kevConfig({ HOME_KEV: 'on', KEV_EVAL_PROVIDER_KEY: KEY })).toEqual({ status: 'no key' });
+    const files = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)],
+      );
+    const naming = files('src').filter((f) =>
+      /KEV_EVAL_PROVIDER_KEY|KEV_LIVE_PROVIDER_KEY/.test(readFileSync(f, 'utf8')),
+    );
+    expect(naming).toEqual([]);
   });
 
   it('N3: scripted is off (never constructed) anywhere deployed', () => {

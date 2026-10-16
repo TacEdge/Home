@@ -49,6 +49,19 @@ export default defineConfig({
           // database, after its guard.
         },
       },
+      {
+        // The Kev live verification runner and the G16 script only
+        // (scripts/kev-live/run.mts, g16-pooled.mts): never part of a test
+        // run, and each refuses to start without its launcher's flag. No
+        // tests/setup.ts: they use their own guarded database.
+        extends: true,
+        test: {
+          name: 'kev-live',
+          include: ['scripts/kev-live/*.live.ts'],
+          environment: 'node',
+          testTimeout: 60 * 60_000,
+        },
+      },
     ],
   },
 });

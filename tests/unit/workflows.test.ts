@@ -11,7 +11,12 @@ const workflows = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
 describe('GitHub workflows', () => {
   it('exist', () => {
     expect(workflows).toEqual(
-      expect.arrayContaining(['ci.yml', 'migrate.yml', 'migrate-preview.yml']),
+      expect.arrayContaining([
+        'ci.yml',
+        'migrate.yml',
+        'migrate-preview.yml',
+        'kev-live-verify.yml',
+      ]),
     );
   });
 
@@ -44,6 +49,63 @@ describe('GitHub workflows', () => {
     expect(text).not.toMatch(/environment:\s*production/);
     expect(text).not.toMatch(/migrate-production/);
     expect(text).toMatch(/DATABASE_URL_MIGRATE: \$\{\{ secrets\.DATABASE_URL_MIGRATE \}\}/);
+  });
+
+  describe('kev-live-verify.yml (M8 live verification; owner decisions 2-4)', () => {
+    const text = () => readFileSync(join(dir, 'kev-live-verify.yml'), 'utf8');
+    const job = (name: string) => {
+      const t = text();
+      const start = t.indexOf(`\n  ${name}:\n`);
+      const next = t.slice(start + 1).search(/\n  [a-z-]+:\n/);
+      return next < 0 ? t.slice(start) : t.slice(start, start + 1 + next);
+    };
+
+    it('runs only on a manual dispatch from main: never on a push, pull request or schedule', () => {
+      const on = text().match(/^on:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+      expect(on.split('\n')[0]!.trim()).toBe('workflow_dispatch:');
+      expect(on).not.toMatch(
+        /^\s{2}(push|pull_request|pull_request_target|schedule|workflow_run|repository_dispatch):/m,
+      );
+      expect(text()).not.toMatch(
+        /^\s*(push|pull_request|pull_request_target|schedule|cron|workflow_run):/m,
+      );
+      for (const j of ['plan', 'run'])
+        expect(job(j)).toMatch(/if: github\.ref == 'refs\/heads\/main'/);
+      expect(text()).toMatch(/^permissions:\n {2}contents: read\n/m);
+    });
+
+    it('the plan job holds no key, no environment and no database; the run job waits for it and for the owner', () => {
+      expect(job('plan')).not.toMatch(/secrets\.|environment:|services:/);
+      expect(job('plan')).toMatch(/run: node scripts\/kev-live\/run\.mts --check-plan/);
+      expect(job('run')).toMatch(/needs: plan/);
+      expect(job('run')).toMatch(/environment: kev-evals/);
+      expect(job('run')).toMatch(/run: node scripts\/kev-live\/run\.mts --live/);
+    });
+
+    it('the key is the kev-evals secret KEV_EVAL_PROVIDER_KEY, given to the runner step only; no other key name', () => {
+      const t = text();
+      expect(t.match(/secrets\.[A-Z_]+/g)).toEqual(['secrets.KEV_EVAL_PROVIDER_KEY']);
+      expect(t).not.toMatch(/HOME_KEV_PROVIDER_KEY|ANTHROPIC_API_KEY|KEV_LIVE_PROVIDER_KEY/);
+      const step = t.slice(
+        t.indexOf('- name: Run the approved plan'),
+        t.indexOf('run: node scripts/kev-live/run.mts --live'),
+      );
+      expect(step).toMatch(/KEV_EVAL_PROVIDER_KEY: \$\{\{ secrets\.KEV_EVAL_PROVIDER_KEY \}\}/);
+    });
+
+    it('the job’s own Postgres, the fixture seed, never a hosted database; inputs only through env', () => {
+      const run = job('run');
+      expect(run).toMatch(/image: postgres:16/);
+      expect(run).toMatch(/POSTGRES_DB: home_live_verify/);
+      expect(run).toMatch(
+        /DATABASE_URL: postgres:\/\/home_app:home_app@localhost:5432\/home_live_verify/,
+      );
+      expect(run).toMatch(/run: pnpm db:seed:fixtures/);
+      expect(text()).not.toMatch(/neon|HOME_REAL_DATA|VERCEL/i);
+      // Dispatch inputs never interpolated into a shell command.
+      expect(text()).not.toMatch(/run: .*\$\{\{/);
+      expect(run).toMatch(/upload-artifact@[0-9a-f]{40}/);
+    });
   });
 
   it('ci.yml runs the previous-schema check and its self-test with full history (migration-first)', () => {

@@ -9,8 +9,13 @@ vi.mock('@/domain/kev-bookkeeping/service', () => ({
   isLiveReservation: (r: unknown) => typeof r === 'object' && r !== null && liveSet.has(r),
 }));
 
-const { TurnBudget, BudgetExhausted } = await import('@/kev/budget');
-const { LIMITS } = await import('@/kev/config');
+const { TurnBudget, BudgetExhausted, recordedPrices } = await import('@/kev/budget');
+const { GEO_MULTIPLIER, LIMITS, MODELS, TIERS } = await import('@/kev/config');
+const { costUsdMicros } = await import('@/trust/usage');
+const { attemptReservation, perCallMax } = await import('@/kev/router');
+/** The model a fast call is made on (a call is recorded at its model's prices). */
+const FAST = TIERS.fast.model.id;
+const HAIKU = MODELS.haiku55.id;
 
 // The application's clock is pinned at NOW: TurnBudget.open checks its
 // deadline against Date.now() (no caller-supplied time).
@@ -50,7 +55,7 @@ describe('TurnBudget', () => {
     const b = TurnBudget.open(reservation('fast', 665_280n), { deadline: NOW + 55_000 });
     for (let i = 0; i < LIMITS.modelCallsPerAttempt; i++) {
       const { ticket } = b.beginCall(NOW);
-      b.endCall(ticket, { model: 'm', usage, ms: 1, stop: 'end_turn' });
+      b.endCall(ticket, { model: FAST, usage, ms: 1, stop: 'end_turn' });
     }
     expect(b.modelCalls).toBe(5);
     expect(b.canCall(NOW)).toEqual({ ok: false, reason: 'calls_exhausted' });
@@ -68,9 +73,9 @@ describe('TurnBudget', () => {
     const c = b.beginCall(NOW);
     expect(b.canCall(NOW)).toEqual({ ok: false, reason: 'reservation_exhausted' });
     // Ending a call at its real cost (3,300 µ$) frees the rest of its maximum.
-    b.endCall(a.ticket, { model: 'm', usage, ms: 1, stop: 'end_turn' });
+    b.endCall(a.ticket, { model: FAST, usage, ms: 1, stop: 'end_turn' });
     expect(b.canCall(NOW).ok).toBe(true);
-    b.endCall(c.ticket, { model: 'm', usage: null, ms: 1, stop: 'error', errorCode: 'timeout' });
+    b.endCall(c.ticket, { model: FAST, usage: null, ms: 1, stop: 'error', errorCode: 'timeout' });
     expect(b.calls.at(-1)?.costUsdMicros).toBe(133_056n); // unknown usage: the per-call maximum
   });
 
@@ -115,10 +120,10 @@ describe('TurnBudget', () => {
     const b = TurnBudget.open(reservation('fast', 665_280n), { deadline: NOW + 55_000 });
     const { ticket } = b.beginCall(NOW);
     expect(b.committedUsdMicros).toBe(133_056n);
-    b.endCall(ticket, { model: 'm', usage: null, ms: 0, stop: 'error', notSent: true });
+    b.endCall(ticket, { model: FAST, usage: null, ms: 0, stop: 'error', notSent: true });
     expect(b.calls).toEqual([]);
     expect(b.committedUsdMicros).toBe(0n);
-    expect(() => b.endCall(ticket, { model: 'm', usage, ms: 0, stop: 'end_turn' })).toThrow();
+    expect(() => b.endCall(ticket, { model: FAST, usage, ms: 0, stop: 'end_turn' })).toThrow();
   });
 
   it('a settled (revoked) reservation allows no further call', () => {
@@ -177,7 +182,7 @@ describe('I2: a call without the provider’s final usage is charged conservativ
     const b = TurnBudget.open(reservation('fast', 665_280n), { deadline: NOW + 55_000 });
     const { ticket } = b.beginCall(NOW);
     const r = b.endCall(ticket, {
-      model: 'm',
+      model: FAST,
       usage: partial,
       ms: 5,
       stop: 'error',
@@ -194,7 +199,7 @@ describe('I2: a call without the provider’s final usage is charged conservativ
     const { ticket } = b.beginCall(NOW);
     // 50,000 input × 2,000 n$ + 4,096 output × 10,000 n$ = 140,960,000 n$, × 1.1.
     const big = { ...usage, inputTokens: 50_000, outputTokens: 3 };
-    const r = b.endCall(ticket, { model: 'm', usage: big, ms: 5, stop: 'error', partial: true });
+    const r = b.endCall(ticket, { model: FAST, usage: big, ms: 5, stop: 'error', partial: true });
     expect(r?.costUsdMicros).toBe(155_056n);
   });
 
@@ -206,7 +211,7 @@ describe('I2: a call without the provider’s final usage is charged conservativ
     });
     for (let i = 0; i < 2; i++) {
       const { ticket } = b.beginCall(NOW);
-      b.endCall(ticket, { model: 'm', usage: partial, ms: 1, stop: 'error', partial: true });
+      b.endCall(ticket, { model: FAST, usage: partial, ms: 1, stop: 'error', partial: true });
     }
     expect(b.calls.map((c) => c.costUsdMicros)).toEqual([133_056n, 133_056n]);
     // Priced as final (2 × 2,112 µ$), a third call would have fitted.
@@ -216,7 +221,7 @@ describe('I2: a call without the provider’s final usage is charged conservativ
   it('a final report is charged at its cost, as before', () => {
     const b = TurnBudget.open(reservation('fast', 665_280n), { deadline: NOW + 55_000 });
     const { ticket } = b.beginCall(NOW);
-    expect(b.endCall(ticket, { model: 'm', usage, ms: 1, stop: 'end_turn' })?.costUsdMicros).toBe(
+    expect(b.endCall(ticket, { model: FAST, usage, ms: 1, stop: 'end_turn' })?.costUsdMicros).toBe(
       3_300n,
     );
   });
@@ -227,11 +232,11 @@ describe('I4: reported input over the 32,000-token cap halts the attempt', () =>
     const b = TurnBudget.open(reservation('fast', 665_280n), { deadline: NOW + 55_000 });
     const at = { ...usage, inputTokens: 10_000, cacheReadTokens: 12_000, cacheWriteTokens: 10_000 };
     let t = b.beginCall(NOW).ticket;
-    b.endCall(t, { model: 'm', usage: at, ms: 1, stop: 'end_turn' });
+    b.endCall(t, { model: FAST, usage: at, ms: 1, stop: 'end_turn' });
     expect(b.canCall(NOW).ok).toBe(true); // exactly 32,000: allowed
     t = b.beginCall(NOW).ticket;
     b.endCall(t, {
-      model: 'm',
+      model: FAST,
       usage: { ...at, inputTokens: 10_001 },
       ms: 1,
       stop: 'error',
@@ -241,5 +246,84 @@ describe('I4: reported input over the 32,000-token cap halts the attempt', () =>
     expect(b.halted).toBe('input_limit');
     expect(b.canCall(NOW)).toEqual({ ok: false, reason: 'input_limit' });
     expect(() => b.beginCall(NOW)).toThrow(BudgetExhausted);
+  });
+});
+
+describe('a call is recorded at the prices of the model actually called (owner decision, 2026-10-16)', () => {
+  const open = (tier: 'fast' | 'deep') =>
+    TurnBudget.open(reservation(tier, attemptReservation(tier)), { deadline: NOW + 55_000 });
+
+  it('the tier’s own model at its prices; Haiku 5.5 on fast at Haiku’s; nothing else has a price', () => {
+    expect(recordedPrices('fast', TIERS.fast.model.id)).toBe(TIERS.fast.model.prices);
+    expect(recordedPrices('deep', TIERS.deep.model.id)).toBe(TIERS.deep.model.prices);
+    expect(recordedPrices('fast', HAIKU)).toBe(MODELS.haiku55.prices);
+    expect(recordedPrices('deep', HAIKU)).toBeNull();
+    expect(recordedPrices('fast', TIERS.deep.model.id)).toBeNull();
+    expect(recordedPrices('fast', 'claude-unknown')).toBeNull();
+    // Haiku is cheaper than the fast tier in every category, so the fast
+    // tier's per-call maximum bounds a Haiku call.
+    const h = MODELS.haiku55.prices;
+    const s = TIERS.fast.model.prices;
+    for (const k of ['input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output'] as const)
+      expect(h[k] < s[k]).toBe(true);
+  });
+
+  it('a completed Haiku call: recorded at Haiku’s prices; the reservation and per-call maximum stay the fast tier’s', () => {
+    const b = open('fast');
+    expect(b.reservedUsdMicros).toBe(attemptReservation('fast'));
+    expect(b.perCallMaxUsdMicros).toBe(perCallMax('fast'));
+    const { ticket } = b.beginCall(NOW);
+    // Committed at the fast tier's maximum while in flight.
+    expect(b.committedUsdMicros).toBe(perCallMax('fast'));
+    const r = b.endCall(ticket, { model: HAIKU, usage, ms: 1, stop: 'end_turn' });
+    // 1,000 × 100 n$ + 100 × 500 n$ = 150,000 n$ × 1.1 = 165 µ$ (Sonnet's: 3,300 µ$).
+    expect(r?.costUsdMicros).toBe(165n);
+    expect(r?.costUsdMicros).toBe(costUsdMicros(usage, MODELS.haiku55.prices, GEO_MULTIPLIER));
+    expect(b.committedUsdMicros).toBe(165n);
+  });
+
+  it('a Haiku call never charged below the conservative figure: unknown usage at the per-call maximum, partial usage at the fast tier’s conservative charge', () => {
+    const b = open('fast');
+    const a = b.beginCall(NOW);
+    const unknown = b.endCall(a.ticket, {
+      model: HAIKU,
+      usage: null,
+      ms: 1,
+      stop: 'error',
+      errorCode: 'timeout',
+    });
+    expect(unknown?.costUsdMicros).toBe(perCallMax('fast'));
+    const c = b.beginCall(NOW);
+    const partial = b.endCall(c.ticket, {
+      model: HAIKU,
+      usage,
+      ms: 1,
+      stop: 'error',
+      partial: true,
+    });
+    expect(partial?.costUsdMicros).toBe(b.conservativeCost(usage));
+    expect(partial!.costUsdMicros >= perCallMax('fast')).toBe(true);
+  });
+
+  it('a model HOME has no verified price for, on that tier, is charged the per-call maximum', () => {
+    for (const [tier, model] of [
+      ['fast', 'claude-unknown'],
+      ['fast', TIERS.deep.model.id],
+      ['deep', HAIKU],
+    ] as const) {
+      const b = open(tier);
+      const { ticket } = b.beginCall(NOW);
+      const r = b.endCall(ticket, { model, usage, ms: 1, stop: 'end_turn' });
+      expect(r?.costUsdMicros).toBe(perCallMax(tier));
+    }
+  });
+
+  it('the tier’s own model is unchanged: its tokens at its prices', () => {
+    for (const tier of ['fast', 'deep'] as const) {
+      const b = open(tier);
+      const { ticket } = b.beginCall(NOW);
+      const r = b.endCall(ticket, { model: TIERS[tier].model.id, usage, ms: 1, stop: 'end_turn' });
+      expect(r?.costUsdMicros).toBe(costUsdMicros(usage, TIERS[tier].model.prices, GEO_MULTIPLIER));
+    }
   });
 });
