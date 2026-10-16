@@ -32,8 +32,9 @@ import { refSchema, type Ref, type ToolName } from '../tools/types';
 // whom: the bundle's Today and get_today cover today's agenda; get_agenda
 // its range's agenda (only for the people asked for, when it was filtered);
 // get_conflicts its range's overlaps; get_weather the asked days it has no
-// forecast for (all of them when none is set up); a search what it searched
-// for. A truncated read covers nothing. A forecast, gaps or conflicts read is
+// forecast for (all of them when none is set up). A search covers nothing:
+// a search that finds nothing makes no claim (ADR 0012 §47). A truncated
+// read covers nothing. A forecast, gaps or conflicts read is
 // never agenda coverage.
 
 export type DayPart = 'morning' | 'afternoon' | 'evening';
@@ -93,7 +94,7 @@ export type LedgerEntry = {
   span: { from: number; to: number } | null;
 };
 
-export type CoverageKind = 'agenda' | 'conflicts' | 'forecast' | 'search';
+export type CoverageKind = 'agenda' | 'conflicts' | 'forecast';
 export type CoverageSpan = {
   kind: CoverageKind;
   /** The read that established it. */
@@ -562,9 +563,6 @@ export class Ledger {
               ),
             );
       this.#cover({ kind: 'forecast', days, persons: null, configured: !unconfigured });
-    } else if (source === 'search') {
-      // What was searched for is the model's text: never kept, never shown.
-      this.#cover({ kind: 'search', days: new Set(), persons: null });
     }
   }
 

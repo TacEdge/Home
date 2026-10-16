@@ -103,7 +103,7 @@ export const PLAN_SHOW_FIELDS = [
   'gust',
   'parts',
 ] as const;
-export const PLAN_SCOPE_KINDS = ['agenda', 'conflicts', 'forecast', 'search'] as const;
+export const PLAN_SCOPE_KINDS = ['agenda', 'conflicts', 'forecast'] as const;
 /** HOME's lead catalogue and Kev's view vocabulary, by identifier (src/kev/answer/catalogue.ts, version 1). */
 export const PLAN_LEAD_IDS = [
   'home_has',

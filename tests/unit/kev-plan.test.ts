@@ -331,9 +331,10 @@ describe('absence and counts: scoped, covered, uncontradicted (V4, V5)', () => {
     expect(
       codes(check(plan('here_you_go', [absence({ of: 'forecast', from: SAT, to: SAT })]), w)),
     ).toEqual(['absence.unsupported']);
-    expect(shownText(check(plan('here_you_go', [absence({ of: 'search' })]), w))[1]).toBe(
-      'Nothing you can see in HOME has a matching title.',
-    );
+    // A search that found nothing is no absence at all (ADR 0012 §47): unrepresentable.
+    expect(codes(check(plan('here_you_go', [absence({ of: 'search' })]), w))).toEqual([
+      'answer.schema',
+    ]);
     const none = busyLedger([more.weatherNone]);
     expect(
       shownText(
@@ -344,10 +345,10 @@ describe('absence and counts: scoped, covered, uncontradicted (V4, V5)', () => {
       )[1],
     ).toBe('HOME doesn’t have a forecast set up.');
     void none;
-    // A search that found something: an absence needs `else` with every result shown.
+    // Nor after a search that found something.
     const f = busyLedger([more.searchFence]);
     expect(codes(check(plan('here_you_go', [absence({ of: 'search' })]), f))).toEqual([
-      'absence.unsupported',
+      'answer.schema',
     ]);
   });
 
@@ -809,9 +810,9 @@ describe('the final review’s unnecessary rejections, and \u00A73.1–\u00A73.3
       'Help me think through our weekend.',
     ],
     [
-      'fabrication: what time’s the dentist? (search found nothing)',
-      plan('here_you_go', [absence({ of: 'search' })]),
-      ['Here you go.', 'Nothing you can see in HOME has a matching title.'],
+      'fabrication: what time’s the dentist? (search found nothing: HOME’s “not sure”)',
+      plan('unsure', []),
+      ['I’m not sure what you’re after. Try asking another way.'],
       'What time’s the dentist?',
     ],
     [

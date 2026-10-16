@@ -198,7 +198,8 @@ const TRUTHFUL: [string, unknown][] = [
     'Help me think about Saturday.',
     plan('when', [rec(foot), rec(party)], v('follow_up', 'who_goes_where', [0, 1])),
   ],
-  ['What time’s the dentist next month?', plan('here_you_go', [abs({ of: 'search' })])],
+  // A search that found nothing makes no claim (ADR 0012 §47): HOME's "not sure".
+  ['What time’s the dentist next month?', plan('unsure', [])],
   [
     'Anything else on Saturday after football?',
     plan('when', [rec(foot), rec(party), abs({ from: SAT, to: SAT, else: true })]),

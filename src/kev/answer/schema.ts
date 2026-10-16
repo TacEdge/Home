@@ -92,7 +92,12 @@ export const DEFAULT_SHOW: Readonly<Record<RefType, readonly ShowField[]>> = Obj
   context: [],
 });
 
-export const SCOPE_KINDS = ['agenda', 'conflicts', 'forecast', 'search'] as const;
+/**
+ * What an absence or count may be over. A search is not one of them (owner
+ * decision of 2026-10-15, ADR 0012 §47): a search that finds nothing makes no
+ * claim, so "nothing has a matching title" cannot be expressed.
+ */
+export const SCOPE_KINDS = ['agenda', 'conflicts', 'forecast'] as const;
 export type ScopeKind = (typeof SCOPE_KINDS)[number];
 export const DAY_PARTS = ['morning', 'afternoon', 'evening'] as const;
 export const SUMMARY_KINDS = ['absence', 'count'] as const;

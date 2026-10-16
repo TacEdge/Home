@@ -65,7 +65,7 @@ export type RefSpec =
  * ADR 0012 §46): people by fixture key.
  */
 export type ScopeSpec = {
-  of: 'agenda' | 'conflicts' | 'forecast' | 'search';
+  of: 'agenda' | 'conflicts' | 'forecast';
   from?: string;
   to?: string;
   people?: FixtureKey[];

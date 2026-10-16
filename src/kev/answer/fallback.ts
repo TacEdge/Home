@@ -92,12 +92,11 @@ export type Coverage = {
 const CALENDAR_RECORDS: readonly RefType[] = ['event', 'conflict', 'gap', 'insight'];
 /**
  * Statements over what calendars hold (final review, minors): an absence or
- * count over the agenda or overlaps, and a search's "nothing has a matching
- * title" (a search reads events' titles too). Each is qualified like a cited
- * event: "As far as HOME knows." with a stale calendar, the coverage
- * sentence with none at all.
+ * count over the agenda or overlaps. Each is qualified like a cited event:
+ * "As far as HOME knows." with a stale calendar, the coverage sentence with
+ * none at all. (A search makes no statement of absence: ADR 0012 §47.)
  */
-const CALENDAR_SUMMARIES = ['agenda', 'conflicts', 'search'] as const;
+const CALENDAR_SUMMARIES = ['agenda', 'conflicts'] as const;
 
 /**
  * The code's sentences for what an answer shows (§8.4), as limit codes. The

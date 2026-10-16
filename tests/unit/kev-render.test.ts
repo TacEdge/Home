@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { temperatureWords as screenTemperature } from '@/app/_insights/weather/weather-today';
 import { TASK_STATUS_LABEL } from '@/app/(home)/tasks/copy';
 import { catalogueCopy, LEADS, SALVAGE_LEAD_ID } from '@/kev/answer/catalogue';
-import { SEARCH_ELSE_TEXT, SEARCH_NONE_TEXT } from '@/kev/answer/coverage';
 import { fixedCopy, forbiddenIn, SALVAGE_LEAD } from '@/kev/answer/language';
 import { Ledger } from '@/kev/answer/ledger';
 import {
@@ -365,8 +364,7 @@ describe('HOME’s copy', () => {
   });
 
   it('HOME’s catalogue (every lead and every view phrase) and its fixed lines say nothing the four lists forbid', () => {
-    for (const t of [...catalogueCopy(), SEARCH_NONE_TEXT, SEARCH_ELSE_TEXT])
-      expect(forbiddenIn(t), t).toEqual([]);
+    for (const t of catalogueCopy()) expect(forbiddenIn(t), t).toEqual([]);
     // Fixed lines' "can't" is about Kev itself, the one exemption (\u00A78.6).
     for (const t of fixedCopy())
       expect(

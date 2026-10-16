@@ -11,7 +11,7 @@ import type { Scope, SummaryBlock } from './schema';
 // own words: it asks for an `absence` or `count` block over an explicit
 // scope, and this module decides whether the ledger supports it and what
 // code says. The coverage rules are the ones the Package 3 review verified
-// (agenda vs overlaps vs forecast vs search; a person-filtered read only for
+// (agenda vs overlaps vs forecast; a person-filtered read only for
 // its people; part of the day; `else`; truncated reads cover nothing; days
 // no read covered fail), now applied to a scope the model states
 // structurally instead of a sentence a pattern had to read.
@@ -23,10 +23,6 @@ import type { Scope, SummaryBlock } from './schema';
 // `else` also needs at least one. A count is the number of events (or
 // overlaps) the ledger holds in scope, over the same coverage, and only
 // when who is on each is known. Code writes the sentence.
-
-/** A search found nothing: HOME's words, with no echo of what was searched for. */
-export const SEARCH_NONE_TEXT = 'Nothing you can see in HOME has a matching title.';
-export const SEARCH_ELSE_TEXT = 'Nothing else you can see in HOME has a matching title.';
 
 export type SummaryOutcome =
   { ok: true; text: string; dates: IsoDate[] } | { ok: false; code: 'absence.unsupported' };
@@ -98,24 +94,6 @@ export function renderSummary(
   const count = block.kind === 'count';
   const isShown = (e: LedgerEntry) =>
     shown.has(fullKeyOf(e.ref)) || shown.has(`${e.ref.type}|${e.ref.id}|`);
-
-  // Search: what this attempt's complete searches found. HOME's fixed
-  // words, never the query: the query is the model's text (final review,
-  // Rendering 4), so it is never shown.
-  if (scope.of === 'search') {
-    if (count || scope.from || scope.to || scope.people.length > 0 || scope.part) return fail;
-    const searches = ledger.coverage.filter((c) => c.kind === 'search');
-    if (searches.length === 0) return fail;
-    const reads = new Set(searches.map((c) => c.read));
-    const found = ledger.entries.filter((e) => e.source === 'search' && reads.has(e.read));
-    if (scope.else ? found.length === 0 || found.some((e) => !isShown(e)) : found.length > 0)
-      return fail;
-    return {
-      ok: true,
-      text: scope.else ? SEARCH_ELSE_TEXT : SEARCH_NONE_TEXT,
-      dates: [],
-    };
-  }
 
   // Every other kind names its days.
   if (!scope.from || !scope.to || scope.to < scope.from) return fail;

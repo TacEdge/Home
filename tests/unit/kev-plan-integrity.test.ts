@@ -3,7 +3,18 @@ import { classifyMessage } from '@/kev/answer/catalogue';
 import type { Ledger } from '@/kev/answer/ledger';
 import { codesOf, validateAnswer, type ValidateResult } from '@/kev/answer/validate';
 import type { Ref } from '@/kev/tools/types';
-import { busyLedger, foot, more, NOW, paint, party, swim, ZONE } from './kev-ledger-fixture';
+import { search } from '@/kev/tools/search';
+import {
+  busyLedger,
+  dentistToday,
+  foot,
+  more,
+  NOW,
+  paint,
+  party,
+  swim,
+  ZONE,
+} from './kev-ledger-fixture';
 
 // The final answer-integrity review of PR #86 (6d2413b), every blocker and
 // important finding as a regression (owner decisions of 2026-10-15, ADR
@@ -164,5 +175,59 @@ describe('B1/I1: social replies, strict (owner decision, Part 2)', () => {
         ),
       ),
     ).toContain('lead.unsupported');
+  });
+});
+
+describe('B5: a search that finds nothing makes no claim (owner decision, Part 6)', () => {
+  /** The busy bundle (Dentist today, 10:00), then a complete search that found nothing. */
+  const l = () => {
+    const ledger = busyLedger();
+    ledger.addResult(
+      'search',
+      search.output.parse({ results: [], returned: 0, truncated: false }),
+      [],
+      { query: 'dentist appointment' },
+    );
+    return ledger;
+  };
+  const searchAbsence = (extra: Record<string, unknown> = {}) => ({
+    kind: 'absence',
+    ref: null,
+    show: [],
+    scope: { of: 'search', from: null, to: null, people: [], part: null, else: false, ...extra },
+  });
+
+  it('a search absence is unrepresentable: alone, beside the dentist, or with `else`', () => {
+    expect(
+      codes(check(plan('here_you_go', [searchAbsence()]), l(), 'What time’s the dentist?')),
+    ).toEqual(['answer.schema']);
+    expect(
+      codes(
+        check(
+          plan('here_you_go', [rec(dentistToday), searchAbsence()]),
+          l(),
+          'What time’s the dentist?',
+        ),
+      ),
+    ).toEqual(['answer.schema']);
+    expect(
+      codes(check(plan('here_you_go', [rec(dentistToday), searchAbsence({ else: true })]), l())),
+    ).toEqual(['answer.schema']);
+  });
+
+  it('the dentist record beside the empty search: the record only', () => {
+    expect(
+      texts(check(plan('here_you_go', [rec(dentistToday)]), l(), 'What time’s the dentist?')),
+    ).toEqual(['Here you go.', '“Dentist”: today, 10:00–10:30. Isla attending.']);
+  });
+
+  it('nothing else read: HOME’s fixed “not sure”, with no echo of the query', () => {
+    const r = check(plan('unsure', []), l(), 'What time’s the dentist?');
+    expect(texts(r)).toEqual(['I’m not sure what you’re after. Try asking another way.']);
+    expect(JSON.stringify(r)).not.toContain('appointment');
+  });
+
+  it('a search covers nothing', () => {
+    expect(l().coverage.some((c) => (c.kind as string) === 'search')).toBe(false);
   });
 });

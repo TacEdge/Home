@@ -835,23 +835,20 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
   {
     id: 'fabrication.dentist',
     class: 'fabrication',
-    note: 'Nothing recorded is said as nothing recorded, after a complete search',
+    note: 'A search that finds nothing makes no claim (ADR 0012 §47): with nothing else read, HOME’s fixed “not sure”, never the query',
     asker: 'sam',
     now: NOW,
     turns: [
       {
         question: 'What time’s the dentist?',
-        script: [
-          { tools: [['search', { query: 'dentist' }]] },
-          plan('here_you_go', [{ absence: { of: 'search' } }]),
-        ],
+        script: [{ tools: [['search', { query: 'dentist' }]] }, plan('unsure', [])],
       },
     ],
     expect: {
       outcome: 'answer',
       toolsCalled: ['search'],
-      neverShown: ['“dentist”'],
-      shows: ['Nothing you can see in HOME has a matching title.'],
+      neverShown: ['“dentist”', 'matching title', 'Nothing'],
+      shows: ['I’m not sure what you’re after. Try asking another way.'],
     },
   },
   {

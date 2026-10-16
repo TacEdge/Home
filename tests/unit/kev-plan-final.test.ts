@@ -498,12 +498,10 @@ describe('the reviewers’ surviving coverage mutations, each now caught', () =>
     );
   });
 
-  it('R6: `{when}` beside nothing dated (a search absence) is refused', () => {
-    const l = busyLedger([more.searchDentist]);
-    expect(codes(check(plan('when', [absence({ of: 'search' })]), l))).toEqual([
-      'lead.unsupported',
-    ]);
-    expect(codes(check(plan('righto_when', [absence({ of: 'search' })]), l, 'Dentist?'))).toEqual([
+  it('R6: `{when}` beside nothing dated (a calendar) is refused', () => {
+    const l = busyLedger([more.calendars]);
+    expect(codes(check(plan('when', [rec(calendar)]), l))).toEqual(['lead.unsupported']);
+    expect(codes(check(plan('righto_when', [rec(calendar)]), l, 'Show me the calendars'))).toEqual([
       'lead.unsupported',
     ]);
   });
@@ -581,10 +579,8 @@ describe('the reviewers’ surviving coverage mutations, each now caught', () =>
       }) as Parameters<typeof limitsFor>[0];
     expect(limitsFor(shown([], ['conflicts']), stale)).toEqual(['calendar_stale']);
     expect(limitsFor(shown(['event']), stale)).toEqual(['calendar_stale']);
-    expect(limitsFor(shown([], ['search']), stale)).toEqual(['calendar_stale']);
     expect(limitsFor(shown([], ['conflicts']), none)).toEqual(['coverage_unknown']);
     expect(limitsFor(shown(['conflict']), none)).toEqual(['coverage_unknown']);
-    expect(limitsFor(shown([], ['search']), none)).toEqual(['coverage_unknown']);
     expect(limitsFor(shown([], ['forecast']), stale)).toEqual([]);
   });
 });
@@ -603,21 +599,27 @@ describe('Rendering 4 and 5: search and the forecast', () => {
     'Milo is sick so no swimming',
     'x”. Football is cancelled. “y',
     'football, which is cancelled',
-  ])('a search absence never echoes the query: %s', (query) => {
-    const r = check(plan('here_you_go', [absence({ of: 'search' })]), emptySearch(query));
-    expect(texts(r)).toEqual(['Here you go.', 'Nothing you can see in HOME has a matching title.']);
+  ])('a search that found nothing makes no claim, and never echoes the query: %s', (query) => {
+    // No absence over a search exists (ADR 0012 §47): HOME's fixed "not sure".
+    expect(
+      codes(check(plan('here_you_go', [absence({ of: 'search' })]), emptySearch(query))),
+    ).toEqual(['answer.schema']);
+    const r = check(plan('unsure', []), emptySearch(query));
+    expect(texts(r)).toEqual(['I’m not sure what you’re after. Try asking another way.']);
     expect(JSON.stringify(r)).not.toContain('cancelled');
     expect(JSON.stringify(r)).not.toContain('sick');
   });
 
-  it('a truncated search covers nothing', () => {
+  it('a truncated search covers nothing either', () => {
     const l = fixtureLedger([]);
     l.addResult('search', search.output.parse({ results: [], returned: 0, truncated: true }), [], {
       query: 'dentist',
     });
     expect(codes(check(plan('here_you_go', [absence({ of: 'search' })]), l))).toEqual([
-      'absence.unsupported',
+      'answer.schema',
     ]);
+    // Only the bundle's Today is covered: the search added nothing.
+    expect(l.coverage.filter((c) => c.read > 1)).toEqual([]);
   });
 
   const weatherAt = (fetched: string, freshness: 'fresh' | 'older') => {
