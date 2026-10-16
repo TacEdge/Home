@@ -162,10 +162,28 @@ beforeEach(async () => {
   seenBodies.clear();
 });
 
+/**
+ * The database-wide open and unreconciled counts before a session. The
+ * runner's own database starts empty, so there both are 0; this shared test
+ * database holds reservations other suites leave open on purpose (a fault
+ * mid-settle, a far-future row), which the settle-only trigger keeps from
+ * being removed, so a session here is measured against what was there.
+ */
+const leftOpen = async () => {
+  const r = await reconcile(db, []);
+  return r.openCount + r.unreconciledCount;
+};
+/** The session left nothing open or unreconciled, and `ok` says exactly that. */
+const expectNothingLeftOpen = (rec: Awaited<ReturnType<typeof reconcile>>, before: number) => {
+  expect(rec.openCount + rec.unreconciledCount).toBeLessThanOrEqual(before);
+  expect(rec.ok).toBe(rec.openCount === 0 && rec.unreconciledCount === 0 && rec.mismatched === 0);
+};
+
 describe('the plan, live path, against a local stub', () => {
   it('every probe passes; every call counted first and in the US; reconciled; the report holds no body', async () => {
     const plan = buildPlan();
     const since = new Date(Date.now() - 1_000);
+    const before = await leftOpen();
     const g = gateway();
     const run = await executePlan(plan, {
       gateway: g,
@@ -217,7 +235,8 @@ describe('the plan, live path, against a local stub', () => {
       db,
       run.results.flatMap((r) => r.attemptIds),
     );
-    expect(rec).toMatchObject({ openCount: 0, unreconciledCount: 0, mismatched: 0, ok: true });
+    expect(rec.mismatched).toBe(0);
+    expectNothingLeftOpen(rec, before);
     expect(rec.usageRows).toBe(calls);
     expect(rec.attempts).toBe(run.results.reduce((a, r) => a + r.attemptIds.length, 0));
     // The aborted call is the one conservative charge; Haiku's four rows are at the fast tier's prices.
@@ -328,6 +347,7 @@ describe('the plan, live path, against a local stub', () => {
   });
 
   it('a refused key on a model call stops the session there; the attempt still settles', async () => {
+    const before = await leftOpen();
     stub.countQueue.push((_req, res) => {
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end(
@@ -346,7 +366,8 @@ describe('the plan, live path, against a local stub', () => {
       db,
       run.results.flatMap((r) => r.attemptIds),
     );
-    expect(rec).toMatchObject({ attempts: 1, openCount: 0, mismatched: 0, usageRows: 0 });
+    expect(rec).toMatchObject({ attempts: 1, mismatched: 0, usageRows: 0 });
+    expectNothingLeftOpen(rec, before);
     expect(perCallMax('fast')).toBe(133_056n);
     expect(TIERS.fast.maxTokens).toBe(4_096);
   });
