@@ -42,15 +42,27 @@ const codeOf = async (p: Promise<unknown>) => {
 const viaStub = (limits = {}) => createProviderFetchForTests(KEY, { stubPort: stub.port, limits });
 
 describe('N5: the destination, exactly', () => {
-  it('approves POST /v1/messages and GET /v1/models/{id} on https://api.anthropic.com only', () => {
+  it('approves POST /v1/messages, POST /v1/messages/count_tokens (G22) and GET /v1/models/{id} on https://api.anthropic.com only', () => {
     const ok = (u: string, m: string) => approveDestination(new URL(u), m);
     expect(ok(MESSAGES, 'POST')).toBe(true);
+    expect(ok('https://api.anthropic.com/v1/messages/count_tokens', 'POST')).toBe(true);
     expect(ok('https://api.anthropic.com/v1/models/model-id-1', 'GET')).toBe(true);
     for (const [u, m] of [
       ['https://api.anthropic.com/v1/messages', 'GET'],
       ['https://api.anthropic.com/v1/messages', 'PUT'],
       ['https://api.anthropic.com/v1/messages/batches', 'POST'],
-      ['https://api.anthropic.com/v1/messages/count_tokens', 'POST'],
+      // G22 adds exactly one path, for POST only: nothing near it is approved.
+      ['https://api.anthropic.com/v1/messages/count_tokens', 'GET'],
+      ['https://api.anthropic.com/v1/messages/count_tokens/', 'POST'],
+      ['https://api.anthropic.com/v1/messages/count_tokens/x', 'POST'],
+      ['https://api.anthropic.com/v1/messages/count_tokens?beta=true', 'POST'],
+      ['https://api.anthropic.com/v1/messages/count-tokens', 'POST'],
+      ['https://api.anthropic.com/v1/messages/batches/count_tokens', 'POST'],
+      ['https://api.anthropic.com/v1/count_tokens', 'POST'],
+      ['https://api.anthropic.com/v1/messages/COUNT_TOKENS', 'POST'],
+      ['http://api.anthropic.com/v1/messages/count_tokens', 'POST'],
+      ['https://api.anthropic.com:8443/v1/messages/count_tokens', 'POST'],
+      ['https://api.anthropic.com/v1/messages/count_tokens/../batches', 'POST'],
       ['https://api.anthropic.com/v1/files', 'POST'],
       ['https://api.anthropic.com/v1/models', 'GET'],
       ['https://api.anthropic.com/v1/models/../messages', 'GET'],

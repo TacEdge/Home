@@ -109,6 +109,33 @@ export const TIERS: Readonly<Record<KevTier, TierConfig>> = Object.freeze({
   }),
 });
 
+/**
+ * What one preflight token count costs (G22): nothing. "Token counting is
+ * free to use but subject to requests per minute rate limits" (the
+ * provider's token-counting page, read 2026-10-15; its own limits, separate
+ * from the Messages API's). Kept here so the accounting is explicit: a
+ * count is charged nothing, writes no `kev_usage` row and is not one of an
+ * attempt's five model calls. If the provider ever prices it, this changes
+ * with G2's price check, and settlement must record it before any live call:
+ * until then the orchestrator refuses to run an attempt with a non-zero
+ * value (its use site, src/kev/orchestrator.ts; tests/unit/kev-preflight.test.ts).
+ */
+export const COUNT_TOKENS_COST_USD_MICROS = 0n;
+
+/**
+ * How each tier returns its final answer (contract §5.1; gate G7, NOT
+ * VERIFIED): `format`, structured output (`output_config.format` with
+ * KevAnswer's schema), the contract's design; or `tool`, a strict `answer`
+ * tool, the documented fallback if G7 finds structured output does not
+ * compose with tool use on that tier. Both are built and tested with the
+ * scripted provider; G7's live result (stage B) decides, by changing this
+ * line, before the first live orchestrated turn.
+ */
+export const ANSWER_PATH: Readonly<Record<KevTier, 'format' | 'tool'>> = Object.freeze({
+  fast: 'format',
+  deep: 'format',
+});
+
 /** Where inference runs, on every request (D3): `us`, which multiplies every price by 1.1. */
 export const INFERENCE_GEO = 'us';
 /** The `us` multiplier as an exact fraction: 11/10. */
@@ -144,6 +171,12 @@ export const LIMITS = Object.freeze({
   callTimeoutMarginMs: 5_000,
   /** No byte for this long ends the call (`timeout`). */
   idleMs: 15_000,
+  /**
+   * The preflight token count's own timeout (G22; Package 3 review, I-3):
+   * 5 s, or less when the call after it would otherwise have too little
+   * time to start (TurnBudget.countTimeoutMs). Never the call's timeout.
+   */
+  preflightCountTimeoutMs: 5_000,
   /** The turn's cost ceiling, US$1.50; it bounds the deep attempt's reservation (§13.6). */
   turnCeilingUsdMicros: TURN_CEILING_USD_MICROS,
   /** At this share of the cap, deep is withdrawn (D19). Percent. */

@@ -51,6 +51,7 @@ const EXACT: Record<string, string> = {
   'proposal.expire': 'A suggestion expired',
   'conversation.start': 'A conversation with Kev started',
   'message.add': 'A message in a conversation with Kev',
+  'kev.turn_end': 'Kev didn’t finish an answer',
   'kev_usage.record': 'Kev ran',
   'kev_budget.reserve': 'Kev set aside spending for an answer',
   'kev_budget.late_settle': 'Kev’s spending recorded late, and counted twice',

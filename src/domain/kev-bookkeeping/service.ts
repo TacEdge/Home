@@ -37,13 +37,14 @@ import {
 
 // Kev's bookkeeping path (M8 contract §7.2, §9.6, §9.7, §13.6; D5; ADR 0012
 // §25, §35, §42). The one narrow, named exception to `kev_cannot_write`:
-// six functions that record Kev's own turn, acting as the requesting adult
+// seven functions that record Kev's own turn, acting as the requesting adult
+// (the seventh, recordTurnEnd, from the Package 3 review, I-5)
 // (a user actor `via: 'kev'` whose `userId` owns the conversation), and one
 // system function, the daily retention cleanup. Nothing here writes a family
 // record: only the adult's own conversation and messages, their usage and
 // the household's budget reservations.
 //
-// - Who: the six refuse the system actor (`not_a_user`) and any actor not
+// - Who: the seven refuse the system actor (`not_a_user`) and any actor not
 //   `via: 'kev'` (`kev_bookkeeping_only`); the conversation is always the
 //   actor's own, resolved from `actor.userId`, never named by the caller, so
 //   another adult's is unreachable. `purgeExpiredMessages` refuses every
@@ -77,7 +78,7 @@ function assertGate(): void {
   assertFamilyWritesOpen();
 }
 
-/** The six adult functions: the gate, then a user actor via Kev. */
+/** The seven adult functions: the gate, then a user actor via Kev. */
 function assertKevAsAdult(actor: UserActor): void {
   assertGate();
   if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
@@ -100,18 +101,55 @@ async function lockConversation(tx: DbOrTx, actor: UserActor) {
   return row ?? null;
 }
 
-/** A person's message under 70 seconds old with no Kev reply after it: a turn is in flight. */
-async function turnInFlight(tx: DbOrTx, conversationId: string): Promise<boolean> {
-  const [latest] = await tx
-    .select({
-      role: message.role,
-      recent: sql<boolean>`${message.createdAt} > now() - make_interval(secs => ${TURN_IN_FLIGHT_SECONDS})`,
-    })
-    .from(message)
-    .where(eq(message.conversationId, conversationId))
-    .orderBy(desc(message.createdAt), desc(message.id))
-    .limit(1);
-  return latest?.role === 'user' && latest.recent === true;
+/** The structural marker a turn that stores no Kev message ends with (I-5). */
+export const TURN_END_EVENT = 'kev.turn_end';
+
+/**
+ * Whether a turn is in flight in the adult's conversation (contract §7.2,
+ * L12; corrected in the Package 3 review, I-5 and M-6): the latest message
+ * is the person's, under 70 seconds old, and no Kev message or turn-end
+ * marker (`kev.turn_end`, written when a turn ends without storing Kev's
+ * message) follows it; or the adult has an `open` budget reservation
+ * younger than the sweep's 120 seconds (an attempt really running, even
+ * one that has outlived the 70 seconds).
+ */
+async function turnInFlight(tx: DbOrTx, conversationId: string, userId: string): Promise<boolean> {
+  // The marker is compared with the person's own `message.add` audit row,
+  // audit time with audit time (the column default's clock, pg_catalog.now(),
+  // which also bounds the scan by the `at` index): never with a message's
+  // time, which is written from the session's now().
+  const result = await tx.execute<{ in_flight: boolean }>(sql`
+    with latest as (
+      select role, created_at from message
+       where conversation_id = ${conversationId}
+       order by created_at desc, id desc limit 1
+    ),
+    asked as (
+      select max(b.at) as at from audit_log b
+       where b.at > pg_catalog.now() - make_interval(secs => ${RESERVATION_STALE_SECONDS})
+         and b.event = 'message.add'
+         and b.subject_type = 'conversation'
+         and b.subject_id = ${conversationId}
+         and b.meta ->> 'role' = 'user'
+    )
+    select (
+      exists (
+        select 1 from latest l
+         where l.role = 'user'
+           and l.created_at > now() - make_interval(secs => ${TURN_IN_FLIGHT_SECONDS})
+           and not exists (
+             select 1 from audit_log a, asked
+              where a.at >= asked.at
+                and a.event = ${TURN_END_EVENT}
+                and a.subject_type = 'conversation'
+                and a.subject_id = ${conversationId}
+                and a.actor_user_id = ${userId}))
+      or exists (
+        select 1 from kev_budget_reservation r
+         where r.user_id = ${userId} and r.status = 'open'
+           and r.created_at > now() - make_interval(secs => ${RESERVATION_STALE_SECONDS}))
+    ) as in_flight`);
+  return result.rows[0]?.in_flight === true;
 }
 
 /**
@@ -166,7 +204,7 @@ export async function recordUserMessage(
       return { result: { ok: false, code: 'rate_limited_day' } as const, audit: null };
     if (counted.lastMinute >= TURNS_PER_MINUTE)
       return { result: { ok: false, code: 'rate_limited_minute' } as const, audit: null };
-    if (current && (await turnInFlight(tx, current.id)))
+    if (current && (await turnInFlight(tx, current.id, actor.userId)))
       return { result: { ok: false, code: 'turn_in_flight' } as const, audit: null };
 
     const audits: DomainAudit[] = [];
@@ -189,7 +227,17 @@ export async function recordUserMessage(
     };
     const [row] = await tx
       .insert(message)
-      .values({ conversationId: conv.id, role: 'user', channel: actor.channel, content })
+      .values({
+        conversationId: conv.id,
+        role: 'user',
+        channel: actor.channel,
+        content,
+        // The database's clock, written as now() rather than left to the
+        // column default (as a reservation's is): the same instant in
+        // production, and one clock with every comparison the one-turn
+        // guard, the window and expiry make (a test can move it).
+        createdAt: sql`now()`,
+      })
       .returning();
     if (!row) throw new Error('message insert returned no row');
     await tx
@@ -233,6 +281,7 @@ export async function recordKevMessage(
         content: data.content,
         tier: data.tier,
         model: data.model,
+        createdAt: sql`now()`,
       })
       .returning();
     if (!row) throw new Error('message insert returned no row');
@@ -251,6 +300,59 @@ export async function recordKevMessage(
         record: privateTo(actor.userId),
       },
     };
+  });
+}
+
+/**
+ * Ends a turn that stores no Kev message (an error, the cap, the provider
+ * unreachable or timing out, a failure after the person's words were
+ * stored; I-5): one structural audit row, `kev.turn_end`, on the adult's
+ * conversation, private to them, with the outcome code only, never text.
+ * The one-turn guard reads it, so the adult's next message and Clear are
+ * accepted at once rather than after 70 seconds. Writes no message.
+ */
+export async function recordTurnEnd(
+  actor: UserActor,
+  input: { outcome: string },
+  deps: Deps = {},
+): Promise<void> {
+  assertKevAsAdult(actor);
+  const outcome = input.outcome;
+  if (!/^[a-z_]{1,40}$/.test(outcome)) throw new RangeError('outcome');
+  await auditedWrite(actor, deps, async (tx) => {
+    const conv = await lockConversation(tx, actor);
+    if (!conv) throw new NotFoundError('conversation');
+    return {
+      result: undefined,
+      audit: {
+        event: TURN_END_EVENT,
+        subjectType: 'conversation',
+        subjectId: conv.id,
+        meta: { outcome },
+        record: privateTo(actor.userId),
+      },
+    };
+  });
+}
+
+/**
+ * The month's routing state for the deep tier (owner decision, 2026-10-15;
+ * contract §13.6): from what the cap counts (settled usage, open and
+ * unreconciled reservations, household-wide), conservative, so another
+ * adult's turn in flight counts. For the orchestrator's routing only: it is
+ * never shown to an adult, whose view stays the recorded aggregate
+ * (getSpendStatus, ADR 0012 §43, I5). A state, never a figure.
+ */
+export async function getRoutingState(actor: UserActor, deps: Deps = {}): Promise<CapState> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  if (actor.via !== 'kev') throw new NotPermittedError('kev_bookkeeping_only');
+  const db = deps.db ?? getDb();
+  const count = await countMonth(db);
+  return capState({
+    counted: count.countedUsdMicros,
+    cap: householdCapUsdMicros(),
+    nextFastReservation: 0n,
+    deepWithdrawnAtPercent: DEEP_WITHDRAWN_AT_PERCENT,
   });
 }
 
@@ -726,6 +828,55 @@ export async function getSpendReport(actor: Actor, deps: Deps = {}): Promise<Spe
 }
 
 // ---------------------------------------------------------------------------
+// The model's window: a read, not a write.
+
+export type WindowRow = Readonly<{ role: 'user' | 'kev'; content: unknown; createdAt: Date }>;
+
+/** The most messages the window read returns: ten exchanges, two messages each, with room to spare. */
+const WINDOW_ROWS = 40;
+
+/**
+ * The adult's own messages for the model's window (contract §7.2, O3): their
+ * active conversation's messages created in the last `hours` hours (an
+ * instant bound on the database's clock, so a night that changes the clock
+ * is measured in real hours, C16) and never expired (90 days, C17), oldest
+ * first, at most 40. Kev only, as the adult: the conversation is always
+ * the actor's own. Reads `message` and `conversation`; writes nothing.
+ * The window's pairing and its exchange and token limits are the
+ * orchestrator's (src/kev/context/window.ts).
+ */
+export async function listConversationWindow(
+  actor: UserActor,
+  opts: { hours: number },
+  deps: Deps = {},
+): Promise<WindowRow[]> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  if (actor.via !== 'kev') throw new NotPermittedError('kev_bookkeeping_only');
+  if (!Number.isInteger(opts.hours) || opts.hours < 1 || opts.hours > 24)
+    throw new RangeError('hours');
+  const db = deps.db ?? getDb();
+  const rows = await db
+    .select({ role: message.role, content: message.content, createdAt: message.createdAt })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .where(
+      and(
+        eq(conversation.userId, actor.userId),
+        isNull(conversation.archivedAt),
+        sql`${message.createdAt} > now() - make_interval(hours => ${opts.hours})`,
+        sql`${message.createdAt} >= now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`,
+      ),
+    )
+    .orderBy(desc(message.createdAt), desc(message.id))
+    .limit(WINDOW_ROWS);
+  return rows.reverse().map((r) => ({
+    role: r.role as 'user' | 'kev',
+    content: r.content,
+    createdAt: r.createdAt,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // 5. purgeExpired and 6. clearConversation: the adult's own messages.
 
 const expired = sql`${message.createdAt} < now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`;
@@ -779,7 +930,7 @@ export async function clearConversation(actor: UserActor, deps: Deps = {}): Prom
   return auditedWrite<ClearOutcome>(actor, deps, async (tx) => {
     const conv = await lockConversation(tx, actor);
     if (!conv) return { result: { ok: true, deleted: 0 } as const, audit: null };
-    if (await turnInFlight(tx, conv.id))
+    if (await turnInFlight(tx, conv.id, actor.userId))
       return { result: { ok: false, code: 'turn_in_flight' } as const, audit: null };
     const rows = await tx
       .delete(message)

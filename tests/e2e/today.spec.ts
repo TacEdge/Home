@@ -228,7 +228,27 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
 test('a quiet day says so, even with things to sort; the identity prompt appears only for an unlinked adult', async ({
   page,
 }) => {
-  const t = await homeToday();
+  // Pinned to a Tuesday at 07:03 (the latest one on or before the real date:
+  // a later one would make the calendar seeded below look days out of date),
+  // through the test-only `x-home-test-now` header. Today looks for weekend
+  // openings today and tomorrow (M7 contract §5.8), so on a real Friday or
+  // Saturday an empty weekend day is rightly Worth knowing; a Tuesday and
+  // its Wednesday never are, so the quiet day stays quiet on every day the
+  // suite runs. The dates below are the pinned day's.
+  const [t] = await q(
+    `with today as (select (now() at time zone 'Pacific/Auckland')::date as d),
+          pin as (select d - ((extract(isodow from d)::int + 5) % 7) as d from today)
+     select to_char(d, 'YYYY-MM-DD') as d,
+            extract(isodow from d)::int as dow,
+            extract(isodow from d + 1)::int as next_dow,
+            to_char(d, 'FMDay FMDD FMMonth') as long,
+            to_char((d + time '07:03') at time zone 'Pacific/Auckland', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as at
+       from pin`,
+  );
+  // The regression this pin exists for: the pinned day and the next are
+  // weekdays, whatever day of the week the suite really runs on.
+  expect([Number(t!.dow), Number(t!.next_dow)]).toEqual([2, 3]);
+  await page.setExtraHTTPHeaders({ 'x-home-test-now': t!.at! });
   // A calendar is connected, so this is a quiet day and not a first run.
   await seedCalendar({
     owner: 'fixture-sam',
@@ -241,7 +261,7 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
   const held = await q(`select id from event where archived_at is null`);
   const heldTasks = await q(
     `select id from task where archived_at is null and status = 'open' and due_date <= $1`,
-    [t.d],
+    [t!.d],
   );
   const [me] = await q(
     `select id from person where user_id = 'fixture-alex' and archived_at is null`,
@@ -275,7 +295,8 @@ test('a quiet day says so, even with things to sort; the identity prompt appears
 
     await signInAsFixtureAdult(page, 'alex');
     await page.goto('/today');
-    await expect(page.getByRole('heading', { level: 1, name: DAY })).toBeVisible();
+    // The screen reads the pinned Tuesday, not the real date.
+    await expect(page.getByRole('heading', { level: 1, name: t!.long })).toBeVisible();
     await expect(page.getByText('Nothing on today.')).toBeVisible();
     await expect(page.getByRole('heading', { level: 2 })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'What’s coming up ›' })).toHaveCount(1);

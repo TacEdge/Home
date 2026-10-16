@@ -1,6 +1,6 @@
 import 'server-only';
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk';
-import { exceedsInputCap, TurnBudget } from '../budget';
+import { BudgetExhausted, exceedsInputCap, TurnBudget } from '../budget';
 import { PROVIDER_KEY_FORMAT } from '@/lib/env';
 import { INFERENCE_GEO, LIMITS, TIERS } from '../config';
 import {
@@ -27,6 +27,7 @@ import {
   type RunOptions,
   type StopCode,
 } from './types';
+import { preflightError, validCount } from './preflight';
 
 // The Anthropic adapter (M8 contract §5.1, §5.3, §5.4; ADR 0012 §13, §14):
 // the only file in HOME that imports an LLM SDK (ESLint and
@@ -125,7 +126,12 @@ export function messagesParams(request: ProviderRequest): Params {
     system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
     messages: request.messages.map(toParam),
     inference_geo: INFERENCE_GEO,
-    output_config: { effort: tier.effort },
+    output_config: request.outputFormat
+      ? {
+          effort: tier.effort,
+          format: { type: 'json_schema', schema: { ...request.outputFormat } },
+        }
+      : { effort: tier.effort },
   };
   if (request.tools.length > 0) {
     params.tools = request.tools.map((t) => ({
@@ -137,6 +143,28 @@ export function messagesParams(request: ProviderRequest): Params {
     params.tool_choice = { type: request.toolChoice };
   }
   return params;
+}
+
+/**
+ * The preflight count's body for a request (G22; contract §2.2, §5.4): the
+ * complete input the call will send, for the same model, with the same
+ * system prompt (and its cache breakpoint), tools, `tool_choice`, thinking
+ * configuration (none is sent: the tier's default) and `output_config`
+ * (effort, and the answer's format); only what the counting endpoint does
+ * not take is left out (`max_tokens`, `inference_geo`, `stream`). Exported
+ * for its test.
+ */
+export function countParams(request: ProviderRequest): Anthropic.Messages.MessageCountTokensParams {
+  const {
+    max_tokens: _max,
+    inference_geo: _geo,
+    stream: _stream,
+    ...rest
+  } = messagesParams(request) as Params & { stream?: unknown };
+  void _max;
+  void _geo;
+  void _stream;
+  return rest as Anthropic.Messages.MessageCountTokensParams;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,11 +306,57 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
   if (typeof apiKey !== 'string' || !PROVIDER_KEY_FORMAT.test(apiKey))
     throw new Error('a well-formed provider key is required');
 
+  /**
+   * The preflight token count (G22; owner decision, 2026-10-15): the
+   * request's complete input, counted through HOME's fetch on POST
+   * /v1/messages/count_tokens before the call, under its own short bound
+   * (TurnBudget.countTimeoutMs: at most 5 s, and never past the point where
+   * the call could still start) and the turn's signal. Any failure (an error status, a timeout,
+   * a refusal by HOME's network policy, a malformed or missing count) fails
+   * closed: a ProviderError marked `preflight: 'failed'`, and no model call.
+   * Never retried. Not a model call: it is not counted among the attempt's
+   * five, and it is free (the provider's pricing page, 2026-10-15; config's
+   * COUNT_TOKENS_COST_USD_MICROS), so nothing is charged or settled for it.
+   */
+  async function preflight(
+    request: ProviderRequest,
+    budget: TurnBudget,
+    signal: AbortSignal | undefined,
+  ): Promise<number> {
+    const started = Date.now();
+    // Its own short bound, never the call's (I-3): a slow count cannot use up the call's time.
+    const check = budget.countTimeoutMs(started);
+    if (!check.ok) throw new BudgetExhausted(check.reason);
+    const call = new AbortController();
+    const timer = setTimeout(() => call.abort(), check.timeoutMs);
+    const onOuter = () => call.abort();
+    if (signal?.aborted) onOuter();
+    else signal?.addEventListener('abort', onOuter, { once: true });
+    const observer: FetchObserver = { requests: 0, responseBytes: 0, status: null };
+    const failed = (code: ProviderErrorCode) =>
+      preflightError(code, budget.attemptId, Date.now() - started, 'failed');
+    try {
+      const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
+      const counted = validCount(
+        await client.messages.countTokens(countParams(request), { signal: call.signal }),
+      );
+      if (counted === null) throw failed('bad_response');
+      return counted;
+    } catch (err) {
+      if (err instanceof ProviderError) throw err;
+      throw failed(call.signal.aborted ? 'timeout' : mapProviderError(err).code);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onOuter);
+    }
+  }
+
   async function once(
     request: ProviderRequest,
     budget: TurnBudget,
     signal: AbortSignal | undefined,
     retried: boolean,
+    counted: number,
   ): Promise<
     | { ok: true; result: ProviderResult }
     | { ok: false; error: ProviderError; mapped: Mapped; noResponseBytes: boolean }
@@ -405,6 +479,7 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
           usage: known,
           ms,
           retried,
+          countedInputTokens: counted,
         }),
       };
     } catch (err) {
@@ -460,7 +535,11 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
       if (!(budget instanceof TurnBudget) || !budget.live)
         throw new Error('a call needs its attempt’s live TurnBudget');
       if (request.tier !== budget.tier) throw new Error('a request runs on its attempt’s tier');
-      const first = await once(request, budget, signal, false);
+      // G22: no model call without a count of its complete input, within the cap.
+      const counted = await preflight(request, budget, signal);
+      if (counted > LIMITS.inputTokensPerCall)
+        throw preflightError('too_large', budget.attemptId, 0, 'over_cap');
+      const first = await once(request, budget, signal, false, counted);
       if (first.ok) return first.result;
       // HOME's one retry (§5.1, N7): only for a connection error, 408, 409,
       // 429 (never the provider's spend cap), 5xx or 529; only before any
@@ -471,7 +550,8 @@ export function buildAnthropicProvider(apiKey: string, fetch: ProviderFetch): Ke
       if (delay === null) throw first.error;
       if (!(await sleep(delay, signal))) throw first.error;
       if (!budget.canCall(Date.now()).ok) throw first.error;
-      const second = await once(request, budget, signal, true);
+      // The retry re-sends the same bytes the count covered: not counted again.
+      const second = await once(request, budget, signal, true, counted);
       if (second.ok) return second.result;
       throw second.error;
     },

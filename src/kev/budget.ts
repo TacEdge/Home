@@ -177,6 +177,23 @@ export class TurnBudget {
     return { ok: true, timeoutMs: Math.min(tier.callTimeoutMs, left - LIMITS.callTimeoutMarginMs) };
   }
 
+  /**
+   * The preflight count's own bound (G22; Package 3 review, I-3): never the
+   * call's timeout. At most `preflightCountTimeoutMs` (5 s), and never so
+   * long that the call it precedes could no longer start (the time left
+   * less the tier's minimum start). Refused, like a call, when that leaves
+   * no time at all.
+   */
+  countTimeoutMs(
+    now: number,
+  ): { ok: true; timeoutMs: number } | { ok: false; reason: BudgetRefusal } {
+    const check = this.canCall(now);
+    if (!check.ok) return check;
+    const room = this.deadline - now - TIERS[this.tier].minStartMs;
+    const timeoutMs = Math.min(LIMITS.preflightCountTimeoutMs, room);
+    return timeoutMs > 0 ? { ok: true, timeoutMs } : { ok: false, reason: 'too_little_time' };
+  }
+
   /** Starts a call: checks canCall, counts it, and commits its maximum until it ends. */
   beginCall(now: number): { ticket: Ticket; timeoutMs: number } {
     const check = this.canCall(now);

@@ -188,7 +188,13 @@ export type ToolCallOutcome =
   | { kind: 'unknown_tool'; result: { ok: false; code: 'bad_input' }; content: string };
 
 export type ToolRunner = {
-  run(name: string, input: unknown): Promise<ToolCallOutcome>;
+  /**
+   * Runs one tool call. `maxBytes` (at most 12 KiB) lets the orchestrator
+   * cut a result further, before it is first sent, so the next request stays
+   * under the input cap (contract §7.4): the result is presented again with
+   * fewer items, and says so, exactly as at the 12 KiB bound.
+   */
+  run(name: string, input: unknown, opts?: { maxBytes?: number }): Promise<ToolCallOutcome>;
   /** Unknown tool names refused so far (S7: the orchestrator records the count). */
   readonly unknownRefused: number;
 };
@@ -245,7 +251,8 @@ export function createToolRunner(ctx: ToolContext & { attemptId: string }): Tool
     get unknownRefused() {
       return unknownRefused;
     },
-    async run(name, raw) {
+    async run(name, raw, opts = {}) {
+      const maxBytes = Math.max(0, Math.min(MAX_RESULT_BYTES, opts.maxBytes ?? MAX_RESULT_BYTES));
       const entry = REGISTRY.get(name);
       if (!entry) {
         unknownRefused++;
@@ -293,7 +300,7 @@ export function createToolRunner(ctx: ToolContext & { attemptId: string }): Tool
             return refuse('unavailable', args);
           }
           const content = JSON.stringify(out.data);
-          if (Buffer.byteLength(content, 'utf8') > MAX_RESULT_BYTES) continue;
+          if (Buffer.byteLength(content, 'utf8') > maxBytes) continue;
           const result: ToolResult<unknown> = {
             ok: true,
             data: out.data,

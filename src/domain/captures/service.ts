@@ -12,6 +12,7 @@ import {
 import type { UserActor } from '@/trust/actor';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
+import { MESSAGE_RETENTION_DAYS } from '../kev-bookkeeping/constants';
 import { records } from '../common/records';
 import { auditedWrite, type Deps, type DomainAudit } from '../common/write';
 import { captureInput, captureText, type CaptureInput } from './schema';
@@ -58,6 +59,9 @@ async function ownMessage(tx: DbOrTx, actor: UserActor, id: string) {
         eq(message.id, id),
         eq(conversation.userId, actor.userId),
         isNull(conversation.archivedAt),
+        // An expired message (over 90 days) is gone for every purpose, even before a purge
+        // deletes it (contract §7.2, C17; Package 3 review): it cannot be kept either.
+        sql`${message.createdAt} >= now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`,
       ),
     )
     .for('share')

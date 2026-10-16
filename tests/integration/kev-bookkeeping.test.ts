@@ -10,6 +10,7 @@ import { exportFor } from '@/domain/export/service';
 import type { KevContentV2 } from '@/domain/kev-bookkeeping/schema';
 import {
   clearConversation,
+  recordTurnEnd,
   getSpendReport,
   getSpendStatus,
   isLiveReservation,
@@ -163,7 +164,7 @@ async function usageRows(attemptId: string) {
 
 // ---------------------------------------------------------------------------
 
-describe('S5: who may call the six adult functions', () => {
+describe('S5: who may call the seven adult functions', () => {
   it('the system actor, a person’s own UI and the gate closed are each refused before any write', async () => {
     const sam = await adult('s5');
     const sys = systemActor as unknown as UserActor;
@@ -174,6 +175,8 @@ describe('S5: who may call the six adult functions', () => {
       settleAttempt(a, { attemptId: uuid(), conversationId: null, calls: [] }, deps),
       purgeExpired(a, deps),
       clearConversation(a, deps),
+      // The seventh (Package 3 review, I-5).
+      recordTurnEnd(a, { outcome: 'timeout' }, deps),
     ];
     const audit = async () =>
       Number((await admin.db.execute(sql`select count(*)::int as n from audit_log`)).rows[0]?.n);
@@ -202,6 +205,8 @@ describe('S5: who may call the six adult functions', () => {
       ),
     ).toBe('not_found');
     expect(await clearConversation(alex, deps)).toEqual({ ok: true, deleted: 0 });
+    // Nor can Alex end Sam's turn: he has no conversation for the marker to name.
+    expect(await code(recordTurnEnd(alex, { outcome: 'timeout' }, deps))).toBe('not_found');
     await setClock('2037-01-10T00:00:00Z');
     await sweep(sam);
     const r = await reserveAttempt(

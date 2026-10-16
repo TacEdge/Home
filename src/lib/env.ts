@@ -527,6 +527,21 @@ export function deploymentEnv(source: Record<string, string | undefined> = proce
   return { VERCEL_ENV: source.VERCEL_ENV, VERCEL: source.VERCEL, NODE_ENV: source.NODE_ENV };
 }
 
+/**
+ * The retention route's secret (M8 contract §7.2, O6; gate G18): the value
+ * Vercel's cron sends as `Authorization: Bearer …` when CRON_SECRET is set.
+ * Read on every call, outside the schema like the provider key, never held
+ * on `env`, never logged or echoed. Unset, empty, or not 16 to 512
+ * printable ASCII characters without a space: null, and the route does
+ * nothing (404), so a weak value fails closed rather than guarding the job.
+ */
+export function cronSecret(
+  source: Record<string, string | undefined> = process.env,
+): string | null {
+  const v = source.CRON_SECRET;
+  return typeof v === 'string' && PROVIDER_KEY_FORMAT.test(v) ? v : null;
+}
+
 /** The boot line's status (contract §14): never the key. */
 export function kevBootStatus(config: KevConfig): string {
   return config.status;

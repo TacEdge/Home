@@ -89,6 +89,8 @@ See [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md). In short:
 
 *As built in M8 Package 1b (ADR 0012 §43):* **the provider network boundary.** `api.anthropic.com` is HOME's third outbound host (after Google's calendar export and Open-Meteo), reached only by the server, only through `src/kev/providers/fetch.ts`, the fetch HOME hands the SDK (`@anthropic-ai/sdk`, pinned exactly, imported only by `src/kev/providers/anthropic.ts`). It is built on Node's `https` like `safe-fetch` (which `kev` may not import and which is unchanged), reusing `isPublicAddress`: `https://api.anthropic.com` exactly, `POST /v1/messages` and `GET /v1/models/{id}` only, everything else refused before connecting; every resolved address and the connected socket checked as public; TLS verified against Node's bundled public roots only, with the hostname checked (`ca: tls.rootCertificates`, `rejectUnauthorized: true`, `servername`, a fresh connection per request), so `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS` and `--use-openssl-ca` cannot widen it (*Package 1b review, ADR 0012 §43*); no redirects; requests at most 1 MiB, responses at most 2 MiB counted while streaming; a 15-second idle limit and a 40-second backstop, with the turn's per-call AbortSignal honoured; a header allow-list (the key it was built with, a fixed `anthropic-version`, content type, accept, the SDK's user agent), so the SDK's `x-stainless-*` platform headers, any `authorization` or beta header, and anything `ANTHROPIC_CUSTOM_HEADERS` injects never leave HOME; closed error codes that carry no key, header or body. The SDK is constructed with every implicit source neutralised (the key from `HOME_KEV_PROVIDER_KEY` only, explicit base URL, no auth token, no profile or config file, logging off, `maxRetries: 0`), and a test traps the global fetch and Node's `https.request` to prove it never bypasses HOME's fetch. The scripted provider serves local and CI runs and is refused when deployed. No route uses any of it yet (Package 4).
 
+*As built in M8 Package 3 (ADR 0012 §45; in review):* the allow-list gains exactly `POST /v1/messages/count_tokens` (owner decision, 2026-10-15; gate G22), under every rule above: before every model call both providers count the complete request (model, system prompt, tools, `tool_choice`, `output_config`, messages) through HOME's fetch; a count above 32,000 tokens refuses the call, and any counting failure fails closed, with no model call. Nothing else of the provider's API is reachable.
+
 ### 2.4 Integration layer
 Adapters that bring outside information in. Each adapter:
 - is **read-only** in V0.1;
@@ -255,14 +257,15 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   ├── proposals/
 │   │   └── engines/           # agenda, conflicts, windows, profile, staleness, insights
 │   ├── kev/                   # Kev Intelligence layer
-│   │   ├── orchestrator.ts    # kev.handle(KevRequest) → KevEvent stream
+│   │   ├── orchestrator.ts    # kev.handle(KevRequest) → KevEvent stream (M8 Package 3)
+│   │   ├── answer/            # schema.ts, ledger.ts, validate.ts (the grounding check), fallback.ts, language.ts (M8 Package 3)
 │   │   ├── router.ts          # tier selection + escalation
 │   │   ├── config.ts          # tier → model/effort mapping, limits
 │   │   ├── providers/         # anthropic.ts (only SDK import)
-│   │   ├── prompts/           # System prompt, persona, Week Ahead template
+│   │   ├── prompts/           # System prompt, persona, Week Ahead template (system.ts, provisional: M8 Package 3)
 │   │   ├── context/           # Context assembly (assemble.ts: the stable prefix's tools, the volatile bundle; M8 Package 2)
 │   │   ├── tools/             # registry.ts + one file per read tool (Zod in and out) → domain services (M8 Package 2)
-│   │   └── evals/             # Scenario fixtures + expected behaviours
+│   │   └── evals/             # Scenario fixtures + expected behaviours (types.ts, scenarios.ts, scripted.ts: M8 Package 3)
 │   ├── integrations/
 │   │   ├── calendar/          # provider.ts (interface), ics/, (later google/, microsoft/, caldav/)
 │   │   └── weather/           # entry.ts (composition root), open-meteo.ts, fake.ts (M7)
@@ -346,7 +349,7 @@ All text from integrations (event titles/descriptions, locations; later emails a
 
 ### 5.7 Storage, retention and deletion
 - Encryption in transit and at rest. Integration credentials (ICS URLs now, OAuth tokens later) encrypted at the application level: AES-256-GCM bound to their row, a per-environment key, destroyed on disconnect, and never sent to the client, logs, audit, exports or the LLM (ADR 0007 §11).
-- Kev conversation transcripts retained **90 days** (approved), then deleted. Transcripts are not Kev's memory — context records are. *Decided in M8 Package 0 (ADR 0012 §23, owner decisions O3 and O6, 2026-10-13):* 90 days per message from when it was written; expired messages hidden at every read and deleted by a daily cleanup, with purge on the adult's next turn as a backstop; Clear deletes them all at once.
+- Kev conversation transcripts retained **90 days** (approved), then deleted. Transcripts are not Kev's memory — context records are. *Decided in M8 Package 0 (ADR 0012 §23, owner decisions O3 and O6, 2026-10-13):* 90 days per message from when it was written; expired messages hidden at every read and deleted by a daily cleanup, with purge on the adult's next turn as a backstop; Clear deletes them all at once. *Built in M8 Package 3 (ADR 0012 §45):* the read-time filter, purge at the start of each turn and the secret-protected cleanup route (`/kev/retention`, `CRON_SECRET`); no schedule until the owner's G18 decision.
 - Captures remain until organised or dismissed; dismissed captures are purged after 30 days.
 - Soft delete with 30-day purge; hard delete on request.
 - Daily database backups; restore tested before V0.1 is used for real. Full JSON export from Settings.
