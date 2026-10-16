@@ -6,7 +6,7 @@
 // the plan hash, with no key, database or network. `--check-plan` is the
 // workflow's keyless first job. `--live` runs the approved plan, and only
 // from the `kev-evals` workflow: it needs the job's own database
-// (home_live_verify on localhost), KEV_LIVE_PROVIDER_KEY, the approved plan
+// (home_live_verify on localhost), KEV_EVAL_PROVIDER_KEY, the approved plan
 // hash and a budget of at most US$10.
 //
 // The environment guards run here first, then again inside the runner,

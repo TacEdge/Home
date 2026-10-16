@@ -27,7 +27,7 @@ export const RUNNER_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
  * Production's. Deliberately not HOME_KEV_PROVIDER_KEY, so a deployment's
  * key can never be picked up; the runner reads no other key variable.
  */
-export const KEY_VARIABLE = 'KEV_LIVE_PROVIDER_KEY';
+export const KEY_VARIABLE = 'KEV_EVAL_PROVIDER_KEY';
 /** The same rule as src/lib/env.ts's PROVIDER_KEY_FORMAT (a test holds them equal). */
 export const KEY_FORMAT = /^[\x21-\x7e]{16,512}$/;
 
@@ -123,7 +123,7 @@ export function assertRunnerDatabase(url: string | undefined): { database: strin
 }
 
 /**
- * The evaluation key, from KEV_LIVE_PROVIDER_KEY only, read at run time.
+ * The evaluation key, from KEV_EVAL_PROVIDER_KEY only, read at run time.
  * HOME_KEV_PROVIDER_KEY, ANTHROPIC_API_KEY and every other variable are
  * never read. Never echoed.
  */

@@ -36,7 +36,7 @@ import { buildReport } from './report';
 //               within US$10, and the campaign ledger must hold the budget.
 //   live        all of that, then the runner's own database (fixture family
 //               only), HOME's reservation cap set to the budget, the key
-//               from KEV_LIVE_PROVIDER_KEY, the probes through the probe
+//               from KEV_EVAL_PROVIDER_KEY, the probes through the probe
 //               gateway, the reconciliation and the report.
 // Every refusal happens before any network call, with its own exit code.
 

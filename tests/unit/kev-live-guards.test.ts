@@ -89,16 +89,17 @@ describe('the environment guards', () => {
     }
   });
 
-  it('read the key from KEV_LIVE_PROVIDER_KEY only: HOME_KEV_PROVIDER_KEY and ANTHROPIC_API_KEY are ignored', () => {
-    expect(readKey({ KEV_LIVE_PROVIDER_KEY: KEY })).toBe(KEY);
+  it('read the key from KEV_EVAL_PROVIDER_KEY only: HOME_KEV_PROVIDER_KEY and ANTHROPIC_API_KEY are ignored', () => {
+    expect(readKey({ KEV_EVAL_PROVIDER_KEY: KEY })).toBe(KEY);
     for (const env of [
       {},
       { HOME_KEV_PROVIDER_KEY: KEY },
       { ANTHROPIC_API_KEY: KEY },
-      { KEV_EVAL_PROVIDER_KEY: KEY },
-      { KEV_LIVE_PROVIDER_KEY: '   ' },
-      { KEV_LIVE_PROVIDER_KEY: 'short' },
-      { KEV_LIVE_PROVIDER_KEY: `${KEY} with space` },
+      // The runner's earlier name (before the owner's decision of 2026-10-16) is not read.
+      { KEV_LIVE_PROVIDER_KEY: KEY },
+      { KEV_EVAL_PROVIDER_KEY: '   ' },
+      { KEV_EVAL_PROVIDER_KEY: 'short' },
+      { KEV_EVAL_PROVIDER_KEY: `${KEY} with space` },
     ]) {
       const r = refusal(() => readKey(env));
       expect(r.exitCode).toBe(EXIT.no_key);
@@ -112,22 +113,22 @@ describe('the environment guards', () => {
   });
 
   it('the keyless plan check refuses when a key is present', () => {
-    expect(refusal(() => assertNoKey({ KEV_LIVE_PROVIDER_KEY: KEY })).exitCode).toBe(EXIT.no_key);
+    expect(refusal(() => assertNoKey({ KEV_EVAL_PROVIDER_KEY: KEY })).exitCode).toBe(EXIT.no_key);
     expect(() => assertNoKey({ HOME_KEV_PROVIDER_KEY: KEY })).not.toThrow();
   });
 
   it('assertEnvironment: a dry run needs no key or database; live needs both; deployed is refused in every mode', () => {
     expect(() => assertEnvironment('dry-run', {})).not.toThrow();
-    expect(() => assertEnvironment('dry-run', { KEV_LIVE_PROVIDER_KEY: KEY })).not.toThrow();
+    expect(() => assertEnvironment('dry-run', { KEV_EVAL_PROVIDER_KEY: KEY })).not.toThrow();
     expect(() => assertEnvironment('check-plan', {})).not.toThrow();
-    expect(refusal(() => assertEnvironment('live', { KEV_LIVE_PROVIDER_KEY: KEY })).code).toBe(
+    expect(refusal(() => assertEnvironment('live', { KEV_EVAL_PROVIDER_KEY: KEY })).code).toBe(
       'database',
     );
     expect(refusal(() => assertEnvironment('live', { DATABASE_URL: RUNNER_URL })).code).toBe(
       'no_key',
     );
     expect(() =>
-      assertEnvironment('live', { DATABASE_URL: RUNNER_URL, KEV_LIVE_PROVIDER_KEY: KEY }),
+      assertEnvironment('live', { DATABASE_URL: RUNNER_URL, KEV_EVAL_PROVIDER_KEY: KEY }),
     ).not.toThrow();
     for (const mode of ['dry-run', 'check-plan', 'live'] as const) {
       expect(refusal(() => assertEnvironment(mode, { VERCEL_ENV: 'production' })).code).toBe(

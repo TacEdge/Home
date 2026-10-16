@@ -32,7 +32,7 @@ vi.mock('@/domain/kev-bookkeeping/service', () => ({
 
 const { TurnBudget } = await import('@/kev/budget');
 const { MODELS, TIERS } = await import('@/kev/config');
-const { perCallMax } = await import('@/kev/router');
+const { attemptReservation, perCallMax } = await import('@/kev/router');
 const { createProviderFetchForTests } = await import('@/kev/providers/fetch');
 const {
   buildAnthropicProvider,
@@ -237,7 +237,7 @@ describe('G1: the Models API read', () => {
 });
 
 describe('probe calls: the production path, changed only as the probe names', () => {
-  it('Haiku 5.5 on a fast budget: counted (G22) and called on Haiku, max_tokens the fast tier’s, charged at the fast tier’s prices', async () => {
+  it('Haiku 5.5 on a fast budget: counted (G22) and called on Haiku, max_tokens the fast tier’s, reserved at the fast tier’s maximum, recorded at Haiku’s prices', async () => {
     stub.countQueue.push(countWithId('req_count_h', 900));
     stub.queue.push(
       withId('req_msg_h', HAIKU, { input_tokens: 900, cache_creation_input_tokens: 0 }),
@@ -251,8 +251,12 @@ describe('probe calls: the production path, changed only as the probe names', ()
     expect(sent.model).toBe(HAIKU);
     expect(sent.max_tokens).toBe(TIERS.fast.maxTokens);
     expect(sent.inference_geo).toBe('us');
-    // 900 input at Sonnet's 2,000 n$ + 450 output at 10,000 n$, × 1.1: conservative for Haiku.
-    expect(b.calls[0]).toMatchObject({ model: HAIKU, costUsdMicros: 6_930n });
+    // Bounded and reserved at the fast tier's figures (Sonnet 5.5's prices).
+    expect(b.perCallMaxUsdMicros).toBe(perCallMax('fast'));
+    expect(b.reservedUsdMicros).toBe(attemptReservation('fast'));
+    // Recorded at Haiku's: 900 input at 100 n$ + 450 output at 500 n$, × 1.1,
+    // rounded up: 346.5 → 347 µ$ (at Sonnet's prices it would be 6,930 µ$).
+    expect(b.calls[0]).toMatchObject({ model: HAIKU, costUsdMicros: 347n });
     const ev2 = g.evidence();
     expect(ev2.map((e) => e.kind)).toEqual(['count', 'message']);
     expect(ev2[0]).toMatchObject({ requestId: 'req_count_h', counted: 900, model: HAIKU });
@@ -261,7 +265,7 @@ describe('probe calls: the production path, changed only as the probe names', ()
       model: HAIKU,
       outcome: 'ok',
       stop: 'end_turn',
-      costUsdMicros: 6_930n,
+      costUsdMicros: 347n,
       growOnly: null,
     });
   });

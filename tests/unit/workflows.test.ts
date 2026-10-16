@@ -82,15 +82,15 @@ describe('GitHub workflows', () => {
       expect(job('run')).toMatch(/run: node scripts\/kev-live\/run\.mts --live/);
     });
 
-    it('the key is the kev-evals secret KEV_LIVE_PROVIDER_KEY, given to the runner step only; no other key name', () => {
+    it('the key is the kev-evals secret KEV_EVAL_PROVIDER_KEY, given to the runner step only; no other key name', () => {
       const t = text();
-      expect(t.match(/secrets\.[A-Z_]+/g)).toEqual(['secrets.KEV_LIVE_PROVIDER_KEY']);
-      expect(t).not.toMatch(/HOME_KEV_PROVIDER_KEY|ANTHROPIC_API_KEY|KEV_EVAL_PROVIDER_KEY/);
+      expect(t.match(/secrets\.[A-Z_]+/g)).toEqual(['secrets.KEV_EVAL_PROVIDER_KEY']);
+      expect(t).not.toMatch(/HOME_KEV_PROVIDER_KEY|ANTHROPIC_API_KEY|KEV_LIVE_PROVIDER_KEY/);
       const step = t.slice(
         t.indexOf('- name: Run the approved plan'),
         t.indexOf('run: node scripts/kev-live/run.mts --live'),
       );
-      expect(step).toMatch(/KEV_LIVE_PROVIDER_KEY: \$\{\{ secrets\.KEV_LIVE_PROVIDER_KEY \}\}/);
+      expect(step).toMatch(/KEV_EVAL_PROVIDER_KEY: \$\{\{ secrets\.KEV_EVAL_PROVIDER_KEY \}\}/);
     });
 
     it('the job’s own Postgres, the fixture seed, never a hosted database; inputs only through env', () => {

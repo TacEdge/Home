@@ -195,7 +195,8 @@ export function probeParams(request: ProviderRequest, probe: ProbeOptions): Para
   if (probe.probeModel !== undefined) {
     if (probe.probeModel !== 'haiku55') throw new Error('a probe model is Haiku 5.5 only');
     // On a fast budget only: its per-call maximum (Sonnet 5.5's prices, the
-    // fast tier's max_tokens) bounds a Haiku call (tested).
+    // fast tier's max_tokens) bounds a Haiku call; a completed one is
+    // recorded at Haiku's prices (kev/budget.ts, recordedPrices; tested).
     if (request.tier !== 'fast') throw new Error('a Haiku probe runs on a fast budget only');
     params.model = MODELS.haiku55.id;
   }

@@ -166,7 +166,7 @@ describe('the dry run', () => {
     const KEY = 'test-key-not-real-dry-run';
     const out = await runMode(
       'dry-run',
-      { KEV_LIVE_PROVIDER_KEY: KEY, DATABASE_URL: 'postgres://u:p@localhost/home_live_verify' },
+      { KEV_EVAL_PROVIDER_KEY: KEY, DATABASE_URL: 'postgres://u:p@localhost/home_live_verify' },
       { ledgerText: null, reportDir: '/nonexistent', log: (l) => lines.push(l) },
     );
     expect(out).toEqual({ exitCode: EXIT.ok, code: 'dry_run' });
@@ -226,7 +226,7 @@ describe('the dry run', () => {
         await run({
           KEV_LIVE_BUDGET_USD: '10',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
-          KEV_LIVE_PROVIDER_KEY: 'test-key-not-real-0000',
+          KEV_EVAL_PROVIDER_KEY: 'test-key-not-real-0000',
         })
       ).exitCode,
     ).toBe(EXIT.no_key);

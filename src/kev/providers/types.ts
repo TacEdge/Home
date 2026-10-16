@@ -204,8 +204,10 @@ export type ProbeOptions = Readonly<{
   /**
    * Haiku 5.5 instead of the tier's model (G1's and G8's Haiku checks), on
    * a fast budget only: the call keeps the fast tier's `max_tokens` and is
-   * charged at the fast tier's prices, which are at least Haiku's in every
-   * category, so HOME's record is conservative.
+   * reserved and bounded at the fast tier's per-call maximum (Sonnet 5.5's
+   * prices, at least Haiku's in every category); a completed call is
+   * recorded at Haiku's own prices, unknown or partial usage at the fast
+   * tier's conservative charge (`recordedPrices`, kev/budget.ts).
    */
   probeModel?: 'haiku55';
   /** `low` instead of the tier's effort (G1: effort `low` is accepted). */

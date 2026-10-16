@@ -239,10 +239,31 @@ describe('the plan, live path, against a local stub', () => {
     expectNothingLeftOpen(rec, before);
     expect(rec.usageRows).toBe(calls);
     expect(rec.attempts).toBe(run.results.reduce((a, r) => a + r.attemptIds.length, 0));
-    // The aborted call is the one conservative charge; Haiku's four rows are at the fast tier's prices.
+    // The aborted call is the one conservative charge; Haiku's four rows are
+    // recorded at Haiku's prices (not conservative), and reserved at the fast
+    // tier's. Reserved ≥ recorded > at list prices, the gap being the aborted
+    // call's conservative charge only.
     expect(rec.conservativeRows).toBe(1);
     expect(rec.probeModelRows).toBe(4);
-    expect(rec.atModelPricesUsdMicros < rec.recordedUsdMicros).toBe(true);
+    const sessionIds = run.results.flatMap((r) => r.attemptIds);
+    const reservedRows = await admin.db.execute<{ total: string }>(sql`
+      select coalesce(sum(reserved_usd_micros), 0)::text as total from kev_budget_reservation
+       where attempt_id in (${sql.join(
+         sessionIds.map((id) => sql`${id}::uuid`),
+         sql`, `,
+       )})`);
+    expect(rec.reservedUsdMicros).toBe(BigInt(reservedRows.rows[0]!.total));
+    // Each Haiku row: its tokens at Haiku's prices exactly.
+    const haikuRows = await admin.db.execute<{ ok: boolean }>(sql`
+      select (cost_usd_micros = ceil(((input_tokens * 100 + output_tokens * 500
+              + cache_write_tokens * 125 + cache_read_tokens * 10) * 11)::numeric / 10000))::boolean as ok
+        from kev_usage where model = ${MODELS.haiku55.id} and attempt_id in (${sql.join(
+          sessionIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})`);
+    expect(haikuRows.rows.map((r) => r.ok)).toEqual([true, true, true, true]);
+    expect(rec.reservedUsdMicros >= rec.recordedUsdMicros).toBe(true);
+    expect(rec.atListPricesUsdMicros < rec.recordedUsdMicros).toBe(true);
     const charged = all.reduce(
       (a, e) => a + (e.kind === 'message' && e.costUsdMicros !== null ? e.costUsdMicros : 0n),
       0n,

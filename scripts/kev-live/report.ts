@@ -183,10 +183,12 @@ export function buildReport(input: {
     );
     md.push(`- Attempts: ${rec.attempts}; settled ≠ Σ usage: ${rec.mismatched}`);
     md.push(
-      `- Usage rows: ${rec.usageRows}; conservative charges: ${rec.conservativeRows}; Haiku rows at the fast tier's prices: ${rec.probeModelRows}`,
+      `- Usage rows: ${rec.usageRows}; conservative charges: ${rec.conservativeRows}; Haiku rows (at Haiku's prices): ${rec.probeModelRows}`,
     );
     md.push(
-      `- HOME recorded US$${usd(rec.recordedUsdMicros)} (at each model's own prices: US$${usd(rec.atModelPricesUsdMicros)})`,
+      `- Reserved (maximum exposure): US$${usd(rec.reservedUsdMicros)}`,
+      `- Recorded by HOME (each model's prices; conservative where usage was unknown or partial): US$${usd(rec.recordedUsdMicros)}`,
+      `- At list prices (reported tokens at each model's prices; the provider's bill should match): US$${usd(rec.atListPricesUsdMicros)}`,
     );
     md.push(
       '',

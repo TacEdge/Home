@@ -251,7 +251,9 @@ export function plannedCalls(p: ProbeSpec): number {
  * call twice (HOME's one retry) at its tier's per-call maximum, never above
  * the attempt's reservation, which the budget enforces; a turn at the turn
  * ceiling (US$1.50), which bounds a fast attempt and an escalation together.
- * A Haiku probe runs on a fast budget and is charged at its prices.
+ * A Haiku probe runs on a fast budget, so it is reserved and bounded at the
+ * fast tier's (Sonnet 5.5's) per-call maximum; its recorded cost is at
+ * Haiku's own prices, which are lower in every category.
  */
 export function probeMaxUsdMicros(p: ProbeSpec): bigint {
   if (p.kind === 'models') return 0n;

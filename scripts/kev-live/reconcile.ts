@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '@/db/create';
 import { getSpendReport } from '@/domain/kev-bookkeeping/service';
+import { recordedPrices } from '@/kev/budget';
 import { GEO_MULTIPLIER, MODELS, TIERS } from '@/kev/config';
 import { systemActor } from '@/trust/actor';
 import { costUsdMicros } from '@/trust/usage';
@@ -9,9 +10,19 @@ import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 // The reconciliation after a session (M8 live-verification plan §9), run
 // against the runner's own database: no reservation left open or
 // unreconciled; each attempt settled at exactly the sum of its usage rows;
-// conservative charges (a cost other than the tokens at the tier's prices ×
-// 1.1) counted; tokens by model and UTC day, to set against the provider
+// conservative charges (a cost other than the tokens at the called model's
+// prices × 1.1) counted; tokens by model and UTC day, to set against the provider
 // Console's figures. Counts, tokens and amounts only.
+//
+// Three figures, kept apart (owner decision, 2026-10-16):
+// - reserved: the session's maximum exposure, its attempts' reservations
+//   (at the tier's prices, Haiku probes included);
+// - recorded: what HOME charged, each completed call at the prices of the
+//   model actually called (Haiku 5.5 at Haiku's), unknown or partial usage
+//   at the conservative charge;
+// - at list prices: every row's reported tokens at its own model's prices,
+//   the figure the provider's bill should match; recorded exceeds it only
+//   by the conservative charges.
 
 export type Reconciliation = Readonly<{
   openCount: number;
@@ -19,17 +30,19 @@ export type Reconciliation = Readonly<{
   lateSettledCount: number;
   /** The session's attempts (its reservations, by attempt id). */
   attempts: number;
+  /** The session's maximum exposure: the sum of its attempts' reservations (µ$). */
+  reservedUsdMicros: bigint;
   /** Attempts whose settled amount is not the sum of their usage rows, or not `settled`. */
   mismatched: number;
   /** HOME's recorded cost for the session (µ$). */
   recordedUsdMicros: bigint;
   usageRows: number;
-  /** Rows charged other than their tokens at the tier's prices × 1.1 (unknown, partial or aborted). */
+  /** Rows charged other than their tokens at their model's prices × 1.1 (unknown, partial or aborted). */
   conservativeRows: number;
-  /** Rows for a model other than their tier's (Haiku 5.5 probes, charged at the fast tier's prices). */
+  /** Rows for a model other than their tier's (Haiku 5.5 probes, recorded at Haiku's prices). */
   probeModelRows: number;
-  /** What those rows would cost at their own model's prices (µ$): the provider's bill should be near this. */
-  atModelPricesUsdMicros: bigint;
+  /** Every row's reported tokens at its own model's prices × 1.1 (µ$): what the provider's bill should match. */
+  atListPricesUsdMicros: bigint;
   /** Tokens by model and UTC day, for the Console's Usage and Cost views. */
   byModelDay: readonly Readonly<{
     model: string;
@@ -58,15 +71,19 @@ export async function reconcile(db: Db, attemptIds: readonly string[]): Promise<
   const attempts = await db.execute<{
     attempt_id: string;
     status: string;
+    reserved: string;
     settled: string | null;
     usage: string;
   }>(sql`
-    select r.attempt_id, r.status, r.settled_usd_micros::text as settled,
+    select r.attempt_id, r.status, r.reserved_usd_micros::text as reserved,
+           r.settled_usd_micros::text as settled,
            coalesce((select sum(u.cost_usd_micros) from kev_usage u
                       where u.attempt_id = r.attempt_id), 0)::text as usage
       from kev_budget_reservation r
      where r.attempt_id in (${ids})`);
   let mismatched = 0;
+  let reserved = 0n;
+  for (const a of attempts.rows) reserved += BigInt(a.reserved);
   for (const a of attempts.rows)
     if (a.status !== 'settled' || a.settled === null || BigInt(a.settled) !== BigInt(a.usage))
       mismatched += 1;
@@ -103,8 +120,8 @@ export async function reconcile(db: Db, attemptIds: readonly string[]): Promise<
     };
     const cost = BigInt(r.cost);
     recorded += cost;
-    if (cost !== costUsdMicros(tokens, TIERS[r.tier].model.prices, GEO_MULTIPLIER))
-      conservative += 1;
+    const prices = recordedPrices(r.tier, r.model);
+    if (!prices || cost !== costUsdMicros(tokens, prices, GEO_MULTIPLIER)) conservative += 1;
     if (r.model !== TIERS[r.tier].model.id) probeModel += 1;
     const own = priceOf(r.model);
     atModel += own ? costUsdMicros(tokens, own, GEO_MULTIPLIER) : cost;
@@ -134,12 +151,13 @@ export async function reconcile(db: Db, attemptIds: readonly string[]): Promise<
     unreconciledCount: report.unreconciledCount,
     lateSettledCount: report.lateSettledCount,
     attempts: attempts.rows.length,
+    reservedUsdMicros: reserved,
     mismatched,
     recordedUsdMicros: recorded,
     usageRows: rows.rows.length,
     conservativeRows: conservative,
     probeModelRows: probeModel,
-    atModelPricesUsdMicros: atModel,
+    atListPricesUsdMicros: atModel,
     byModelDay: Object.freeze(
       [...groups.values()].sort((a, b) => (a.day + a.model).localeCompare(b.day + b.model)),
     ),

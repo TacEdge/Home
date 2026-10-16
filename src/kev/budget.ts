@@ -2,7 +2,7 @@ import 'server-only';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 import { isLiveReservation, type Reservation } from '@/domain/kev-bookkeeping/service';
 import { costUsdMicros, perCallMaxUsdMicros } from '@/trust/usage';
-import { GEO_MULTIPLIER, LIMITS, TIERS } from './config';
+import { GEO_MULTIPLIER, LIMITS, MODELS, TIERS, type PriceTable } from './config';
 import type { CallUsage, StopCode, ProviderErrorCode } from './providers/types';
 import { attemptReservation } from './router';
 
@@ -17,7 +17,11 @@ import { attemptReservation } from './router';
 // every bound here is tested to its limit (tests/unit/kev-budget.test.ts).
 //
 // What a call is charged (contract §13.6; ADR 0012 §43, I2, I4):
-// - the provider's final usage (the stream completed): its cost;
+// - the provider's final usage (the stream completed): its cost at the
+//   prices of the model actually called (`recordedPrices`): the tier's
+//   model, or Haiku 5.5 on a fast attempt (the live-verification probe path
+//   only; owner decision, 2026-10-16); any other model at the per-call
+//   maximum, since HOME has no verified price for it;
 // - no usage at all: the per-call maximum;
 // - partial usage (`message_start` arrived but the call never completed:
 //   aborted, timed out, reset, refused for its geo, malformed, an error
@@ -67,6 +71,21 @@ export function inputTokensOf(usage: CallUsage): number {
 /** Whether a call's reported input passes the per-call cap (I4). */
 export function exceedsInputCap(usage: CallUsage): boolean {
   return inputTokensOf(usage) > LIMITS.inputTokensPerCall;
+}
+
+/**
+ * The verified prices a call with final usage is recorded at (owner
+ * decision, 2026-10-16): the model actually called, when HOME knows its
+ * price for that tier: the tier's own model, or Haiku 5.5 on the fast tier
+ * (whose reservation and per-call maximum, at Sonnet 5.5's prices, bound
+ * every Haiku call). null for any other model: the call is charged at the
+ * per-call maximum. Reservations, per-call maxima and conservative charges
+ * stay at the tier's prices.
+ */
+export function recordedPrices(tier: KevTier, model: string): PriceTable | null {
+  if (model === TIERS[tier].model.id) return TIERS[tier].model.prices;
+  if (tier === 'fast' && model === MODELS.haiku55.id) return MODELS.haiku55.prices;
+  return null;
 }
 
 export class TurnBudget {
@@ -233,6 +252,7 @@ export class TurnBudget {
     const usage = outcome.usage;
     if (usage && exceedsInputCap(usage)) this.#halted = 'input_limit';
     const partial = usage !== null && outcome.partial === true;
+    const prices = recordedPrices(this.tier, outcome.model);
     const record: CallRecord = Object.freeze({
       tier: this.tier,
       model: outcome.model,
@@ -241,7 +261,9 @@ export class TurnBudget {
         ? this.perCallMaxUsdMicros
         : partial
           ? this.conservativeCost(usage)
-          : costUsdMicros(usage, TIERS[this.tier].model.prices, GEO_MULTIPLIER),
+          : prices
+            ? costUsdMicros(usage, prices, GEO_MULTIPLIER)
+            : this.perCallMaxUsdMicros,
       ms: Math.max(0, Math.round(outcome.ms)),
       stop: partial ? 'partial' : outcome.stop,
       errorCode: outcome.errorCode ?? null,

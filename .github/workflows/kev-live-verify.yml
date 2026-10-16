@@ -11,7 +11,7 @@ name: Kev live verification
 #         required reviewer), then runs the approved probes against the
 #         job's own throwaway Postgres, seeded with the fixture family only.
 #         The evaluation key is the `kev-evals` environment's own secret,
-#         KEV_LIVE_PROVIDER_KEY, given to the one step that needs it. The
+#         KEV_EVAL_PROVIDER_KEY, given to the one step that needs it. The
 #         report (tokens, cost, stop reasons, inference geo and request ids;
 #         never a prompt, answer or key) is the run's artifact.
 #
@@ -112,7 +112,7 @@ jobs:
         env:
           KEV_LIVE_APPROVED_PLAN_HASH: ${{ inputs.plan_hash }}
           KEV_LIVE_BUDGET_USD: ${{ inputs.budget_usd }}
-          KEV_LIVE_PROVIDER_KEY: ${{ secrets.KEV_LIVE_PROVIDER_KEY }}
+          KEV_EVAL_PROVIDER_KEY: ${{ secrets.KEV_EVAL_PROVIDER_KEY }}
         run: node scripts/kev-live/run.mts --live
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
