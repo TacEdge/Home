@@ -15,7 +15,10 @@ export async function expectAccessible(page: Page, where: string): Promise<void>
     .analyze();
   const blocking = result.violations
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
+    .map(
+      (v) =>
+        `${v.id}: ${v.nodes.map((n) => `${n.target.join(' ')} (${n.failureSummary ?? ''})`).join(', ')}`,
+    );
   expect(blocking, where).toEqual([]);
 }
 
