@@ -123,7 +123,7 @@ export function TodayView({
       {askKev ? (
         // Static, never waiting for Kev: a way in, with Today as the focus (D16).
         <p className="mt-1">
-          <Link href="/kev?focus=today" className={link} data-testid="ask-kev-today">
+          <Link href="/kev?focus=today#latest" className={link} data-testid="ask-kev-today">
             Ask Kev about today ›
           </Link>
         </p>

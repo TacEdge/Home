@@ -90,7 +90,7 @@ function CaptureForm({ action }: { action: FormAction }) {
 function AskKev() {
   return (
     <Link
-      href="/kev"
+      href="/kev#latest"
       aria-label="Ask Kev"
       data-testid="ask-kev"
       className="text-ink border-line hover:bg-paper-2 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-[22px] border px-3 font-medium"

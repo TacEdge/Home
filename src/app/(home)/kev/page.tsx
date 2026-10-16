@@ -54,7 +54,7 @@ export const dynamic = 'force-dynamic';
 // Clear at the foot, with a confirmation.
 
 const WEEK_LIMIT = 13; // 90 days of messages, a week at a time
-const TURN_LIMIT = 100;
+const TURN_LIMIT = 30; // a phone-first view (owner decision, 2026-10-16); the rest on "Show earlier"
 
 export default async function KevPage({
   searchParams,
@@ -100,7 +100,9 @@ export default async function KevPage({
   const allTurns = toTurns(rows, inFlight, zone);
   // A week at a time (§7.2), and at most the latest TURN_LIMIT turns of it
   // unless the adult asks for the rest: the largest week the limits allow
-  // (60 a day) would otherwise be a page of about 1.5 MB (ADR 0012 §48).
+  // (60 a day) would otherwise be a page of about 1.5 MB (ADR 0012 §48), and
+  // 30 keeps today's turns and the box near the fold on a phone. Ask Kev and
+  // Today's line open the page at #latest.
   const showAll = one('all') === '1';
   const turns = showAll ? allTurns : allTurns.slice(-TURN_LIMIT);
   const cut = allTurns.length - turns.length;
@@ -193,17 +195,13 @@ export default async function KevPage({
         }}
       />
 
-      {spend.state === 'deep_withdrawn' ? (
-        <p className="text-muted mt-6 text-[15px]" data-testid="kev-simpler">
-          {SIMPLER_TODAY}
-        </p>
-      ) : null}
-
       <Composer
         focusToday={one('focus') === 'today'}
         suggestions={turnsToday || inFlight ? [] : suggestions(today, hour)}
         notSaved={ERROR_TEXT.not_saved}
         initialError={errorCode ? ERROR_TEXT[errorCode] : null}
+        simpler={spend.state === 'deep_withdrawn' ? SIMPLER_TODAY : null}
+        capReached={errorCode === 'cap_reached'}
       />
 
       {turns.length > 0 ? (

@@ -22,8 +22,13 @@ export function ownLine(questions: number): string {
     : `You’ve asked Kev ${questions.toLocaleString('en-NZ')} questions this month.`;
 }
 
+// The cap counts more than the recorded figure: what HOME sets aside for an
+// answer while Kev works on it, and any answer whose cost it couldn't
+// confirm (§13.6). Said in general words only: never an amount, a count,
+// a tier or anything about the other adult's activity (I5; owner-approved
+// copy, 2026-10-16).
 export const RECORDED_NOTE =
-  'These are the costs HOME records as Kev answers. The provider’s own bill can differ slightly.';
+  'These are the costs HOME has recorded as Kev answers. HOME also sets aside enough to cover each answer while Kev works on it, and keeps counting any answer whose cost it couldn’t confirm, so Kev can reach the limit before this figure does. The provider’s own bill can differ slightly.';
 export const SIMPLER = 'Kev is keeping answers simpler until the 1st.';
 
 /** The first day of the next home-zone month, in words: the day Kev resumes. */

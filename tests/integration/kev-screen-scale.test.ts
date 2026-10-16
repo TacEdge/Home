@@ -152,8 +152,8 @@ async function screen(actor: UserActor) {
     );
     return { ms: performance.now() - t1, bytes: Buffer.byteLength(html) };
   };
-  // As the page: the latest 100 turns of the week first, the rest on "Show earlier".
-  const first = render(turns.slice(-100));
+  // As the page: the latest 30 turns of the week first, the rest on "Show earlier".
+  const first = render(turns.slice(-30));
   const whole = render(turns);
   return { turns: turns.length, queries: q, read, first, whole };
 }

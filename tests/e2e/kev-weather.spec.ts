@@ -184,6 +184,11 @@ test('U14: Usage at about 30%, past 80% and at the cap: the recorded month only'
   await expect(
     page.getByTestId('kev-turn').last().getByRole('button', { name: 'Keep in To sort' }),
   ).toBeVisible();
+  // The refusal is what the page says: no "keeping answers simpler" beside it.
+  await expect(page.getByTestId('kev-simpler')).toHaveCount(0);
+  // Usage says why the limit can come before the recorded figure, in general words.
+  await page.goto('/settings/usage');
+  await expect(page.getByText(/sets aside enough to cover each answer/)).toBeVisible();
 
   // At the cap, recorded: Usage gives the date Kev resumes.
   await recordUsageUpTo(CAP + 1n);

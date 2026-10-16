@@ -11,6 +11,9 @@ import { Wordmark } from './wordmark';
 // of its own, Kev's screen, can leave it out: M8 Package 4). A page
 // that holds a `data-wide` element (Today's second column, M5 Package 3) lets
 // the page grow from 720px to 960px at tablet width; no other page does.
+// `shrink-0`: under `html, body { height: 100% }` the shell would otherwise
+// shrink to one screen, so the sticky header's block would end there and the
+// header would scroll away on a long page (M8 Package 4 review, 2026-10-16).
 
 export function Shell({
   children,
@@ -21,7 +24,7 @@ export function Shell({
   capture?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex min-h-full shrink-0 flex-col">
       <a
         href="#content"
         className="bg-ink text-paper sr-only rounded-home-sm px-3 py-2 focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-30 focus:inline-flex focus:min-h-11 focus:items-center"

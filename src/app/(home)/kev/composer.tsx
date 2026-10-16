@@ -76,6 +76,8 @@ export function Composer({
   suggestions,
   notSaved,
   initialError,
+  simpler,
+  capReached,
 }: {
   focusToday: boolean;
   /** Static questions chosen by code, on a day with no turns yet (§11.2). */
@@ -84,6 +86,10 @@ export function Composer({
   notSaved: string;
   /** An error from a form post without JavaScript, said once. */
   initialError: string | null;
+  /** The quiet past-80% line (the recorded month), or null. */
+  simpler: string | null;
+  /** The no-JavaScript redirect said the cap was reached. */
+  capReached: boolean;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -96,6 +102,10 @@ export function Composer({
   const [announce, setAnnounce] = useState('');
   const [focus, setFocus] = useState(focusToday);
   const [asked, setAsked] = useState(false);
+  // Once a turn is refused at the cap, "keeping answers simpler" would
+  // contradict it (the cap counts what is set aside, the recorded month does
+  // not): the refusal is what this page says (owner decision, 2026-10-16).
+  const [capped, setCapped] = useState(capReached);
   const box = useRef<HTMLTextAreaElement>(null);
 
   async function send(words: string) {
@@ -141,6 +151,7 @@ export function Composer({
             }
           } else if (e.event === 'error') {
             failed = str(e.data.message) || notSaved;
+            if (str(e.data.code) === 'cap_reached') setCapped(true);
             ended = true;
           } else if (OUTCOMES.has(e.event)) {
             const blocks = Array.isArray(e.data.blocks)
@@ -172,6 +183,11 @@ export function Composer({
 
   return (
     <div data-testid="kev-composer">
+      {simpler && !capped ? (
+        <p className="text-muted mt-6 text-[15px]" data-testid="kev-simpler">
+          {simpler}
+        </p>
+      ) : null}
       {pending ? (
         <div className="mt-6" data-testid="kev-pending">
           <p className="text-ink ml-auto max-w-[85%] text-right break-words whitespace-pre-wrap">

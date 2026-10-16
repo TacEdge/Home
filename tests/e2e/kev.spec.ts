@@ -30,12 +30,15 @@ test.describe('U2: the entry points, Kev on', () => {
     await expect(page.getByRole('link', { name: 'Ask Kev', exact: true })).toHaveCount(1);
     await page.goto('/forward');
     await expect(page.getByRole('link', { name: 'Ask Kev about today ›' })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'Ask Kev', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: 'Ask Kev', exact: true })).toHaveAttribute(
+      'href',
+      '/kev#latest',
+    );
     await page.goto('/settings');
     await expect(page.getByRole('link', { name: /Usage/ })).toHaveCount(1);
     await page.goto('/today');
     await page.getByRole('link', { name: 'Ask Kev about today ›' }).click();
-    await page.waitForURL(/\/kev\?focus=today$/);
+    await page.waitForURL(/\/kev\?focus=today#latest$/);
     await expect(page.getByTestId('kev-privacy')).toHaveText('Only you can see this conversation.');
     await expect(page.getByTestId('kev-focus')).toHaveText('About today');
     // One input on Kev's screen: no capture bar, no second Ask Kev.
@@ -320,6 +323,34 @@ test.describe('U1: the screen at four viewports', () => {
 async function offPage(page: Page, path: string) {
   await page.goto(`${NARROW_URL}${path}`);
 }
+
+test.describe('the shell on a long page (M8 Package 4 review)', () => {
+  test('the sticky header stays at the top when a long page is scrolled to its foot', async ({
+    page,
+  }) => {
+    await signInAsFixtureAdult(page, 'sam');
+    await page.setViewportSize({ width: 320, height: 568 });
+    for (const path of ['/today', '/kev?weeks=13&all=1']) {
+      await page.goto(path);
+      // Open everything that folds, so the page is longer than the screen.
+      await page.evaluate(() =>
+        document
+          .querySelectorAll<HTMLDetailsElement>('main details')
+          .forEach((d) => (d.open = true)),
+      );
+      const long = await page.evaluate(
+        () => document.documentElement.scrollHeight > window.innerHeight + 200,
+      );
+      if (!long) continue;
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const top = await page
+        .locator('header')
+        .first()
+        .evaluate((h) => h.getBoundingClientRect().top);
+      expect(Math.abs(top), path).toBeLessThan(1);
+    }
+  });
+});
 
 test.describe('S9, U2: Kev off (the narrow server)', () => {
   test('no Ask Kev, no Today line, no Usage; Kev’s screen says so with no input; the route refuses', async ({
