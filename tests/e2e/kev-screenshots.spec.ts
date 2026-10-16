@@ -71,6 +71,22 @@ async function open(browser: Browser, viewport: { width: number; height: number 
 const shot = (page: Page, name: string, fullPage = true) =>
   page.screenshot({ path: `${DIR}/${name}.png`, fullPage, caret: 'initial' });
 
+/** Moves Sam's conversation so far back by `days`, for the history by day (synthetic only). */
+async function backdateSam(days: number, sinceMinutes?: number): Promise<void> {
+  const [c] = await q(
+    `select id from conversation where user_id = 'fixture-sam' and archived_at is null order by created_at desc limit 1`,
+  );
+  const recent = sinceMinutes ? `and created_at > now() - interval '${sinceMinutes} minutes'` : '';
+  await q(
+    `update message set created_at = created_at - make_interval(days => $2) where conversation_id = $1 ${recent}`,
+    [c!.id, days],
+  );
+  await q(
+    `update conversation set created_at = least(created_at, now() - make_interval(days => $2)) where id = $1`,
+    [c!.id, days],
+  );
+}
+
 test.beforeAll(async () => {
   mkdirSync(DIR, { recursive: true });
   // The privacy canaries are for the sweeps, not for review: put away for the shots.
@@ -110,17 +126,39 @@ test('the screens, for review', async ({ browser }) => {
     await shot(page, '01-empty-phone', false);
     await page.setViewportSize(SMALL);
     await shot(page, '01-empty-small-phone', false);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await shot(page, '01-empty-desktop', false);
     await page.setViewportSize(VIEWPORTS.phone);
     await page.goto('/today');
     await shot(page, '00-today-entry-phone', false);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await shot(page, '00-today-entry-desktop', false);
+    // 11. The small phone: Today scrolled, the sticky header and capture bar over it.
+    await page.setViewportSize(SMALL);
+    await page.evaluate(() => window.scrollTo(0, 260));
+    await shot(page, '11-today-small-phone', false);
+    await context.close();
+  }
+
+  // 12. History by day: two earlier turns, moved back three days and one day.
+  {
+    const { context, page } = await open(browser, VIEWPORTS.phone);
+    await ask(page, 'sam', 'What tasks have I still got outstanding?');
+    await backdateSam(3);
+    await ask(page, 'sam', 'Thanks Kev');
+    await backdateSam(1, 10);
     await context.close();
   }
 
   // 2–4. A conversation: today, the weekend (rows, credit), the weekend thought through (Kev's view).
   const { context, page } = await open(browser, VIEWPORTS.phone);
-  await ask(page, 'sam', 'What’s happening today?');
+  await ask(page, 'sam', 'What’s on tomorrow?');
   await ask(page, 'sam', 'What have we got this weekend?');
   await shot(page, '02-conversation-phone');
+  await page.getByTestId('kev-turn').last().scrollIntoViewIfNeeded();
+  await shot(page, '02-answer-phone', false);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot(page, '12-history-phone', false);
   await page.getByTestId('kev-turn').last().getByText('What’s this based on?').click();
   await page.getByTestId('kev-turn').last().scrollIntoViewIfNeeded();
   await shot(page, '03-answer-with-references-phone', false);
@@ -174,7 +212,22 @@ test('the screens, for review', async ({ browser }) => {
     await page.goto('/kev');
     await shot(page, `10-conversation-${name}`);
   }
+  // 11. The small phone, mid-conversation: the sticky header and capture bar over it.
+  await page.setViewportSize(SMALL);
+  await page.goto('/kev');
+  await page.getByTestId('kev-turn').nth(2).scrollIntoViewIfNeeded();
+  await shot(page, '11-conversation-small-phone', false);
   await page.setViewportSize(VIEWPORTS.phone);
+
+  // 13. Clear: the confirmation, then the screen after it.
+  await page.goto('/kev');
+  await page.getByText('Clear conversation', { exact: true }).click();
+  await page.getByRole('button', { name: 'Clear', exact: true }).scrollIntoViewIfNeeded();
+  await shot(page, '13-clear-confirm-phone', false);
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await page.waitForURL(/\/kev\?cleared=1/);
+  await expect(page.getByTestId('kev-cleared')).toBeVisible();
+  await shot(page, '13-cleared-phone', false);
 
   // 8. Usage, then 7. the budget limit, and Usage at the cap.
   await recordUsageUpTo((CAP * 30n) / 100n);
@@ -184,6 +237,9 @@ test('the screens, for review', async ({ browser }) => {
   await page.goto('/settings/usage');
   await shot(page, '08-usage-past-80-phone');
   await page.goto('/kev');
+  await ask(page, 'sam', 'What have we got this weekend?');
+  await page.getByTestId('kev-composer').scrollIntoViewIfNeeded();
+  await shot(page, '07-budget-past-80-phone', false);
   await recordUsageUpTo(CAP - 300_000n);
   await ask(page, 'sam', 'What’s on tomorrow?');
   await page.getByTestId('kev-composer').scrollIntoViewIfNeeded();
