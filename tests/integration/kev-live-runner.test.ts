@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { user } from '@/db/schema';
 import { createPerson } from '@/domain/people/service';
+import type { UserActor } from '@/trust/actor';
 import { TIERS, MODELS } from '@/kev/config';
 import { buildProbeGateway } from '@/kev/providers/anthropic';
 import { createProviderFetchForTests } from '@/kev/providers/fetch';
@@ -49,6 +51,11 @@ const KEY = 'test-key-not-real-live-runner';
 const CANARY = 'canary-live-report-55aa';
 let stub: Stub;
 let f: KevFixture;
+/**
+ * The adult the probes run as: a fresh synthetic account per run (a .test
+ * address), so the other suites' turns today never rate-limit its turn.
+ */
+let runner: UserActor;
 const savedEnv = { ...process.env };
 const seenBodies = new Set<string>();
 let ids = 0;
@@ -132,6 +139,10 @@ beforeAll(async () => {
   // is append-only); the runner's own cap rule is tested in kev-live-guards.
   process.env.HOME_KEV_MONTHLY_CAP_NZD = '300';
   f = await buildKevFixture(db, admin.db);
+  const id = `live-runner-${randomUUID()}`;
+  const email = `${id}@example.test`;
+  await admin.db.insert(user).values({ id, name: 'Synthetic runner adult', email });
+  runner = { kind: 'user', userId: id, email, via: 'kev', channel: 'web' };
   stub = await startStub();
 });
 afterAll(async () => {
@@ -158,7 +169,7 @@ describe('the plan, live path, against a local stub', () => {
     const g = gateway();
     const run = await executePlan(plan, {
       gateway: g,
-      actor: f.kev.sam,
+      actor: runner,
       deps: { db },
       budgetMicros: 10_000_000n,
     });
@@ -254,7 +265,7 @@ describe('the plan, live path, against a local stub', () => {
     const g = gateway();
     const run = await executePlan(plan, {
       gateway: g,
-      actor: f.kev.sam,
+      actor: runner,
       deps: { db },
       budgetMicros: 2_000_000n,
     });
@@ -280,7 +291,7 @@ describe('the plan, live path, against a local stub', () => {
     try {
       const run = await executePlan(buildPlan(), {
         gateway: gateway(),
-        actor: f.kev.sam,
+        actor: runner,
         deps: { db },
         budgetMicros: 10_000_000n,
       });
@@ -306,7 +317,7 @@ describe('the plan, live path, against a local stub', () => {
     for (let i = 0; i < 10; i++) stub.queue.push(smart);
     const run = await executePlan(buildPlan(), {
       gateway: gateway(),
-      actor: f.kev.sam,
+      actor: runner,
       deps: { db },
       budgetMicros: 10_000_000n,
     });
@@ -325,7 +336,7 @@ describe('the plan, live path, against a local stub', () => {
     });
     const run = await executePlan(buildPlan(), {
       gateway: gateway(),
-      actor: f.kev.sam,
+      actor: runner,
       deps: { db },
       budgetMicros: 10_000_000n,
     });
