@@ -69,10 +69,14 @@ async function open(browser: Browser, viewport: { width: number; height: number 
 }
 
 const shot = (page: Page, name: string, fullPage = true) =>
-  page.screenshot({ path: `${DIR}/${name}.png`, fullPage });
+  page.screenshot({ path: `${DIR}/${name}.png`, fullPage, caret: 'initial' });
 
 test.beforeAll(async () => {
   mkdirSync(DIR, { recursive: true });
+  // The privacy canaries are for the sweeps, not for review: put away for the shots.
+  await q(
+    `update event set archived_at = now() where title like 'canary-%' and archived_at is null and title not like 'canary-archived-%'`,
+  );
   await setForecast();
   const held = (
     await q(`select id from calendar_source where archived_at is null and name not like 'ks %'`)
@@ -88,6 +92,12 @@ test.beforeAll(async () => {
   await q(
     `update calendar_source set archived_at = null, last_attempt_at = $2::timestamptz, last_synced_at = $2::timestamptz, last_sync_status = 'ok' where id = $1`,
     [id, `${await todayNz()}T06:58:00+13:00`],
+  );
+});
+
+test.afterAll(async () => {
+  await q(
+    `update event set archived_at = null where title in ('canary-sam-event', 'canary-alex-event')`,
   );
 });
 

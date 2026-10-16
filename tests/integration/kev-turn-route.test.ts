@@ -288,6 +288,29 @@ describe('the event stream carries only code-approved text (D17, U3)', () => {
   });
 });
 
+describe('failed persistence through the route (§9.9, I-4)', () => {
+  it('when the words cannot be stored, the stream says nothing was saved: no started, nothing keepable', async () => {
+    // A session whose login has no user row: storing the words fails.
+    session = { ...ui(f.kev.sam), userId: `u-ghost-${crypto.randomUUID().slice(0, 8)}` };
+    const p = provider([answer('when', [swim])]);
+    const { events } = await streamed(
+      await handleTurnRequest(json('What’s happening today?'), deps({ provider: p })),
+    );
+    expect(events).toEqual([
+      {
+        event: 'error',
+        data: { code: 'not_saved', message: ERROR_TEXT.not_saved, keepable: false },
+      },
+    ]);
+    expect(p.requests).toHaveLength(0);
+    const nojs = await handleTurnRequest(
+      form('What’s happening today?'),
+      deps({ provider: provider([]) }),
+    );
+    expect(nojs.headers.get('location')).toBe(`/kev?e=not_saved&at=${NOW.getTime()}#latest`);
+  });
+});
+
 describe('without JavaScript (U8, the server half)', () => {
   it('the form post runs to completion and returns 303 to /kev, the answer stored', async () => {
     const p = provider([answer('when', [swim])]);

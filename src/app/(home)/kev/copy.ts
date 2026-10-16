@@ -30,6 +30,7 @@ export const KEPT = 'Kept';
 export const KEPT_WHERE = 'in To sort';
 export const STILL_ANSWERING = 'Kev’s still answering.';
 export const EARLIER = 'Show the week before';
+export const EARLIER_THIS_WEEK = 'Show earlier';
 export const GONE_ONE = 'One record this answer rested on is gone from your view of HOME.';
 export const GONE_MANY = (n: number) =>
   `${n} records this answer rested on are gone from your view of HOME.`;
@@ -140,6 +141,7 @@ export function screenCopy(): string[] {
     KEPT_WHERE,
     STILL_ANSWERING,
     EARLIER,
+    EARLIER_THIS_WEEK,
     GONE_ONE,
     GONE_MANY(2),
     SIMPLER_TODAY,

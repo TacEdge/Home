@@ -349,3 +349,24 @@ describe('S15, U5, U11: the answer renders as text, its parts in order', () => {
     expect(html.match(/data-testid="kev-keep"/g)).toHaveLength(2);
   });
 });
+
+describe('S13: the screen’s client code carries nothing of Kev’s', () => {
+  it('the client components import only the screen’s copy, forms, UI and the framework', () => {
+    for (const file of [
+      'src/app/(home)/kev/composer.tsx',
+      'src/app/(home)/kev/keep-form.tsx',
+      'src/app/_capture/capture-bar.tsx',
+    ]) {
+      const text = readFileSync(file, 'utf8');
+      expect(text.startsWith("'use client';"), file).toBe(true);
+      const imports = [...text.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]!);
+      for (const i of imports)
+        expect(
+          /^(react|react-dom|next\/link|next\/navigation|\.\/copy|@\/app\/_forms\/[a-z-]+|@\/ui\/[a-z-]+)$/.test(
+            i,
+          ),
+          `${file}: ${i}`,
+        ).toBe(true);
+    }
+  });
+});

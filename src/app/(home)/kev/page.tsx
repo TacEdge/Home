@@ -29,6 +29,7 @@ import {
   DISCLOSURE,
   DISCLOSURE_LINK,
   EARLIER,
+  EARLIER_THIS_WEEK,
   INTRO,
   KEV_TITLE,
   PRIVACY_LINE,
@@ -53,6 +54,7 @@ export const dynamic = 'force-dynamic';
 // Clear at the foot, with a confirmation.
 
 const WEEK_LIMIT = 13; // 90 days of messages, a week at a time
+const TURN_LIMIT = 100;
 
 export default async function KevPage({
   searchParams,
@@ -95,7 +97,13 @@ export default async function KevPage({
   const firstOpen =
     rows.length === 0 &&
     (active === undefined || (await listMessages(actor, active.id)).length === 0);
-  const turns = toTurns(rows, inFlight, zone);
+  const allTurns = toTurns(rows, inFlight, zone);
+  // A week at a time (§7.2), and at most the latest TURN_LIMIT turns of it
+  // unless the adult asks for the rest: the largest week the limits allow
+  // (60 a day) would otherwise be a page of about 1.5 MB (ADR 0012 §48).
+  const showAll = one('all') === '1';
+  const turns = showAll ? allTurns : allTurns.slice(-TURN_LIMIT);
+  const cut = allTurns.length - turns.length;
   const days = byDay(turns);
   const refs = turns.flatMap((t) => (t.kev?.kind === 'v2' ? t.kev.content.cites : []));
   const answered = turns.some((t) => t.kev?.kind === 'v2');
@@ -133,11 +141,11 @@ export default async function KevPage({
       {firstOpen ? (
         <div className="mt-6" data-testid="kev-intro">
           <p className="font-display text-ink text-[22px] leading-[1.25] font-medium">{INTRO}</p>
-          <p className="text-ink-2 mt-2 text-[15px]">
-            {DISCLOSURE}{' '}
+          <p className="text-ink-2 mt-2 text-[15px]">{DISCLOSURE}</p>
+          <p className="text-[15px]">
             <Link
               href="/settings/usage"
-              className="inline-flex min-h-11 items-center underline underline-offset-4"
+              className="text-ink-2 inline-flex min-h-11 items-center underline underline-offset-4"
             >
               {DISCLOSURE_LINK} ›
             </Link>
@@ -145,10 +153,19 @@ export default async function KevPage({
         </div>
       ) : null}
 
-      {olderMayExist ? (
+      {cut > 0 ? (
         <p className="mt-4">
           <Link
-            href={`/kev?weeks=${weeks + 1}`}
+            href={`/kev?weeks=${weeks}&all=1`}
+            className="text-ink-2 inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            {EARLIER_THIS_WEEK}
+          </Link>
+        </p>
+      ) : olderMayExist ? (
+        <p className="mt-4">
+          <Link
+            href={`/kev?weeks=${weeks + 1}${showAll ? '&all=1' : ''}`}
             className="text-ink-2 inline-flex min-h-11 items-center underline underline-offset-4"
           >
             {EARLIER}
