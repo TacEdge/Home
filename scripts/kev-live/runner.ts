@@ -119,8 +119,6 @@ export async function runMode(
       const gateway = opts.gatewayFor ? opts.gatewayFor(key) : createProbeGateway({ apiKey: key });
       const actor = await fixtureAdult(db);
       const startedAt = new Date();
-      // Reservations are stamped by the database's clock: start a second early.
-      const since = new Date(startedAt.getTime() - 1_000);
       const run = await executePlan(plan, {
         gateway,
         actor,
@@ -128,7 +126,10 @@ export async function runMode(
         budgetMicros: budget,
         log: opts.log,
       });
-      const reconciliation = await reconcile(db, since);
+      const reconciliation = await reconcile(
+        db,
+        run.results.flatMap((r) => r.attemptIds),
+      );
       const report = buildReport({
         plan,
         budgetMicros: budget,

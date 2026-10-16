@@ -16,9 +16,12 @@ export type FixtureCheck = Readonly<{
   calendarConnections: number;
 }>;
 
-export async function assertFixtureDatabase(db: Db): Promise<FixtureCheck> {
+export async function assertFixtureDatabase(
+  db: Db,
+  expected: string = RUNNER_DATABASE,
+): Promise<FixtureCheck> {
   const [name] = (await db.execute<{ db: string }>(sql`select current_database() as db`)).rows;
-  if (name?.db !== RUNNER_DATABASE)
+  if (name?.db !== expected)
     throw new LiveRefusal(
       'database',
       `The connection is not the runner’s database (${RUNNER_DATABASE}).`,

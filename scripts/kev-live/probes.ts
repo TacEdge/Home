@@ -240,7 +240,9 @@ async function modelProbe(
         if (!checks.chargedAtLeastMax) reasons.push('charged_below_max');
       } else {
         reasons.push(code);
-        if (STOPPING.has(code)) stop = code;
+        // The key refused, the provider's limits or spend cap: stop the session.
+        const base = e instanceof ProviderError ? e.code : code;
+        if (STOPPING.has(base)) stop = base;
       }
     }
   } finally {

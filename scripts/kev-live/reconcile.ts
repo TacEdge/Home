@@ -17,7 +17,7 @@ export type Reconciliation = Readonly<{
   openCount: number;
   unreconciledCount: number;
   lateSettledCount: number;
-  /** The session's attempts (reservations created since it started). */
+  /** The session's attempts (its reservations, by attempt id). */
   attempts: number;
   /** Attempts whose settled amount is not the sum of their usage rows, or not `settled`. */
   mismatched: number;
@@ -47,7 +47,13 @@ export type Reconciliation = Readonly<{
 const priceOf = (model: string) =>
   Object.values(MODELS).find((m) => m.id === model)?.prices ?? null;
 
-export async function reconcile(db: Db, since: Date): Promise<Reconciliation> {
+export async function reconcile(db: Db, attemptIds: readonly string[]): Promise<Reconciliation> {
+  const ids = sql.join(
+    (attemptIds.length ? attemptIds : ['00000000-0000-0000-0000-000000000000']).map(
+      (id) => sql`${id}`,
+    ),
+    sql`, `,
+  );
   const report = await getSpendReport(systemActor, { db });
   const attempts = await db.execute<{
     attempt_id: string;
@@ -59,7 +65,7 @@ export async function reconcile(db: Db, since: Date): Promise<Reconciliation> {
            coalesce((select sum(u.cost_usd_micros) from kev_usage u
                       where u.attempt_id = r.attempt_id), 0)::text as usage
       from kev_budget_reservation r
-     where r.created_at >= ${since.toISOString()}::timestamptz`);
+     where r.attempt_id in (${ids})`);
   let mismatched = 0;
   for (const a of attempts.rows)
     if (a.status !== 'settled' || a.settled === null || BigInt(a.settled) !== BigInt(a.usage))
@@ -79,7 +85,7 @@ export async function reconcile(db: Db, since: Date): Promise<Reconciliation> {
            u.cost_usd_micros::text as cost
       from kev_usage u
       join kev_budget_reservation r on r.attempt_id = u.attempt_id
-     where r.created_at >= ${since.toISOString()}::timestamptz`);
+     where r.attempt_id in (${ids})`);
   let recorded = 0n;
   let conservative = 0;
   let probeModel = 0;
