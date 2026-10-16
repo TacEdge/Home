@@ -828,6 +828,48 @@ export async function getSpendReport(actor: Actor, deps: Deps = {}): Promise<Spe
 }
 
 // ---------------------------------------------------------------------------
+// The Kev screen's own reads (Package 4): the adult's own, never another's.
+
+/**
+ * Whether a turn is in flight in the adult's own conversation, as the
+ * one-turn guard reads it (contract §7.2): the screen says "Kev's still
+ * answering." under a message it is still answering, and offers no Keep in
+ * To sort there yet. Any signed-in adult, about their own conversation
+ * only; reads, never writes or locks.
+ */
+export async function getTurnInFlight(actor: UserActor, deps: Deps = {}): Promise<boolean> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  const db = deps.db ?? getDb();
+  const [conv] = await db
+    .select({ id: conversation.id })
+    .from(conversation)
+    .where(and(eq(conversation.userId, actor.userId), isNull(conversation.archivedAt)))
+    .orderBy(desc(conversation.createdAt), desc(conversation.id))
+    .limit(1);
+  if (!conv) return false;
+  return turnInFlight(db, conv.id, actor.userId);
+}
+
+/**
+ * How many questions the adult has asked Kev this home-zone month (Settings
+ * › Usage, contract §11.2: "your own questions this month"): their own
+ * `message.add` audit rows with role `user`, which Clear never removes. The
+ * adult's own count only: never the other adult's, never the household's.
+ */
+export async function getOwnQuestionsThisMonth(actor: UserActor, deps: Deps = {}): Promise<number> {
+  if ((actor as { kind: string }).kind !== 'user') throw new NotPermittedError('not_a_user');
+  const db = deps.db ?? getDb();
+  const tz = env.HOME_TIMEZONE;
+  const result = await db.execute<{ n: number }>(sql`
+    select count(*)::int as n from audit_log
+     where at >= date_trunc('month', now() at time zone ${tz}) at time zone ${tz}
+       and actor_user_id = ${actor.userId}
+       and event = 'message.add'
+       and meta ->> 'role' = 'user'`);
+  return Number(result.rows[0]?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
 // The model's window: a read, not a write.
 
 export type WindowRow = Readonly<{ role: 'user' | 'kev'; content: unknown; createdAt: Date }>;
