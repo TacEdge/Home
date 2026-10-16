@@ -560,6 +560,14 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       7. **"What's this based on?"** names each calendar as it is now (its name and last update when the page is read); the forecast's time is the stored one.
       8. **The once-a-day line** is shown once on the page while the recorded month is past 80%, not remembered per day.
       9. **G4's local evidence** uses `after()` to hold the turn past the response; the platform's own behaviour is G4's, not verified.
+    - **Owner product decisions (2026-10-16, focused product acceptance of PR #87):** approved as built:
+      1. **Usage shows recorded spending only** (the boundary above; reading 1): no budget-counted figure and no reservation, unreconciled or late-settled detail.
+      2. **The capture bar is hidden on `/kev`** (reading 4): Kev's screen keeps one input.
+      3. **The introduction returns after Clear** (reading 5).
+      4. **The usage notice on `/kev` is once per page** (reading 8), not remembered per day.
+      5. **"What's this based on?" names calendars as they are now** (reading 7): only calendars the reader can see, by their current name and last update.
+      6. **Keep in To sort twice returns the existing capture** (one capture per message per person; the second keep is unaudited).
+      7. **The test-only configuration boundaries:** `HOME_TEST_KEV=scripted` and the `x-home-test-kev` header are honoured only with the scripted provider, which every deployed environment refuses (N3); the e2e main and weather servers run Kev scripted (the weather server with a NZ$20 cap) and the narrow server keeps Kev off.
     - **Stage-D gates** (§5.7): **G3, G4, G16 on Neon with two adults and G17 are NOT VERIFIED.** Each needs Kev running in Preview, which needs item 25's Preview key and the stage-B and C gates; the scripted provider cannot stand in (refused anywhere deployed) and no deployed stub was built. Locally: the route's `maxDuration = 90` and `runtime` are tested; a disconnect completes, settles and records (G4's local half); concurrent turns serialise (L13 through the route); G16's local half passed in Package 1b. DEPLOY.md §E item 27 lists the Preview steps.
     - **Tests.** `tests/integration/kev-turn-route.test.ts` (S8, S9, U3, U4, U8's and U10's server halves, G4 local, L13 and C18 through the route, C14, U13's reads, citations made private or archived, sensitive context never resolved, the local model's book, no model input in any log line); `tests/unit/kev-screen.test.tsx` (the copy against the lists, U6, U7, U11, S15, the outcome event); `tests/e2e/kev.spec.ts` and `kev-weather.spec.ts` (U1, U2, U5, U8, U9, U11–U14, C14, S9, the forecast's attribution, citation navigation, a record archived after it was cited, four viewports, 200% text, reduced motion); the privacy sweep gains `/kev` and `/settings/usage`; `tests/e2e/kev-screenshots.spec.ts` (screenshots for review, `KEV_SHOTS=1` only).
 
