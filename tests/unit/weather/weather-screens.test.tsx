@@ -333,13 +333,14 @@ describe('the screens’ boundaries, held in the source (X1, X12, W19)', () => {
     });
   const read = (p: string) => readFileSync(p, 'utf8');
 
-  it('the credit link is rendered by exactly the weather pieces and the Worth knowing row, nowhere else', () => {
+  it('the credit link is rendered by exactly the weather pieces, the Worth knowing row and Kev’s answer (M8 §11.2), nowhere else', () => {
     const users = walk('src/app')
       .filter((f) => /\.tsx$/.test(f) && f !== join('src/app/_insights/weather/credit.tsx'))
       .filter((f) => /<CreditLink|from '.*weather\/credit'/.test(read(f)))
       .sort();
     expect(users).toEqual(
       [
+        join('src/app/(home)/kev/conversation.tsx'),
         join('src/app/_insights/opening-explanation.tsx'),
         join('src/app/_insights/weather/forecast-credit-line.tsx'),
         join('src/app/_insights/weather/weather-today.tsx'),

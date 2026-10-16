@@ -114,6 +114,20 @@ export const RULES: Rule[] = [
   // no subset of specs covers them (ADR 0010 §8).
   { re: /^src\/app\/_forms\//, tier: 'high', reason: 'form helpers every screen uses' },
   { re: /^src\/app\/_capture\//, tier: 'high', reason: 'the capture bar in the shell' },
+  // Kev's screen, its turn route and Settings › Usage (M8 Package 4): the
+  // conversation, the model path and the household spend. The forecast
+  // credit is imported by Kev's screen too, so it is high with it (ADR 0010 §8).
+  {
+    re: /^src\/app\/\(home\)\/kev\/|^src\/app\/_kev\/|^src\/app\/\(home\)\/settings\/usage\//,
+    tier: 'high',
+    reason: 'Kev’s screen, its turn route and Settings › Usage',
+    specs: ['kev', 'kev-weather'],
+  },
+  {
+    re: /^src\/app\/_insights\/weather\/credit\.tsx$/,
+    tier: 'high',
+    reason: 'the forecast credit (also on Kev’s screen)',
+  },
   // Engines the shared agenda, its loader or a domain service imports: a
   // change reaches every screen those reach (ADR 0010 §8).
   {
