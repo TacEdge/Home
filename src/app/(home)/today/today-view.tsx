@@ -52,6 +52,8 @@ export type TodayViewProps = {
   };
   /** The opening the credit link follows, when there is no sentence (M7 W19). */
   creditFor?: string;
+  /** With Kev on, the one static line under the header (M8 contract §11.1, D16). */
+  askKev?: boolean;
 };
 
 export function TodayView({
@@ -62,6 +64,7 @@ export function TodayView({
   marks = new Map(),
   weather,
   creditFor,
+  askKev = false,
 }: TodayViewProps) {
   const { headline, state } = model;
   const day = state === 'day';
@@ -117,6 +120,14 @@ export function TodayView({
           lookup={lookup}
         />
       )}
+      {askKev ? (
+        // Static, never waiting for Kev: a way in, with Today as the focus (D16).
+        <p className="mt-1">
+          <Link href="/kev?focus=today#latest" className={link} data-testid="ask-kev-today">
+            Ask Kev about today ›
+          </Link>
+        </p>
+      ) : null}
     </header>
   );
 

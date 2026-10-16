@@ -102,7 +102,8 @@ A future kitchen/wall display would be this tablet layout, read-only, larger typ
 | Gesture | Result |
 |---|---|
 | Tap an insight | Expands in place: the facts it's based on ("Isla — pickup 3:00 · Alex — work till 2:30 · Sam — client site") and its action. |
-| **Sort it ›** | Opens Kev with the insight as focus. Kev: "Alex is free from 2:30. Put Alex down for Isla's pickup?" → **Yes** / Someone else. |
+| **Sort it ›** | Opens Kev with the insight as focus. Kev: "Alex is free from 2:30. Put Alex down for Isla's pickup?" → **Yes** / Someone else. *Superseded for M8 (contract §8.6; annotated in Package 4): "Alex is free from 2:30" is never said; "Sort it" is M9's.* |
+| **Ask Kev about today ›** | *M8 (Package 4, D16):* one quiet, static line under Today's header, shown only with Kev on; it opens Kev's screen with today as the focus. Today never waits for Kev and never changes because of it. |
 | Swipe an insight | Dismiss (with "Not useful" as a secondary option). Gone for the day; doesn't come back. |
 | Tap `?` in Getting everyone there | Choose who's doing it directly (a person picker) — no Kev needed. |
 | Tap a person | Their profile sheet: age, regular week, things to know, coming up. |

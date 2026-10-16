@@ -59,8 +59,19 @@ describe('S13: Kev is server-only', () => {
     for (const f of files) expect(readFileSync(f, 'utf8'), f).toMatch(/^import 'server-only';$/m);
   });
 
-  it('nothing under src/app or src/ui imports src/kev yet (no route or screen until Packages 3–4)', () => {
-    const files = [...walk('src/app'), ...walk('src/ui')].filter((f) => /\.(ts|tsx)$/.test(f));
-    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(/@\/kev(\/|['"])/);
+  it('no client component and nothing in src/ui imports src/kev (Package 4: only server code does)', () => {
+    const ui = walk('src/ui').filter((f) => /\.(ts|tsx)$/.test(f));
+    for (const f of ui) expect(readFileSync(f, 'utf8'), f).not.toMatch(/@\/kev(\/|['"])/);
+    const client = walk('src/app')
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .filter((f) => /^['"]use client['"];?$/m.test(readFileSync(f, 'utf8')));
+    expect(client.length).toBeGreaterThan(0);
+    for (const f of client) expect(readFileSync(f, 'utf8'), f).not.toMatch(/@\/kev(\/|['"])/);
+    // The app's importers of src/kev are server code: the turn route, server
+    // actions and server components.
+    const importers = walk('src/app')
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .filter((f) => /@\/kev(\/|['"])/.test(readFileSync(f, 'utf8')));
+    expect(importers.length).toBeGreaterThan(0);
   });
 });

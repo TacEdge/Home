@@ -1,5 +1,6 @@
 import { requestNow } from '@/app/_agenda/now';
 import { RefreshOnUse } from '@/app/_calendar/refresh-on-use';
+import { kevSwitchedOn } from '@/app/_kev/status';
 import { RefreshWeather } from '@/app/_weather/refresh-weather';
 import { env } from '@/lib/env';
 import { requireActor } from '@/trust/session';
@@ -23,7 +24,7 @@ export default async function TodayPage() {
     <>
       {calendarStale ? <RefreshOnUse /> : null}
       {askWeather ? <RefreshWeather /> : null}
-      <TodayView {...props} />
+      <TodayView {...props} askKev={kevSwitchedOn()} />
     </>
   );
 }

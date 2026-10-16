@@ -198,6 +198,7 @@ Proposals created from a capture carry its id; approving the last of them marks 
 - **"Anything I need to know today?"** → `get_insights(today)` + `get_agenda(today)` → the one or two things that matter, briefly; "Nothing that needs you" is a valid answer.
 - **"What does our weekend look like?"** → `get_agenda` + `get_conflicts` + `get_weather` → short narrative.
 - **"Find us a night out."** → `find_free_windows` for both adults, evenings, next 3 weeks → 2–3 options.
+- *Superseded for M8 (contract §8.6, ADR 0012 §7, D8; annotated in Package 4, 2026-10-16):* "recommend one window" and "Find us a night out" for both adults. Kev lays out the stretches where nothing is recorded (`get_gaps`) with their facts and, at most, a typed **Kev's view**; it never recommends a window, says anyone is free or chooses for the family. M8 has no `propose_*` tool (M9).
 - **"Help me plan the exterior painting."** → `deep` tier → proposed tasks with estimates and weather needs → offer to schedule the first ones.
 - **Week Ahead** → `deep` tier, fixed template (Needs coordination · Potential conflicts · Family opportunities · Home · You two · Coming over the horizon · To sort), generated on request in V0.1.
 

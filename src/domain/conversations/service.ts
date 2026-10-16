@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
 import { conversation, message } from '@/db/schema';
@@ -150,7 +150,10 @@ export async function addMessage(
 export async function listMessages(
   actor: UserActor,
   conversationId: string,
-  opts: ReadOpts = {},
+  opts: ReadOpts & {
+    /** Only messages created at or after this instant (the Kev screen reads a week at a time). */
+    since?: Date;
+  } = {},
   deps: Deps = {},
 ): Promise<Message[]> {
   const db = deps.db ?? getDb();
@@ -162,6 +165,7 @@ export async function listMessages(
       and(
         own(actor, conversationId, opts.includeArchived ? 'include' : 'exclude'),
         sql`${message.createdAt} >= now() - make_interval(days => ${MESSAGE_RETENTION_DAYS})`,
+        opts.since ? gte(message.createdAt, opts.since) : undefined,
       ),
     )
     .orderBy(asc(message.createdAt), asc(message.id));

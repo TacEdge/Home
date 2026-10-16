@@ -91,6 +91,8 @@ See [KEV-AGENT-MODEL.md](./KEV-AGENT-MODEL.md). In short:
 
 *As built in M8 Package 3 (ADR 0012 §45; in review):* the allow-list gains exactly `POST /v1/messages/count_tokens` (owner decision, 2026-10-15; gate G22), under every rule above: before every model call both providers count the complete request (model, system prompt, tools, `tool_choice`, `output_config`, messages) through HOME's fetch; a count above 32,000 tokens refuses the call, and any counting failure fails closed, with no model call. Nothing else of the provider's API is reachable.
 
+*As built in M8 Package 4 (ADR 0012 §48; in review):* **the web channel adapter.** `POST /kev/turn` (`src/app/(home)/kev/turn/`, Node, `maxDuration = 90`, subject to G3) is the one caller of `kev.handle()` outside tests. It checks the same origin (as `/weather/refresh`), a body of at most 8 KiB and the session's allowlisted adult, then Kev on, before any read; it hands Kev the adult's actor `via: 'kev'`. With JavaScript it answers Server-Sent Events: `started`, HOME's fixed `working` lines and `escalated`, then one outcome event (`answer`, `declined`, `fallback`, `refused` or `error`) carrying only the stored lead and rendered blocks or HOME's error line, after the checker has passed the answer and it is stored; never a ref, a tool argument or result, a trace, a model or provider name or a provider body. Without JavaScript the same route takes the form post, runs to completion and answers 303 to `/kev`, which renders from the database. The turn runs apart from the connection and is kept alive past the response (`after()`); writes to a closed stream are ignored; cancellation is never enabled. The connection is same-origin (`connect-src 'self'`): no CSP change. The screen reads only the adult's own conversation (owner-only), and re-reads every cited record as the adult before linking it (`src/domain/citations/`).
+
 ### 2.4 Integration layer
 Adapters that bring outside information in. Each adapter:
 - is **read-only** in V0.1;
@@ -238,7 +240,7 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   ├── (home)/forward/
 │   │   ├── (home)/projects/
 │   │   ├── (home)/people/
-│   │   ├── (home)/kev/
+│   │   ├── (home)/kev/        # Kev's screen and its turn route, POST /kev/turn: the web channel adapter (M8 Package 4)
 │   │   ├── (home)/to-sort/
 │   │   ├── settings/
 │   │   └── api/               # Route handlers: Kev stream, approvals, capture
@@ -246,6 +248,7 @@ A single package. No monorepo tooling until there is a second deployable.
 │   ├── domain/                # Family Knowledge layer
 │   │   ├── agenda/            # loadAgenda + the Today input builder (moved from src/app/_agenda, M8 Package 2)
 │   │   ├── search/            # searchTitles: titles only, for Kev's search (M8 Package 2, ADR 0012 §19)
+│   │   ├── citations/         # listCitedRecords: a Kev answer's refs re-read as the reader, for the screen's rows (M8 Package 4)
 │   │   ├── people/
 │   │   ├── events/
 │   │   ├── calendars/
@@ -265,7 +268,7 @@ A single package. No monorepo tooling until there is a second deployable.
 │   │   ├── prompts/           # System prompt, persona, Week Ahead template (system.ts, provisional: M8 Package 3)
 │   │   ├── context/           # Context assembly (assemble.ts: the stable prefix's tools, the volatile bundle; M8 Package 2)
 │   │   ├── tools/             # registry.ts + one file per read tool (Zod in and out) → domain services (M8 Package 2)
-│   │   └── evals/             # Scenario fixtures + expected behaviours (types.ts, scenarios.ts, scripted.ts: M8 Package 3)
+│   │   └── evals/             # Scenario fixtures + expected behaviours (types.ts, scenarios.ts, scripted.ts: M8 Package 3; local.ts, the scripted model for local and CI servers: Package 4)
 │   ├── integrations/
 │   │   ├── calendar/          # provider.ts (interface), ics/, (later google/, microsoft/, caldav/)
 │   │   └── weather/           # entry.ts (composition root), open-meteo.ts, fake.ts (M7)

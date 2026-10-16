@@ -20,6 +20,8 @@ vi.mock('@/lib/env', () => ({
   env: { HOME_TIMEZONE: 'Pacific/Auckland' },
   // No home location (M7): Today's openings read no forecast and no daylight.
   weatherConfig: () => ({ status: 'absent' }),
+  // Kev off (M8 §11.1): Today renders no "Ask Kev about today" line.
+  kevConfig: () => ({ status: 'off' }),
 }));
 vi.mock('@/trust/session', () => ({
   requireActor: async () => ({

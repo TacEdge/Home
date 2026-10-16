@@ -286,8 +286,16 @@ describe('the map is complete and real', () => {
   });
   it('every browser spec is reached by some rule, or is the smoke suite or a full-regression sweep', () => {
     const named = new Set([SMOKE, ...RULES.flatMap((r) => r.specs ?? [])]);
-    // Sweeps and cross-cutting specs run in full regression (high and critical changes).
-    const fullOnly = ['csp', 'm3-device-sweep', 'm3-privacy-sweep', 'shell', 'sign-in'];
+    // Sweeps and cross-cutting specs run in full regression (high and critical
+    // changes); Kev's screenshots run only on request (KEV_SHOTS=1).
+    const fullOnly = [
+      'csp',
+      'kev-screenshots',
+      'm3-device-sweep',
+      'm3-privacy-sweep',
+      'shell',
+      'sign-in',
+    ];
     for (const s of specs) expect(named.has(s) || fullOnly.includes(s), s).toBe(true);
   });
   it('the summary names the tier, the mode and every path', () => {

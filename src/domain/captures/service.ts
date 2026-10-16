@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, count, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import type { DbOrTx } from '@/db/create';
 import { capture, conversation, message, proposal } from '@/db/schema';
@@ -13,6 +13,7 @@ import type { UserActor } from '@/trust/actor';
 import { NotFoundError, NotPermittedError } from '../common/errors';
 import { assertCanWrite } from '../common/guards';
 import { MESSAGE_RETENTION_DAYS } from '../kev-bookkeeping/constants';
+import { recordId as recordIdSchema } from '../common/inputs';
 import { records } from '../common/records';
 import { auditedWrite, type Deps, type DomainAudit } from '../common/write';
 import { captureInput, captureText, type CaptureInput } from './schema';
@@ -92,6 +93,23 @@ export async function captureVerbatim(
   return auditedWrite(actor, deps, async (tx) => {
     let text = data.text;
     if (data.messageId) {
+      // One capture per person per message (M8 Package 4, "Keep in To sort"):
+      // the message's own lock key serialises two keeps of it (a double tap,
+      // two devices), and a second keep returns the first capture, unchanged
+      // and unaudited, rather than a copy.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`home:capture_message:${data.messageId}`}, 0))`,
+      );
+      const [kept] = await tx
+        .select()
+        .from(capture)
+        .where(and(eq(capture.messageId, data.messageId), eq(capture.createdBy, actor.userId)))
+        .orderBy(capture.createdAt, capture.id)
+        .limit(1);
+      if (kept) {
+        await ownMessage(tx, actor, data.messageId);
+        return { result: kept, audit: null };
+      }
       const m = await ownMessage(tx, actor, data.messageId);
       if (kev) {
         // Only the person's own words: a user message, copied exactly.
@@ -122,6 +140,26 @@ export async function getCapture(
   deps: Deps = {},
 ): Promise<Capture> {
   return R.get(deps.db ?? getDb(), actor, id, opts.includeArchived ? 'include' : 'exclude');
+}
+
+/**
+ * Which of these messages the actor has already kept (M8 Package 4, "Keep in
+ * To sort"): the ids among `messageIds` that one of the actor's own captures
+ * came from, archived or not. Only the actor's own captures are read.
+ */
+export async function listKeptMessageIds(
+  actor: UserActor,
+  messageIds: readonly string[],
+  deps: Deps = {},
+): Promise<Set<string>> {
+  const ids = [...new Set(messageIds)].filter((id) => recordIdSchema.safeParse(id).success);
+  if (ids.length === 0) return new Set();
+  const db = deps.db ?? getDb();
+  const rows = await db
+    .selectDistinct({ messageId: capture.messageId })
+    .from(capture)
+    .where(and(eq(capture.createdBy, actor.userId), inArray(capture.messageId, ids)));
+  return new Set(rows.flatMap((r) => (r.messageId ? [r.messageId] : [])));
 }
 
 /** The actor's own captures, newest first ("To sort" is `status: 'new'`). */
