@@ -43,7 +43,7 @@ export const ZERO_CAP = 'Kev is paused for this month.';
 export const ABOUT_LABEL = 'About Kev';
 export const ABOUT = [
   'When you ask Kev something, HOME sends Anthropic, its AI provider, only what your question calls for: your words, your last few exchanges with Kev, and the records Kev reads to answer, as you can see them. Never sensitive notes, the other adult’s private records, your home’s location, dates of birth or contact details.',
-  'Kev’s answers are worked out by Anthropic in the United States, so what HOME sends leaves New Zealand whenever Kev runs. Anthropic doesn’t train on it. How long Anthropic keeps it is set by HOME’s agreement with them, which the household records before Kev is used with family records.',
+  'Kev’s answers are produced by Anthropic in the United States, so what HOME sends leaves New Zealand whenever Kev runs. Anthropic doesn’t train on it. How long Anthropic keeps it is set by HOME’s agreement with them, which the household records before Kev is used with family records.',
   'In HOME, each message in your conversation is kept for 90 days and then deleted. Only you can see your conversation.',
   'Clearing your conversation deletes your words and Kev’s answers at once. It keeps the usage records and the activity log (neither holds any words), anything you kept in To sort, and any copies Anthropic holds under its own terms.',
 ] as const;

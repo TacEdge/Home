@@ -42,6 +42,9 @@ const STATIC_ROUTES = [
   '/settings/archived',
   '/settings/activity',
   '/settings/export',
+  // M8 Package 4 (U13): Kev's screen and Settings › Usage, swept like every place.
+  '/kev',
+  '/settings/usage',
 ];
 
 /** Records one adult may see by the visibility rule: household, or their own private. */
