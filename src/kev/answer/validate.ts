@@ -52,10 +52,11 @@ import {
 //     blocks support its phrase (`view.unsupported`); never with no blocks;
 //  6. no sensitive string in a rendered fact (defence in depth; Kev never
 //     reads sensitive context, D7).
-// What passes is returned rendered. A plan whose only failures are its lead
-// or view, and which shows at least one fact, also carries the salvage: the
-// same rendered facts with HOME's fixed lead and no view (§8.5). A plan
-// with no facts has no salvage.
+// What passes is returned rendered. A plan whose only failures are its lead,
+// its view or whole statements of absence or counts, and which keeps at
+// least one fact, also carries the salvage: the remaining facts, checked
+// again, with HOME's fixed lead and no view (§8.5; controlled salvage, ADR
+// 0012 §47). A plan with no facts left has no salvage.
 
 export type ValidatorCode = (typeof VALIDATOR_CODES)[number];
 /** Where a check failed: the lead, the view, a fact block by index, or the plan as a whole. */
@@ -91,6 +92,13 @@ export type RenderedAnswer = {
   blocks: AnswerBlock[];
   cites: Ref[];
   shown: Shown;
+  /**
+   * A salvage only: a statement of absence or a count the plan held failed
+   * its check and was removed whole (controlled salvage, ADR 0012 §47). Such
+   * a salvage still lets a fast attempt escalate; one that dropped only the
+   * lead or view does not (§8.5).
+   */
+  claimsRemoved?: true;
 };
 
 export type ValidateResult =
@@ -99,7 +107,7 @@ export type ValidateResult =
       ok: false;
       plan: AnswerPlan | null;
       violations: Violation[];
-      /** The rendered facts with the fixed lead and no view, when only the lead or view failed and facts exist. */
+      /** The facts that passed, checked again with the fixed lead and no view (`salvage` below), or null. */
       salvage: RenderedAnswer | null;
     };
 
@@ -121,7 +129,7 @@ const sortViolations = (v: Violation[]) =>
 /**
  * Checks and renders a plan (above). A decline passes (code renders it).
  * Returns the rendered answer when it passes, or every check it failed,
- * with where (and the salvage when only the lead or view failed).
+ * with where (and the salvage, `salvage` below).
  */
 export function validateAnswer(input: ValidateInput): ValidateResult {
   const plan = parsePlan(input.raw);
@@ -249,7 +257,6 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
       add('sensitive.leak', i);
   });
 
-  const factsOk = !out.some((v) => typeof v.where === 'number' || v.where === 'answer');
   const render = (say: string, withView: boolean): RenderedAnswer => {
     const blocks: AnswerBlock[] = facts.map((f) => ({
       kind: 'fact' as const,
@@ -276,13 +283,40 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
     };
   };
   if (out.length > 0)
-    return {
-      ok: false,
-      plan,
-      violations: sortViolations(out),
-      salvage: factsOk && n > 0 ? render(leadText(SALVAGE_LEAD_ID, days, today), false) : null,
-    };
+    return { ok: false, plan, violations: sortViolations(out), salvage: salvage(plan, out, input) };
   return { ok: true, plan, rendered: render(leadText(plan.lead, days, today), true) };
+}
+
+/**
+ * The salvage (§8.5; controlled salvage, owner decision of 2026-10-15, ADR
+ * 0012 §47), or null. Only the model's selections of HOME's words (its lead
+ * and view) and whole statements of absence or counts that failed their
+ * check can be dropped; a failed record block (an unknown ref, a record
+ * that cannot be rendered, a field it does not carry, a sensitive string)
+ * or a malformed plan has none. The reduced plan (the remaining blocks, in
+ * order, HOME's fixed lead and no view: a view never survives, since its
+ * support may have rested on a removed block) is checked again in full,
+ * and only a plan that passes, with at least one fact block, is shown. A
+ * failed "nothing else" or count is removed, never reworded: a partial read
+ * never becomes a complete absence.
+ */
+function salvage(
+  plan: PlanOf,
+  out: readonly Violation[],
+  input: ValidateInput,
+): RenderedAnswer | null {
+  if (out.some((v) => v.where === 'answer')) return null;
+  const failed = new Set<number>();
+  for (const v of out) {
+    if (typeof v.where !== 'number') continue;
+    if (!isSummary(plan.facts[v.where]!)) return null;
+    failed.add(v.where);
+  }
+  const facts = plan.facts.filter((_, i) => !failed.has(i));
+  if (facts.length === 0) return null;
+  const reduced = check({ lead: SALVAGE_LEAD_ID, facts, view: null }, input);
+  if (!reduced.ok || !reduced.rendered) return null;
+  return failed.size > 0 ? { ...reduced.rendered, claimsRemoved: true } : reduced.rendered;
 }
 
 /** Refs in order, each once. */

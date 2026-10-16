@@ -402,9 +402,13 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     // model's `escalate`, or two failed answers on fast), never on a budget
     // refusal (that is the fallback), and only with the time and the counted
     // month's room for it, read again now the fast attempt has settled.
-    // A plan that failed only in its words shows its facts: never an escalation (§8.5, amended).
+    // A plan that failed only in its words shows its facts: never an
+    // escalation (§8.5, amended). One that also held a failed statement of
+    // absence or count still escalates; its salvage (the claim removed) is
+    // shown only when the attempt that ends the turn produced it (ADR 0012 §47).
     if (
-      (end.kind === 'escalate' || (end.kind === 'invalid' && !end.salvage)) &&
+      (end.kind === 'escalate' ||
+        (end.kind === 'invalid' && (!end.salvage || end.salvage.claimsRemoved))) &&
       turn.tier === 'fast'
     ) {
       const remainingMs = deadline - Date.now();

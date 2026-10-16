@@ -929,6 +929,58 @@ describe('escalation (N11, C15)', () => {
     expect(u.provider.requests.every((r) => r.tier === 'fast')).toBe(true);
   });
 
+  it('controlled salvage (ADR 0012 §47): a failed statement of absence is removed whole and the checked facts shown; fast still escalates first', async () => {
+    // "Nothing is recorded for today." beside today's swimming: contradicted.
+    const contradicted = answer(
+      'when',
+      [swim, { absence: { from: '2026-10-14', to: '2026-10-14' } }],
+      {
+        type: 'follow_up',
+        phrase: 'ask_more',
+        about: [0, 1],
+      },
+    );
+    // No time to escalate: the salvage, never the fallback.
+    const t = await turn(f.kev.sam, 'What’s happening today?', [contradicted, contradicted], {
+      deps: { turnDeadlineMs: 25_000 },
+    });
+    expect(t.done).toMatchObject({ outcome: 'answer', escalated: false });
+    expect(t.events.find((e) => e.type === 'say')).toEqual({ type: 'say', text: SALVAGE_LEAD });
+    const detail = t.events.find((e) => e.type === 'detail') as {
+      blocks: { kind: string; cites: Ref[] }[];
+    };
+    expect(detail.blocks.map((b) => [b.kind, b.cites])).toEqual([['fact', [swim]]]);
+    expect(JSON.stringify(t.events)).not.toContain('Nothing is recorded');
+    expect(JSON.stringify(t.events)).not.toContain('Ask me about');
+    const content = (await kevRows(f.kev.sam)).at(-1)!.content as Record<string, unknown>;
+    expect(content).toMatchObject({
+      outcome: 'answer',
+      salvaged: true,
+      // The view rested on the removed absence: it goes too.
+      violations: ['absence.unsupported', 'view.unsupported'],
+    });
+    expect(kevContentV2.safeParse(content).success).toBe(true);
+    await clockForward(admin, 2);
+    // Time to escalate: deep is asked first; its own salvage ends the turn.
+    const u = await turn(f.kev.sam, 'What’s happening today?', [
+      contradicted,
+      contradicted,
+      contradicted,
+      contradicted,
+    ]);
+    expect(u.provider.requests.map((r) => r.tier)).toEqual(['fast', 'fast', 'deep', 'deep']);
+    expect(u.done).toMatchObject({ outcome: 'answer', escalated: true });
+    expect((await kevRows(f.kev.sam)).at(-1)!.content).toMatchObject({ salvaged: true });
+    await clockForward(admin, 2);
+    // Nothing safe left (the absence was the whole answer): the safe fallback.
+    const alone = answer('when', [{ absence: { from: '2026-10-14', to: '2026-10-14' } }]);
+    const v = await turn(f.kev.sam, 'What’s happening today?', [alone, alone], {
+      deps: { turnDeadlineMs: 25_000 },
+    });
+    expect(v.done).toMatchObject({ outcome: 'fallback' });
+    expect((await kevRows(f.kev.sam)).at(-1)!.content).not.toHaveProperty('salvaged');
+  });
+
   it('escalation happens once: deep never offers or honours escalate', async () => {
     const t = await turn(f.kev.sam, 'Plan it.', [
       tools(['escalate', { reason: 'long_range' }]),

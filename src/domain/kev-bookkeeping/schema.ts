@@ -301,7 +301,11 @@ export const kevContentV2 = z
     blocks: z.array(answerBlockSchema).max(11),
     /** The validated plan the blocks were rendered from (an answer only). */
     plan: storedPlanSchema.optional(),
-    /** The plan's lead or view failed the check; its validated facts are shown with HOME's lead (§8.5). */
+    /**
+     * The plan's lead or view, or a whole statement of absence or count in
+     * it, failed the check; its other validated facts are shown with HOME's
+     * lead (§8.5; controlled salvage, ADR 0012 §47).
+     */
     salvaged: z.literal(true).optional(),
     /**
      * The fetch time of the forecast the answer shows, as it was when the

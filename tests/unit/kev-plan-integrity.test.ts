@@ -15,9 +15,13 @@ import { getWeather } from '@/kev/tools/get-weather';
 import type { Ref } from '@/kev/tools/types';
 import { search } from '@/kev/tools/search';
 import {
+  board,
   bundle,
   bundleRefs,
   busyLedger,
+  conflict,
+  interviews,
+  kapaHaka,
   dentistToday,
   foot,
   gap,
@@ -678,5 +682,82 @@ describe('the reviewers’ smallest tests for mutations M8 and M9', () => {
     expect(outcome(check(plan('when', [rec(sun), rec(sat)]), l)).forecastAt).toBe(
       '2026-10-14T05:00:00+13:00',
     );
+  });
+});
+
+describe('C-I2: controlled salvage (Part 9)', () => {
+  const plumber: Ref = { type: 'task', id: '00000000-0000-4000-8000-000000000024' };
+  const l = () => busyLedger([more.alexTasks]);
+  const thursdayElse = absence({ from: THU, to: THU, else: true });
+  const ask = 'What’s on Thursday?';
+  const THURSDAY = [
+    '“Kapa haka”: tomorrow, 16:00–17:00. Milo attending.',
+    '“Board meeting”: tomorrow, 17:30–19:30. Sam attending.',
+    '“Parent interviews”: tomorrow, 18:00–18:30. Sam attending.',
+  ];
+
+  it('Thursday’s "nothing else" that forgets the plumber task: the records survive, the absence goes whole', () => {
+    const r = check(
+      plan('when', [rec(kapaHaka), rec(board), rec(interviews), thursdayElse], {
+        type: 'follow_up',
+        phrase: 'who_goes_where',
+        about: [1, 2],
+      }),
+      l(),
+      ask,
+    );
+    expect(codes(r)).toEqual(['absence.unsupported']);
+    expect(outcome(r)).toEqual({
+      texts: ['Here’s what HOME has.', ...THURSDAY],
+      limits: [],
+      forecastAt: null,
+    });
+    // The view is dropped though its own blocks survived; the qualifications follow the reduced plan.
+    expect(outcome(r, stale).limits).toEqual(['calendar_stale']);
+    expect(r.ok ? null : r.salvage?.claimsRemoved).toBe(true);
+    // With the plumber shown, the same plan passes whole.
+    expect(
+      codes(
+        check(
+          plan('when', [rec(kapaHaka), rec(board), rec(interviews), rec(plumber), thursdayElse]),
+          l(),
+          ask,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('a count that fails is removed, never reworded; a valid absence beside it stays', () => {
+    const overlaps = absence({ of: 'conflicts', from: '2026-10-19', to: '2026-10-25' });
+    // Next week's agenda read was cut short: no count can be made over it.
+    const nextWeek = { ...absence({ from: '2026-10-19', to: '2026-10-25' }), kind: 'count' };
+    const r2 = check(plan('here_you_go', [rec(conflict), overlaps, nextWeek]), l(), ask);
+    expect(codes(r2)).toEqual(['absence.unsupported']);
+    expect(outcome(r2).texts).toEqual([
+      'Here’s what HOME has.',
+      expect.stringContaining('Board meeting'),
+      'HOME hasn’t marked any overlaps for next week.',
+    ]);
+    expect(JSON.stringify(r2)).not.toContain('events are recorded');
+  });
+
+  it('no facts left once the claim is removed: no salvage (the safe fallback)', () => {
+    const r = check(plan('here_you_go', [thursdayElse]), l(), ask);
+    expect(codes(r)).toEqual(['absence.unsupported']);
+    expect(r.ok ? 'ok' : r.salvage).toBeNull();
+  });
+
+  it('a failed record beside the failed claim: no salvage at all', () => {
+    const unread: Ref = { type: 'event', id: 'not-returned' };
+    const r = check(plan('when', [rec(kapaHaka), rec(unread), thursdayElse]), l(), ask);
+    expect(codes(r)).toEqual(['cite.unknown', 'absence.unsupported']);
+    expect(r.ok ? 'ok' : r.salvage).toBeNull();
+  });
+
+  it('a lead or view failure alone keeps its facts, as before, and is not a removed claim', () => {
+    const r = check(plan('ka_pai', [rec(kapaHaka), rec(board)]), l(), ask);
+    expect(codes(r)).toEqual(['lead.unsupported']);
+    expect(outcome(r).texts).toEqual(['Here’s what HOME has.', THURSDAY[0], THURSDAY[1]]);
+    expect(r.ok ? null : r.salvage?.claimsRemoved).toBeUndefined();
   });
 });
