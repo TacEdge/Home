@@ -1,6 +1,19 @@
 # M8 — Controlled live verification plan (synthetic data only)
 
-*Prepared 2026-10-16, main @ eebb639 (Packages 0–4 merged). A plan for the owner's approval: nothing in it has been run, no account, workspace, key or credential exists, and no gate below is marked PASS that was not already PASS. Authoritative: the M8 contract (`M8-BUILD-CONTRACT.md` §5.7 gate register, §12.4, §13.6, §14) and DEPLOY.md §E items 23–31. Where this plan and those differ, they win.*
+*Prepared 2026-10-16, main @ eebb639 (Packages 0–4 merged); approved by the owner the same day, with the decisions below. A plan: nothing in it has been run, no account, workspace, key or credential exists, and no gate below is marked PASS that was not already PASS. Authoritative: the M8 contract (`M8-BUILD-CONTRACT.md` §5.7 gate register, §12.4, §13.6, §14) and DEPLOY.md §E items 23–31. Where this plan and those differ, they win.*
+
+## Owner decisions (2026-10-16)
+
+Recorded as given; none authorises a live call.
+
+1. **The plan is approved** (this document).
+2. **A dedicated live verification runner may be built**, without executing any paid model call. It uses HOME's approved gateway: G1 through the approved Models API path; G8 and the Haiku 5.5 checks through the controlled provider path where supported; no direct provider call where a gateway operation exists; no unrestricted network exception; no provider credential in source control; no model call during implementation; no automatic execution after deployment; every live run needs the owner's explicit approval; G22's preflight count is kept.
+3. **A separate throwaway database** for the runner is approved, holding only synthetic fixtures, budget reservations and usage records (the reading of stage B's "no HOME database" in §5). No real family record and no Production database.
+4. **A US$10 maximum first-session allocation is approved, but not its execution.** It is enforced by the runner and kept separate from the household's NZ$100 cap; the Package 5 campaign's US$200 stays separate from household usage.
+5. **G16 may be tested against home-dev's pooled connection, after isolation checks.**
+6. **Isolation is not marked verified without evidence:** home-dev holding synthetic data only, Preview not using a Production clone, the runner's database isolated, and no connection string targeting Production. If these cannot be verified, the runner is not enabled.
+
+G3, G4, G17 and G18 stay with their infrastructure steps (§8). No gate is marked PASS until it has run.
 
 ## 1. Readiness in one paragraph
 
