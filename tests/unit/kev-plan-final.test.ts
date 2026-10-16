@@ -651,20 +651,21 @@ describe('Rendering 4 and 5: search and the forecast', () => {
 describe('leads: HOME’s catalogue, by question class (owner decision 6)', () => {
   const l = () => busyLedger([more.insights]);
   it.each([
-    ['Is football cancelled?', true, false],
-    ['Did Alex book the plumber?', true, false],
-    ['Any clashes Thursday?', true, true],
-    ['Am I free Saturday afternoon?', true, true],
-    ['Football Saturday?', true, false],
-    ['We’re doing the fence on Saturday, right?', true, false],
-    ['When’s football?', false, false],
-    ['What’s on this weekend?', false, false],
-    ['Who’s on that?', false, false],
-  ] as const)('%s → yes-or-no %s, availability %s', (q, yesNo, availability) => {
+    ['Is football cancelled?', false, false],
+    ['Did Alex book the plumber?', false, false],
+    ['Any clashes Thursday?', false, false],
+    ['Am I free Saturday afternoon?', false, false],
+    ['Football Saturday?', false, false],
+    ['We’re doing the fence on Saturday, right?', false, false],
+    ['Thanks', false, true],
+    ['When’s football?', true, false],
+    ['What’s on this weekend?', true, false],
+    ['Who’s on that?', true, false],
+  ] as const)('%s → informational %s, social %s', (q, informational, social) => {
     const m = classifyMessage(q);
-    expect(m.yesNo).toBe(yesNo);
-    expect(m.availability).toBe(availability);
-    expect(m.question).toBe(true);
+    expect(m.informational).toBe(informational);
+    expect(m.social).toBe(social);
+    expect(m.known).toBe(true);
   });
 
   it('"No worries." beside a record for "When’s football?"; refused for "Any clashes Thursday?" and with no facts', () => {

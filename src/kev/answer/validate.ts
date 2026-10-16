@@ -44,9 +44,10 @@ import {
 //  4. the lead is allowed here (`lead.unsupported`): a fact lead beside at
 //     least one block (`{when}` only beside a dated one, "here it is" beside
 //     exactly one record, "No worries." beside a record, "flagged" beside an
-//     overlap or insight HOME flagged), no affirming lead for a yes-or-no,
-//     availability or unreadable message; a response with no blocks is a
-//     social lead to a message that asks nothing, or HOME's "not sure";
+//     overlap or insight HOME flagged), an affirming lead only for a message
+//     HOME clearly recognises as informational (deny by default); a response
+//     with no blocks is a social lead to a message made only of greetings,
+//     thanks, farewells and courtesies, or HOME's "not sure";
 //  5. Kev's view refers to blocks that exist (`view.about`) and those
 //     blocks support its phrase (`view.unsupported`); never with no blocks;
 //  6. no sensitive string in a rendered fact (defence in depth; Kev never
@@ -191,7 +192,7 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
   const records = plan.facts.filter((b) => !isSummary(b));
   const n = plan.facts.length;
   const leadOk = (() => {
-    if (lead.kind === 'social') return n === 0 && !plan.view && message.known && !message.question;
+    if (lead.kind === 'social') return n === 0 && !plan.view && message.social;
     if (lead.kind === 'uncertain') return n === 0 && !plan.view;
     if (n === 0) return false;
     if (lead.when && days.length === 0) return false;
@@ -199,7 +200,7 @@ function check(plan: PlanOf, input: ValidateInput): ValidateResult {
     if (lead.record && records.length === 0) return false;
     if (lead.flagged && !records.some((b) => b.kind === 'conflict' || b.kind === 'insight'))
       return false;
-    if (lead.affirming && (!message.known || message.yesNo || message.availability)) return false;
+    if (lead.affirming && !message.informational) return false;
     return true;
   })();
   if (!leadOk) add('lead.unsupported', 'lead');

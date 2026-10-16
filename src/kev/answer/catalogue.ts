@@ -73,9 +73,9 @@ type LeadSpec = {
   /** "flagged": needs an overlap or an insight HOME flagged. */
   flagged?: true;
   /**
-   * Could read as "yes" (or, for "No worries.", as "no"): never to a
-   * yes-or-no question, an availability or overlap question, or a message
-   * HOME cannot classify. A block shown is never a yes or no.
+   * Could read as "yes" (or, for "No worries.", as "no"): only for a message
+   * HOME clearly recognises as informational (`classifyMessage`), never for
+   * anything else. A block shown is never a yes or no.
    */
   affirming?: true;
 };
@@ -104,74 +104,184 @@ export const SALVAGE_LEAD_ID: LeadId = 'home_has';
 
 // ---------------------------------------------------------------------------
 // The adult's message: a code-side classifier used only to restrict leads.
+//
+// Deny by default (owner decisions of 2026-10-15, ADR 0012 §47): an
+// affirming lead is allowed only for a message HOME clearly recognises as
+// informational, and a social lead only for a message made of nothing but
+// greetings, thanks, farewells and courtesies. Everything else (a yes-or-no
+// question, availability, overlaps, a status check, a condition, an action
+// request, a fragment HOME cannot place) gets neither: a neutral lead and
+// the facts. Misreading a message costs a lead, never a fact.
 
 export type MessageShape = {
   /** HOME could read the message at all (a test may give none). */
   known: boolean;
-  /** It asks something, or asks for something: never answered with a social lead alone. */
-  question: boolean;
-  /** It can be answered yes or no (or reads that way): no affirming lead. */
-  yesNo: boolean;
-  /** It is about who is free, busy, around or away, or about overlaps: no affirming lead. */
-  availability: boolean;
+  /**
+   * Only greeting, thanks, farewell or courtesy words (with emoji and
+   * punctuation, but no question mark): the one message a social lead may
+   * answer, with no facts.
+   */
+  social: boolean;
+  /**
+   * Clearly informational: every clause a positive question-word question
+   * ("What's on this weekend?", "When is swimming?", "Who is attending?")
+   * or a read request ("Show my tasks.", "List tomorrow's commitments."),
+   * with no yes-or-no form, availability, overlap or status word, no "if"
+   * or "whether", and no action verb. Only then may an affirming lead be used.
+   */
+  informational: boolean;
 };
 
 const words = (s: string) => new Set(s.split(/\s+/).filter(Boolean));
-/** Openers and courtesies skipped at the start of a clause. */
-const OPENERS = words(`kev hey hi hello kia ora morena morning ok okay so and but also then um uh
-  oh ah right well hmm please just quick thanks thank you cheers ta sweet great nice actually now`);
-/** A clause starting with one of these can be answered yes or no. */
-const AUX =
-  words(`is isnt are arent am was wasnt were werent do dont does doesnt did didnt has hasnt
-  have havent had hadnt can cant could couldnt will wont would wouldnt should shouldnt shall may
-  might must any anything anyone anybody someone something got is there are there`);
-const WH = words(`what whats when whens where wheres who whos whose whom which why how hows`);
-/** Asking for something, in other words. */
-const REQUEST = words(`show tell list find check look give search remind book add help explain
-  walk run let lets`);
-const AVAILABILITY_WORDS = words(`free available availability unavailable busy around away clash
-  clashes clashing overlap overlaps overlapping conflict conflicts conflicting double clear spare
-  open booked make home`);
+/** Courtesies skipped at the start of a clause ("Thanks Kev, what's on?"). */
+const OPENERS = words(`kev hey hi hello kia ora morena morning ok okay so um uh oh ah hmm please
+  just quick thanks thank you cheers ta now actually`);
+/** Question words that open a positive informational question ("why" presumes, so it is left out). */
+const WH = words(`what whats when whens where wheres who whos whose whom which how hows`);
+/** Read requests: the verbs that ask HOME to show what it has. */
+const READ = words(`show list find check look search tell give`);
+/** After "tell" or "give", only the adult themselves: "tell Alex …" is a message to send. */
+const TO_READER = words(`me us`);
+/** Words that make a message about who is free, busy or around, or about overlaps (English and te reo). */
+const AVAILABILITY = words(`free available availability unavailable busy around away clash clashes
+  clashing overlap overlaps overlapping conflict conflicts conflicting double clear spare open
+  booked home watea`);
+const AVAILABILITY_PHRASES = /\b(?:make it|same time|at once|anything on|nothing on)\b/;
+/** A state to confirm: a question about it can be answered yes or no. */
+const STATUS = words(`still yet sorted cancelled canceled confirmed`);
+/** A condition: "if", "whether". */
+const CONDITION = words(`if whether`);
+/** Asking Kev to do something (an action HOME declines), anywhere in the message. */
+const ACTION = words(`book add cancel pay text move swap delete remove remind send schedule
+  reschedule change email message ring call arrange organise organize save remember invite buy
+  order update edit`);
 
 /**
- * The shape of the adult's message (owner decision 6), conservatively:
- * anything with a question mark, a clause opening with a question word or
- * an auxiliary ("Is…", "Any…", "Did…"), or a request verb is a question; a
- * question mark without a question word, or a clause opening with an
- * auxiliary, is yes-or-no-shaped; any availability or overlap word makes it
- * an availability question. It only ever withholds leads.
+ * Social words and phrases, each as its words (longest first when matched):
+ * a message is social only when these cover every word of it.
  */
-export function classifyMessage(text: string | undefined): MessageShape {
-  if (text === undefined || text.trim() === '')
-    return { known: false, question: true, yesNo: true, availability: true };
-  const norm = text
+const SOCIAL = [
+  'thank you very much',
+  'thank you so much',
+  'thanks for that',
+  'thank you for that',
+  'much appreciated',
+  'appreciate it',
+  'see you later',
+  'catch you later',
+  'thats great',
+  'thats awesome',
+  'thats good',
+  'thats perfect',
+  'thats lovely',
+  'thats helpful',
+  'very helpful',
+  'thank you',
+  'thanks heaps',
+  'thanks mate',
+  'kia ora',
+  'ka kite',
+  'ka kite ano',
+  'nga mihi',
+  'tena koe',
+  'see ya',
+  'see you',
+  'nice one',
+  'sweet as',
+  'good morning',
+  'good night',
+  'all good',
+  'no worries',
+  'thanks',
+  'thank',
+  'thx',
+  'ta',
+  'cheers',
+  'mate',
+  'kev',
+  'morena',
+  'bye',
+  'goodbye',
+  'ok',
+  'okay',
+  'hi',
+  'hello',
+  'hey',
+  'heaps',
+  'great',
+  'awesome',
+  'perfect',
+  'lovely',
+  'brilliant',
+  'helpful',
+  'legend',
+  'cool',
+  'sweet',
+  'good',
+  'night',
+  'later',
+].map((p) => p.split(' '));
+
+/** The message lower-cased, apostrophes dropped and macrons folded ("wātea" → "watea"). */
+function normalise(text: string): string {
+  return text
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[‘’ʼ`']/g, '')
-    .replace(/[ā]/g, 'a')
-    .replace(/[ē]/g, 'e')
-    .replace(/[ī]/g, 'i')
-    .replace(/[ō]/g, 'o')
-    .replace(/[ū]/g, 'u');
+    .normalize('NFD')
+    .replace(/̄/g, '')
+    .normalize('NFC');
+}
+
+/** Whether these words are covered, in order, by the social phrases alone. */
+function allSocial(ws: readonly string[]): boolean {
+  let i = 0;
+  while (i < ws.length) {
+    const at = i;
+    const match = SOCIAL.filter((p) => p.every((w, k) => ws[at + k] === w)).sort(
+      (a, b) => b.length - a.length,
+    )[0];
+    if (!match) return false;
+    i += match.length;
+  }
+  return true;
+}
+
+/**
+ * The shape of the adult's message (above). Pure; it only ever withholds
+ * leads, never answers.
+ */
+export function classifyMessage(text: string | undefined): MessageShape {
+  if (text === undefined || text.trim() === '')
+    return { known: false, social: false, informational: false };
+  const norm = normalise(text);
+  const all = norm.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const pictographs = /\p{Extended_Pictographic}/u.test(norm);
+  const mark = norm.includes('?');
+  const social =
+    !mark &&
+    (all.length > 0 || pictographs) &&
+    all.every((w) => /^[a-z]+$/.test(w)) &&
+    allSocial(all);
+
   const clauses = norm
     .split(/[,.;:!?\n–—-]+|\b(?:and|so|but|or|then)\b/)
-    .map((c) => (c.match(/[a-z0-9]+/g) ?? []).filter(Boolean))
+    .map((c) => c.match(/[\p{L}\p{N}]+/gu) ?? [])
     .map((ws) => {
       let i = 0;
       while (i < ws.length && OPENERS.has(ws[i]!)) i++;
       return ws.slice(i);
     })
     .filter((ws) => ws.length > 0);
-  const all = norm.match(/[a-z0-9]+/g) ?? [];
-  const mark = norm.includes('?');
-  const auxClause = clauses.some((ws) => AUX.has(ws[0]!));
-  const whWord = all.some((w) => WH.has(w));
-  const question = mark || auxClause || whWord || all.some((w) => REQUEST.has(w));
-  const yesNo = auxClause || (mark && !whWord);
-  const availability =
-    all.some((w) => AVAILABILITY_WORDS.has(w)) ||
-    /\b(?:make it|same time|at once|anything on|nothing on)\b/.test(norm);
-  return { known: true, question, yesNo, availability };
+  const opensInformational = (ws: readonly string[]) =>
+    WH.has(ws[0]!) ||
+    (READ.has(ws[0]!) && (!/^(?:tell|give)$/.test(ws[0]!) || TO_READER.has(ws[1] ?? '')));
+  const informational =
+    clauses.length > 0 &&
+    clauses.every(opensInformational) &&
+    !all.some((w) => AVAILABILITY.has(w) || STATUS.has(w) || CONDITION.has(w) || ACTION.has(w)) &&
+    !AVAILABILITY_PHRASES.test(norm);
+  return { known: true, social, informational };
 }
 
 // ---------------------------------------------------------------------------
