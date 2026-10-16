@@ -228,12 +228,14 @@ test.describe('citations re-read as the reader', () => {
     const today = (
       await q(`select to_char(now() at time zone 'Pacific/Auckland', 'YYYY-MM-DD') as today`)
     )[0]!.today!;
-    const id = (await q(
-      `insert into event (title, kind, created_by, created_via, visibility, all_day, start_date, end_date)
+    const id = (
+      await q(
+        `insert into event (title, kind, created_by, created_via, visibility, all_day, start_date, end_date)
        values ('p4 library books', 'other', 'fixture-sam', 'ui', 'household', true, $1::date, $1::date + 1)
        returning id`,
-      [today],
-    ))[0]!.id!;
+        [today],
+      )
+    )[0]!.id!;
     try {
       const { context, page } = await fixtureAdultContext(browser, 'sam', PHONE);
       await page.goto('/kev');
