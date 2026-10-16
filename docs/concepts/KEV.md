@@ -4,6 +4,8 @@
 
 Underneath, every exchange is one or more of **ask · tell · capture · recommend · propose · approve**. On the surface there is only a conversation, and a card when Kev wants to change something.
 
+*M8 (built in Package 4, 2026-10-16; contract §11, ADR 0012 §32, §33, §48; screenshots for the owner's approval):* M8's Kev only reads and answers. It is a full page, `/kev`, opened from an **Ask Kev** button (Kev's spark) at the end of the bar row on every place, and from Today's one line "Ask Kev about today ›"; the bar keeps "Tell HOME something…" until M9 (D16). The page has the privacy line "Only you can see this conversation.", the conversation by day, answers as a lead in Kev's type, then the facts HOME rendered, then **Kev's view** under its label, then the cited records as rows, then the code's sentences and "What's this based on?"; static suggestions on a day with no turns; Clear at the foot; Settings › Usage. No proposal cards, capture, tell, sheet, focus from an insight or desktop panel in M8 (M9 and M10). Progress streams as one quiet working line; the answer appears whole, once checked (D17), not streamed word by word.
+
 ## 1. Information hierarchy
 
 **The Kev bar** (every screen): one line — *Ask or tell Kev…*. Nothing else. No modes, no buttons besides send.
@@ -65,6 +67,8 @@ Underneath, every exchange is one or more of **ask · tell · capture · recomme
 │ └──────────────────────────────────┘ │
 ```
 
+*Superseded for M8 (contract §8.6, ADR 0012 §7, D8; annotated in Package 4):* "Saturday, 9 till 12, looks best." Kev never names a best time or says anyone is free: it lays out the stretches where nothing is recorded, the forecast and the task's recorded needs as facts, and at most a **Kev's view** such as "That stretch is at least as long as the task's estimate." The proposal card is M9's.
+
 ### TELL → capture → propose → approve
 
 ```
@@ -102,6 +106,8 @@ If you tap **Not now**, or just close the sheet, nothing is lost: "Kept in To so
 │ └──────────────────────────────────┘ │
 ```
 
+*Superseded for M8 (contract §8.6, annotated in Package 4):* "Alex finishes at 2:30 and is free until swimming at 3:30." Availability is never stated; Kev says what is recorded ("Nothing is recorded for Alex …") with the code's limit sentence. Opening Kev from an insight is M9's ("Sort it"); M8's only focus is Today's.
+
 ## 3. Tablet / desktop adaptation
 
 - **Tablet:** the same bottom-sheet behaviour as phones — half height when opened from something on screen, full height from the bar. Today is not squeezed beside a panel (ADR 0002).
@@ -112,7 +118,7 @@ If you tap **Not now**, or just close the sheet, nothing is lost: "Kept in To so
 
 | Interaction | Behaviour |
 |---|---|
-| Type or dictate, send | Kev answers, streaming. Dictation is the phone keyboard's own; HOME adds no microphone of its own in V0.1. |
+| Type or dictate, send | Kev answers, streaming. Dictation is the phone keyboard's own; HOME adds no microphone of its own in V0.1. *M8 (D17): progress streams; the answer appears whole once checked.* |
 | Tell HOME something | "✓ Kept" appears immediately (verbatim capture), then Kev's suggestion follows. |
 | **Yes / Add** | Approves the proposal; the change is made; "Added." with **Undo** for a few seconds. |
 | **Change** | The card becomes editable in place: title, where it goes, when, who, *Shared / Just me*. Then Yes. |
@@ -122,7 +128,7 @@ If you tap **Not now**, or just close the sheet, nothing is lost: "Kept in To so
 | **What's this based on?** (small link under an answer) | Shows sources and freshness: "Your calendars (updated 7:00), forecast (6:45), Back fence project." |
 | Suggestions | Tap to ask; they change with time of day, day of week and focus. |
 | Drag handle | Half → full screen → dismiss. The conversation is always there next time. |
-| Kev unavailable | "I can't think straight right now — I've kept that for later." The capture is safe in To sort. |
+| Kev unavailable | "I can't think straight right now — I've kept that for later." The capture is safe in To sort. *M8 (contract §9.9): "Kev isn't answering right now. What you asked is kept here." — the words are stored in the conversation, with Keep in To sort beside them.* |
 
 ## 5. What Kev contributes (and what code does)
 
