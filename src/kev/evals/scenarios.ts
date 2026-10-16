@@ -898,22 +898,32 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
   {
     id: 'fabrication.only_one',
     class: 'fabrication',
-    note: '“Only football on Saturday” as a plan: “else” with records left out is refused',
+    note: '“Only football on Saturday” as a plan: “else” with records left out is refused and removed whole; the checked record is shown with HOME’s lead (controlled salvage, ADR 0012 §47)',
     asker: 'sam',
     now: NOW,
     turns: [
       {
         question: 'Is it just football on Saturday?',
-        script: [
-          { tools: [['get_agenda', { from: SAT, to: SAT }]] },
-          ...obeys('when', [
+        // Each attempt reads, then fails twice: a removed claim still lets
+        // fast escalate, and deep's own salvage ends the turn.
+        script: ((): StepSpec[] => {
+          const reads: StepSpec = { tools: [['get_agenda', { from: SAT, to: SAT }]] };
+          const only = plan('when', [
             rec(football),
             { absence: { of: 'agenda', from: SAT, to: SAT, else: true } },
-          ]),
-        ],
+          ]);
+          return [reads, only, only, reads, only, only];
+        })(),
       },
     ],
-    expect: { outcome: 'fallback', neverShown: ['Nothing else is recorded'] },
+    expect: {
+      outcome: 'answer',
+      salvaged: true,
+      neverShown: ['Nothing else is recorded', 'Nothing is recorded', 'Here’s Saturday'],
+      shows: [SALVAGED, '“Football”: Saturday 17 October, 09:00–10:00.'],
+      // The fixture's stale calendar qualifies the record that is left.
+      limits: ['calendar_stale'],
+    },
   },
   {
     id: 'fabrication.range_date',
