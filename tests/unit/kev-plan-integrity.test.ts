@@ -93,6 +93,16 @@ describe('B1/B4: reassuring leads, deny by default (owner decision, Part 1)', ()
     'Saturday',
     'Why is football cancelled?',
     'Can you tell me when football is?',
+    // A question word or read verb first, but an action, condition, status,
+    // availability or unplaceable clause inside (each rule on its own).
+    'When can you book football?',
+    'Show me how to cancel swimming',
+    'Check whether football is on',
+    'Tell me if football is on',
+    'Check football’s still on',
+    'When is football confirmed?',
+    'When is Alex wātea?',
+    'What’s on Saturday, we good?',
   ];
 
   it.each(WITHHELD)('"%s": no affirming lead; the facts are kept (salvage)', (q) => {
@@ -448,6 +458,15 @@ describe('A-B2: forecast words in a gap carry their read’s time and the credit
     expect(f.texts).toContain(`${GAP} That’s after “Football”.`);
     expect(f.texts.join(' ')).not.toContain('rain likely');
     expect(f.limits).toContain('gap_limit');
+  });
+
+  it('a read whose own fetch time is over 12 hours old at `now` attributes nothing, whatever it calls itself', () => {
+    const l = ledgerOf(rainGaps(), weather('2026-10-13T12:00:00+13:00', 'older'));
+    expect(codes(check(gapPlan, l, 'What’s on Saturday?'))).toEqual([
+      'fact.field',
+      'lead.unsupported',
+      'view.unsupported',
+    ]);
   });
 
   it('a gap without its forecast shown needs no forecast read', () => {
