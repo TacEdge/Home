@@ -1,6 +1,5 @@
 import 'server-only';
 import { bandWords } from '@/domain/engines/weather';
-import type { IsoDate } from '@/lib/dates';
 import type { LedgerEntry } from './ledger';
 import type { FactBlock } from './schema';
 
