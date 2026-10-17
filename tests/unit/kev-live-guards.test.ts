@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   assertBudgetCovers,
+  assertBudgetWithinPlanCap,
   assertCapCovers,
   assertEnvironment,
   assertLedgerCovers,
@@ -237,6 +238,17 @@ describe('the campaign ledger', () => {
     planHash: 'a'.repeat(64),
     plannedMaxUsdMicros: '7277024',
     recordedUsdMicros: recorded,
+  });
+
+  it('a budget above the plan’s session cap is refused; at or below it, not', () => {
+    expect(() => assertBudgetWithinPlanCap(6_000_000n, 6_000_000n)).not.toThrow();
+    expect(() => assertBudgetWithinPlanCap(5_000_000n, 6_000_000n)).not.toThrow();
+    expect(refusal(() => assertBudgetWithinPlanCap(6_000_001n, 6_000_000n)).exitCode).toBe(
+      EXIT.budget,
+    );
+    expect(refusal(() => assertBudgetWithinPlanCap(10_000_000n, 6_000_000n)).exitCode).toBe(
+      EXIT.budget,
+    );
   });
 
   it('the committed ledger: live verification #1 recorded at its upper bound, the remainder covering a US$10 session', () => {

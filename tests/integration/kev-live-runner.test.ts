@@ -180,8 +180,41 @@ const expectNothingLeftOpen = (rec: Awaited<ReturnType<typeof reconcile>>, befor
 };
 
 describe('the plan, live path, against a local stub', () => {
-  it('every probe passes; every call counted first and in the US; reconciled; the report holds no body', async () => {
+  it('live verification #2’s plan: the six probes pass through the real gateway; every model call counted first, in the US, its count compared with the reported input; reconciled', async () => {
     const plan = buildPlan();
+    expect(plan.name).toBe('verification-2');
+    const before = await leftOpen();
+    const run = await executePlan(plan, {
+      gateway: gateway(),
+      actor: runner,
+      deps: { db },
+      budgetMicros: plan.sessionCapUsdMicros,
+    });
+    expect(run.results.map((r) => r.id)).toEqual(plan.probes.map((p) => p.id));
+    for (const r of run.results) expect(r.outcome, `${r.id}: ${r.reasons.join(',')}`).toBe('pass');
+    expect(run.stopped).toBeNull();
+    for (const r of run.results.filter((x) => x.id !== 'g1-models')) {
+      expect(r.checks, r.id).toMatchObject({ countedFirst: true, usInference: true });
+      // G22's comparison is recorded for every model probe (the stub's
+      // count and its reported input differ on purpose).
+      expect(typeof r.checks.maxCountDelta, r.id).toBe('number');
+    }
+    // Tools and the answer schema were sent, and counted, on the tool probes.
+    const counted = stub.counts.map((c) => JSON.parse(c.body) as Record<string, unknown>);
+    expect(counted.some((c) => Array.isArray(c.tools) && (c.tools as unknown[]).length > 0)).toBe(
+      true,
+    );
+    const rec = await reconcile(
+      db,
+      run.results.flatMap((r) => r.attemptIds),
+    );
+    expect(rec.mismatched).toBe(0);
+    expectNothingLeftOpen(rec, before);
+    expect(rec.recordedUsdMicros <= plan.totalMaxUsdMicros).toBe(true);
+  });
+
+  it('every probe passes; every call counted first and in the US; reconciled; the report holds no body', async () => {
+    const plan = buildPlan('full');
     const since = new Date(Date.now() - 1_000);
     const before = await leftOpen();
     const g = gateway();
@@ -327,7 +360,7 @@ describe('the plan, live path, against a local stub', () => {
   });
 
   it('the budget: no probe starts whose maximum would pass it; nothing is reserved for them', async () => {
-    const plan = buildPlan();
+    const plan = buildPlan('full');
     const g = gateway();
     const run = await executePlan(plan, {
       gateway: g,
@@ -355,7 +388,7 @@ describe('the plan, live path, against a local stub', () => {
   it('HOME’s own cap stops the run: a reservation the cap cannot hold is refused, and the session stops', async () => {
     process.env.HOME_KEV_MONTHLY_CAP_NZD = '1';
     try {
-      const run = await executePlan(buildPlan(), {
+      const run = await executePlan(buildPlan('full'), {
         gateway: gateway(),
         actor: runner,
         deps: { db },
@@ -381,7 +414,7 @@ describe('the plan, live path, against a local stub', () => {
       );
     });
     for (let i = 0; i < 10; i++) stub.queue.push(smart);
-    const run = await executePlan(buildPlan(), {
+    const run = await executePlan(buildPlan('full'), {
       gateway: gateway(),
       actor: runner,
       deps: { db },
@@ -401,7 +434,7 @@ describe('the plan, live path, against a local stub', () => {
         JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'x' } }),
       );
     });
-    const run = await executePlan(buildPlan(), {
+    const run = await executePlan(buildPlan('full'), {
       gateway: gateway(),
       actor: runner,
       deps: { db },
