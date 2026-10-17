@@ -9,6 +9,20 @@ import { withDb } from './helpers';
 
 export const USER: Record<Adult, string> = { sam: 'fixture-sam', alex: 'fixture-alex' };
 
+/**
+ * A fixed instant for a Kev spec whose answer depends on the weekday: the
+ * seeded week's Wednesday, 14 October 2026, 07:03 in Pacific/Auckland, sent
+ * as the test time source's `x-home-test-now` header (src/app/_agenda/now.ts).
+ * It sets the turn's own clock only: stored rows keep the database's real
+ * time, so a spec that reads a stored answer's day or its forecast credit
+ * (relative to when it was answered) runs on the real date instead.
+ */
+export const KEV_TEST_NOW = '2026-10-14T07:03:00+13:00';
+export const KEV_TEST_DATE = KEV_TEST_NOW.slice(0, 10);
+export const KEV_CLOCK: Readonly<Record<string, string>> = Object.freeze({
+  'x-home-test-now': KEV_TEST_NOW,
+});
+
 export const q = (sql: string, a: unknown[] = []) =>
   withDb(async (pool) => (await pool.query(sql, a)).rows as Record<string, string>[]);
 

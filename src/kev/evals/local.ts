@@ -176,10 +176,29 @@ export function localScript(
   return book;
 }
 
+/**
+ * This weekend, from a home date: on Saturday, today and tomorrow; on
+ * Sunday, yesterday and today; on a weekday, the coming Saturday and
+ * Sunday. `ahead` is its first day not before today (Sunday's own on a
+ * Sunday), for the questions about one weekend day.
+ */
+export function weekendOf(today: string): { sat: string; sun: string; ahead: string } {
+  const wd = weekdayOf(today); // 0 Monday … 5 Saturday, 6 Sunday
+  const sat = wd === 6 ? addDays(today, -1) : addDays(today, 5 - wd);
+  const sun = addDays(sat, 1);
+  return { sat, sun, ahead: wd === 6 ? sun : sat };
+}
+
+/**
+ * An agenda absence beside the records a plan shows: "anything else" only
+ * when it shows at least one (the checker refuses `else` over none, §8.3).
+ */
+const agendaAbsence = (from: string, to: string, shown: number): Fact =>
+  absence('agenda', from, to, shown > 0);
+
 function scriptFor(q: string, today: string): LocalScript {
   const wd = weekdayOf(today); // 0 Monday … 6 Sunday
-  const sat = wd === 6 ? today : addDays(today, (5 - wd + 7) % 7);
-  const sun = wd === 6 ? today : addDays(sat, 1);
+  const { sat, sun, ahead } = weekendOf(today);
   const tomorrow = addDays(today, 1);
   const nextMonday = addDays(today, 7 - wd);
   const nextSunday = addDays(nextMonday, 6);
@@ -200,10 +219,10 @@ function scriptFor(q: string, today: string): LocalScript {
         tools(['get_today', {}]),
         ...twice((req: ProviderRequest) => {
           const read = resultsOf(req);
-          const events = refsIn(read, 'event');
+          const events = refsIn(read, 'event').slice(0, 8);
           return plan('when', [
-            ...events.slice(0, 8).map((r) => record(r, ['people'])),
-            absence('agenda', today, today),
+            ...events.map((r) => record(r, ['people'])),
+            agendaAbsence(today, today, events.length),
           ]);
         }),
       ],
@@ -213,14 +232,13 @@ function scriptFor(q: string, today: string): LocalScript {
     return {
       script: [
         tools(['get_agenda', { from: tomorrow, to: tomorrow }]),
-        ...twice((req: ProviderRequest) =>
-          plan('when', [
-            ...refsIn(resultsOf(req), 'event')
-              .slice(0, 8)
-              .map((r) => record(r, ['people'])),
-            absence('agenda', tomorrow, tomorrow),
-          ]),
-        ),
+        ...twice((req: ProviderRequest) => {
+          const events = refsIn(resultsOf(req), 'event').slice(0, 8);
+          return plan('when', [
+            ...events.map((r) => record(r, ['people'])),
+            agendaAbsence(tomorrow, tomorrow, events.length),
+          ]);
+        }),
       ],
     };
 
@@ -231,15 +249,15 @@ function scriptFor(q: string, today: string): LocalScript {
           [
             'get_gaps',
             {
-              from: sat,
-              to: sat,
+              from: ahead,
+              to: ahead,
               scope: 'household',
               min_minutes: 180,
               needs: ['dry_weather', 'daylight'],
             },
           ],
           ['get_tasks', { assignee: 'me' }],
-          ['get_weather', { from: sat, to: sat }],
+          ['get_weather', { from: ahead, to: ahead }],
         ),
         ...twice((req: ProviderRequest) => {
           const read = resultsOf(req);
@@ -252,7 +270,8 @@ function scriptFor(q: string, today: string): LocalScript {
           if (facts.length === 0) return plan('unsure', []);
           const view =
             gap && fence ? { type: 'suggestion', phrase: 'stretch_estimate', about: [0, 1] } : null;
-          return plan('when', facts, view);
+          // `when` needs a dated fact (§8.2): the gap; the task alone is undated.
+          return plan(gap ? 'when' : 'here_you_go', facts, view);
         }),
       ],
     };
@@ -263,12 +282,11 @@ function scriptFor(q: string, today: string): LocalScript {
         tools(['get_agenda', { from: sat, to: sun }], ['get_weather', { from: sat, to: sun }]),
         ...twice((req: ProviderRequest) => {
           const read = resultsOf(req);
+          const events = refsIn(read, 'event').slice(0, 6);
           return plan('righto_when', [
-            ...refsIn(read, 'event')
-              .slice(0, 6)
-              .map((r) => record(r, ['people'])),
+            ...events.map((r) => record(r, ['people'])),
             ...refsIn(read, 'forecast').map((r) => record(r, ['phrase'])),
-            absence('agenda', sat, sun),
+            agendaAbsence(sat, sun, events.length),
           ]);
         }),
       ],
@@ -315,7 +333,7 @@ function scriptFor(q: string, today: string): LocalScript {
   if (/\bweather\b/.test(q))
     return {
       script: [
-        tools(['get_weather', { from: sat, to: sat }]),
+        tools(['get_weather', { from: ahead, to: ahead }]),
         ...twice((req: ProviderRequest) => {
           const days = refsIn(resultsOf(req), 'forecast');
           return days.length > 0
@@ -323,7 +341,7 @@ function scriptFor(q: string, today: string): LocalScript {
                 'when',
                 days.map((r) => record(r, ['phrase', 'temperature'])),
               )
-            : plan('here_you_go', [absence('forecast', sat, sat, false)]);
+            : plan('here_you_go', [absence('forecast', ahead, ahead, false)]);
         }),
       ],
     };
