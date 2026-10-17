@@ -1,3 +1,4 @@
+import { diagnosticLine } from '@/kev/providers/diagnostics';
 import { usd } from './guards.mts';
 import type { Plan } from './plan';
 import type { ProbeResult, RunOutcome } from './probes';
@@ -31,6 +32,7 @@ function callRows(r: ProbeResult) {
           resolvedId: e.id,
           maxInputTokens: e.maxInputTokens,
           maxTokens: e.maxTokens,
+          error: e.error,
           ms: e.ms,
         }
       : e.kind === 'count'
@@ -40,6 +42,7 @@ function callRows(r: ProbeResult) {
             status: e.status,
             requestId: e.requestId,
             counted: e.counted,
+            error: e.error,
             ms: e.ms,
           }
         : {
@@ -58,6 +61,7 @@ function callRows(r: ProbeResult) {
             blocks: e.blocks,
             growOnly: e.growOnly,
             retried: e.retried,
+            error: e.error,
             ms: e.ms,
           },
   );
@@ -175,6 +179,23 @@ export function buildReport(input: {
         `| ${p.id} | ${c.kind} | ${c.model} | ${v('status')} | ${v('requestId')} | ${v('counted')} | ${v('stop')} | ${v('inputTokens')} | ${v('outputTokens')} | ${v('cacheReadTokens')} | ${v('cacheWriteTokens')} | ${v('inferenceGeo')} | ${v('costUsdMicros')} |`,
       );
     }
+  md.push('', '## Provider errors', '');
+  const refused = probes.flatMap((p) =>
+    p.calls.flatMap((c) =>
+      c.error ? [{ id: p.id, kind: c.kind, model: c.model, e: c.error }] : [],
+    ),
+  );
+  if (refused.length === 0) md.push('None.');
+  else {
+    md.push(
+      'Structural fields and recognised detail only (src/kev/providers/diagnostics.ts): the provider’s message is never kept.',
+      '',
+      '| Probe | Kind | Model | Diagnostic |',
+      '|---|---|---|---|',
+    );
+    for (const r of refused)
+      md.push(`| ${r.id} | ${r.kind} | ${r.model} | ${diagnosticLine(r.e, r.e.message)} |`);
+  }
   md.push('', '## Reconciliation (§9)', '');
   if (!rec) md.push('Not run.');
   else {

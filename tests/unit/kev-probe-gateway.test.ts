@@ -186,7 +186,7 @@ describe('the probe path is unreachable from Kev', () => {
 describe('G1: the Models API read', () => {
   it('GET /v1/models/{id} through HOME’s fetch: no count, no budget, the limits and the request id recorded', async () => {
     stub.queue.push((_req, res) => {
-      res.writeHead(200, { 'content-type': 'application/json', 'request-id': 'req_models_1' });
+      res.writeHead(200, { 'content-type': 'application/json', 'request-id': 'req_models0001' });
       res.end(
         JSON.stringify({
           id: HAIKU,
@@ -205,7 +205,7 @@ describe('G1: the Models API read', () => {
       kind: 'models',
       model: HAIKU,
       status: 200,
-      requestId: 'req_models_1',
+      requestId: 'req_models0001',
       outcome: 'ok',
       id: HAIKU,
       maxInputTokens: 1_000_000,
@@ -223,14 +223,14 @@ describe('G1: the Models API read', () => {
     await expect(g.models('claude-unknown-1')).rejects.toThrow(/config.ts/);
     expect(stub.seen).toHaveLength(0);
     stub.queue.push((_req, res) => {
-      res.writeHead(404, { 'content-type': 'application/json', 'request-id': 'req_404' });
+      res.writeHead(404, { 'content-type': 'application/json', 'request-id': 'req_notfound404' });
       res.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'x' } }));
     });
     const e = await g.models(DEEP);
     expect(e).toMatchObject({
       outcome: 'bad_response',
       status: 404,
-      requestId: 'req_404',
+      requestId: 'req_notfound404',
       id: null,
     });
   });
@@ -238,9 +238,9 @@ describe('G1: the Models API read', () => {
 
 describe('probe calls: the production path, changed only as the probe names', () => {
   it('Haiku 5.5 on a fast budget: counted (G22) and called on Haiku, max_tokens the fast tier’s, reserved at the fast tier’s maximum, recorded at Haiku’s prices', async () => {
-    stub.countQueue.push(countWithId('req_count_h', 900));
+    stub.countQueue.push(countWithId('req_counthaiku', 900));
     stub.queue.push(
-      withId('req_msg_h', HAIKU, { input_tokens: 900, cache_creation_input_tokens: 0 }),
+      withId('req_msghaiku', HAIKU, { input_tokens: 900, cache_creation_input_tokens: 0 }),
     );
     const g = gateway();
     const b = budget('fast');
@@ -259,9 +259,9 @@ describe('probe calls: the production path, changed only as the probe names', ()
     expect(b.calls[0]).toMatchObject({ model: HAIKU, costUsdMicros: 347n });
     const ev2 = g.evidence();
     expect(ev2.map((e) => e.kind)).toEqual(['count', 'message']);
-    expect(ev2[0]).toMatchObject({ requestId: 'req_count_h', counted: 900, model: HAIKU });
+    expect(ev2[0]).toMatchObject({ requestId: 'req_counthaiku', counted: 900, model: HAIKU });
     expect(ev2[1]).toMatchObject({
-      requestId: 'req_msg_h',
+      requestId: 'req_msghaiku',
       model: HAIKU,
       outcome: 'ok',
       stop: 'end_turn',
@@ -320,7 +320,7 @@ describe('probe calls: the production path, changed only as the probe names', ()
 
   it('G20: abort after the first event: a timeout, partial usage charged at least the per-call maximum, never retried', async () => {
     stub.queue.push(
-      withId('req_abort', FAST, { input_tokens: 800, cache_creation_input_tokens: 0 }),
+      withId('req_abortprobe', FAST, { input_tokens: 800, cache_creation_input_tokens: 0 }),
     );
     const g = gateway();
     const b = budget();
@@ -334,13 +334,13 @@ describe('probe calls: the production path, changed only as the probe names', ()
     expect(m).toMatchObject({
       outcome: 'timeout',
       stop: 'partial',
-      requestId: 'req_abort',
+      requestId: 'req_abortprobe',
       costUsdMicros: perCallMax('fast'),
     });
   });
 
   it('G10: a response without US inference fails closed on the probe path too', async () => {
-    stub.queue.push(withId('req_geo', FAST, { inference_geo: 'global' }));
+    stub.queue.push(withId('req_geoprobe', FAST, { inference_geo: 'global' }));
     const g = gateway();
     const err = await failure(g.run(request(), { budget: budget() }));
     expect(err.code).toBe('bad_response');
@@ -353,7 +353,7 @@ describe('probe calls: the production path, changed only as the probe names', ()
 
   it('G22: a failed count stops the probe call; the evidence holds the count only', async () => {
     stub.countQueue.push((_req, res) => {
-      res.writeHead(500, { 'request-id': 'req_count_500' });
+      res.writeHead(500, { 'request-id': 'req_count500x' });
       res.end();
     });
     const g = gateway();
@@ -364,7 +364,7 @@ describe('probe calls: the production path, changed only as the probe names', ()
       expect.objectContaining({
         kind: 'count',
         status: 500,
-        requestId: 'req_count_500',
+        requestId: 'req_count500x',
         counted: null,
       }),
     ]);

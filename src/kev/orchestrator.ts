@@ -46,6 +46,7 @@ import { assembleBundle } from './context/assemble';
 import { requestTokens } from './context/tokens';
 import { selectWindow } from './context/window';
 import { SYSTEM_PROMPT } from './prompts/system';
+import type { ProviderDiagnostic } from './providers/diagnostics';
 import { selectKevProvider } from './providers/select';
 import {
   ProviderError,
@@ -220,7 +221,12 @@ type AttemptEnd =
       salvage?: RenderedAnswer | null;
     }
   | { kind: 'refused' }
-  | { kind: 'error'; code: KevTurnErrorCode }
+  | {
+      kind: 'error';
+      code: KevTurnErrorCode;
+      /** The provider's structural diagnostic, when the provider refused (logged, never stored). */
+      provider?: ProviderDiagnostic;
+    }
   | { kind: 'cap' };
 
 type CallUsageV2 = KevContentV2['calls'][number];
@@ -229,9 +235,10 @@ type TraceV2 = KevContentV2['trace'][number];
 /** A provider error's place in §9.9's table. */
 function errorOf(e: ProviderError): AttemptEnd {
   if (e.code === 'refusal') return { kind: 'refused' };
-  if (e.code === 'timeout') return { kind: 'error', code: 'timeout' };
-  if (e.code === 'bad_response') return { kind: 'error', code: 'bad_response' };
-  return { kind: 'error', code: 'provider_unavailable' };
+  const provider = e.detail.provider ? { provider: e.detail.provider } : {};
+  if (e.code === 'timeout') return { kind: 'error', code: 'timeout', ...provider };
+  if (e.code === 'bad_response') return { kind: 'error', code: 'bad_response', ...provider };
+  return { kind: 'error', code: 'provider_unavailable', ...provider };
 }
 
 /** The tool results answering every tool call of a response, in order (the API needs each). */
@@ -947,6 +954,13 @@ async function finish(
       break;
     case 'error':
       errorCode = end.code;
+      // Structural only (diagnostics.ts): the status, the closed category and
+      // the request id, for the log line; never stored in the conversation.
+      if (end.provider) {
+        turnLog.providerStatus = end.provider.status;
+        turnLog.providerErrorType = end.provider.type;
+        turnLog.providerRequestId = end.provider.requestId;
+      }
       content = {
         ...base,
         outcome: 'error',

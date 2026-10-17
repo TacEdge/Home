@@ -1,6 +1,7 @@
 import 'server-only';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 import type { TurnBudget } from '../budget';
+import type { ProbeErrorDetail, ProviderDiagnostic } from './diagnostics';
 
 // The provider seam (M8 contract §4.3, §4.5, §5.1, §5.4; ADR 0012 §12).
 // Provider-neutral: nothing here names a provider, a model or an SDK type.
@@ -169,6 +170,12 @@ export class ProviderError extends Error {
        * No model call was made, nothing was charged.
        */
       preflight?: 'failed' | 'over_cap';
+      /**
+       * The provider's structural diagnostic when the provider itself refused
+       * (diagnostics.ts): HTTP status, category from a closed list, request
+       * id in its documented shape. Never a message or a body.
+       */
+      provider?: ProviderDiagnostic;
     }>,
   ) {
     super(code);
@@ -231,6 +238,8 @@ export type ProbeEvidence =
       requestId: string | null;
       /** The preflight count (G22), or null when it failed. */
       counted: number | null;
+      /** The provider's refusal, as diagnostics.ts keeps it (no text); null otherwise. */
+      error: ProbeErrorDetail | null;
       ms: number;
     }>
   | Readonly<{
@@ -241,6 +250,8 @@ export type ProbeEvidence =
       requestId: string | null;
       /** `ok`, or the closed error code the call failed with. */
       outcome: 'ok' | ProviderErrorCode;
+      /** The provider's refusal, as diagnostics.ts keeps it (no text); null otherwise. */
+      error: ProbeErrorDetail | null;
       /** The call's stop as the budget recorded it (`partial`, `error`, `refusal` included); null if not recorded. */
       stop: string | null;
       usage: CallUsage | null;
@@ -259,6 +270,7 @@ export type ProbeEvidence =
       status: number | null;
       requestId: string | null;
       outcome: 'ok' | ProviderErrorCode;
+      error: ProbeErrorDetail | null;
       /** The Models API's id, context window and output limit, as returned. */
       id: string | null;
       maxInputTokens: number | null;
