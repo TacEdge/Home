@@ -444,7 +444,11 @@ test('privacy: Alex never sees Sam’s private title or its overlap, on any hori
   await alex.context.close();
 });
 
-/** Every visible control shorter than 44px (summaries and links included; widths follow their words, as on Today). */
+/**
+ * Every visible control shorter than 44px (summaries and links included;
+ * link widths follow their words, as on Today), and every summary narrower
+ * than 44px: a fold's "+ N" is a control of its own, never inline text.
+ */
 async function smallTargets(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
@@ -457,7 +461,7 @@ async function smallTargets(page: Page): Promise<string[]> {
       if (style.visibility === 'hidden' || style.display === 'none') continue;
       const box = el.getBoundingClientRect();
       if (box.width === 0 || box.height === 0) continue;
-      if (box.height < 43.5)
+      if (box.height < 43.5 || (el.tagName === 'SUMMARY' && box.width < 43.5))
         out.push(
           `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}" ${box.width}×${box.height}`,
         );
@@ -507,7 +511,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       ).toEqual([]);
       await page.screenshot({ path: `${SHOTS}/forward-${horizon}-${name}.png`, fullPage: true });
     }
-    expect(small, `${name}: controls under 44px high`).toEqual([]);
+    expect(small, `${name}: controls under 44px (summaries in both directions)`).toEqual([]);
     await context.close();
   });
 }

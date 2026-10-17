@@ -3,7 +3,15 @@ import { WEATHER_URL } from '../../playwright.config';
 import { FINGERPRINT_VECTORS } from '../fixtures/weather';
 import { seedCalendar } from './calendar-feeds';
 import { signInAsFixtureAdult, VIEWPORTS, type Adult } from './fixture-adults';
-import { ask, clearKev, q, recordedMonth, recordUsageUpTo } from './kev-helpers';
+import {
+  ask,
+  clearKev,
+  KEV_CLOCK,
+  KEV_TEST_DATE,
+  q,
+  recordedMonth,
+  recordUsageUpTo,
+} from './kev-helpers';
 
 // Kev on the weather server (M8 Package 4; contract §8.4, §11.2, §13.6;
 // matrix rows U5, U14 and the forecast's attribution): the synthetic home
@@ -27,9 +35,12 @@ async function todayNz(): Promise<string> {
   return (await q(`select to_char(now() at time zone '${NZ}', 'YYYY-MM-DD') as d`))[0]!.d!;
 }
 
-/** The forecast, fetched at 06:55 today: dry, except an hour of showers on Sunday afternoon. */
-async function setForecast(): Promise<void> {
-  const today = await todayNz();
+/**
+ * The forecast, fetched at 06:55 on `day` (today unless given): dry, except
+ * an hour of showers on Sunday afternoon.
+ */
+async function setForecast(day?: string): Promise<void> {
+  const today = day ?? (await todayNz());
   const fetched = new Date(`${today}T06:55:00+13:00`);
   const start = Math.floor(fetched.getTime() / (24 * HOUR)) * 24 * HOUR;
   const hours = Array.from({ length: 191 }, (_, i) => {
@@ -61,8 +72,12 @@ async function setForecast(): Promise<void> {
   );
 }
 
-async function kevPage(browser: Browser, adult: Adult) {
-  const context = await browser.newContext({ viewport: VIEWPORTS.phone, baseURL: WEATHER_URL });
+async function kevPage(browser: Browser, adult: Adult, headers?: Record<string, string>) {
+  const context = await browser.newContext({
+    viewport: VIEWPORTS.phone,
+    baseURL: WEATHER_URL,
+    ...(headers ? { extraHTTPHeaders: headers } : {}),
+  });
   const page = await context.newPage();
   await signInAsFixtureAdult(page, adult);
   await page.goto('/kev');
@@ -129,17 +144,28 @@ test('U5 and the forecast’s attribution: a weekend answer with its rows, the c
 test('U5: the weekend thought through: Kev’s view under its label, and the code’s sentences', async ({
   browser,
 }) => {
-  const { context, page } = await kevPage(browser, 'sam');
-  await ask(page, 'sam', 'Help me think through our weekend.');
-  const turn = page.getByTestId('kev-turn').last();
-  const view = turn.getByTestId('kev-view');
-  await expect(view).toContainText('Kev’s view');
-  await expect(view).toContainText('That stretch is at least as long as the task’s estimate.');
-  await expect(turn.getByTestId('kev-fact').first()).toContainText('Nothing is recorded');
-  await expect(turn.getByTestId('kev-limits')).toContainText('It isn’t a check of anyone’s plans.');
-  const text = (await turn.textContent()) ?? '';
-  for (const word of [' free', 'best', 'available']) expect(text).not.toContain(word);
-  await context.close();
+  // A fixed weekday (the seeded week's Wednesday, by the test time source),
+  // with its own forecast: the weekend it thinks through is that week's
+  // Saturday, whatever day the suite runs. On a real Saturday or Sunday the
+  // weekend is today, where the seeded family has no such stretch.
+  await setForecast(KEV_TEST_DATE);
+  const { context, page } = await kevPage(browser, 'sam', KEV_CLOCK);
+  try {
+    await ask(page, 'sam', 'Help me think through our weekend.');
+    const turn = page.getByTestId('kev-turn').last();
+    const view = turn.getByTestId('kev-view');
+    await expect(view).toContainText('Kev’s view');
+    await expect(view).toContainText('That stretch is at least as long as the task’s estimate.');
+    await expect(turn.getByTestId('kev-fact').first()).toContainText('Nothing is recorded');
+    await expect(turn.getByTestId('kev-limits')).toContainText(
+      'It isn’t a check of anyone’s plans.',
+    );
+    const text = (await turn.textContent()) ?? '';
+    for (const word of [' free', 'best', 'available']) expect(text).not.toContain(word);
+  } finally {
+    await context.close();
+    await setForecast();
+  }
 });
 
 test('U14: Usage at about 30%, past 80% and at the cap: the recorded month only', async ({
