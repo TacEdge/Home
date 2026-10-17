@@ -280,7 +280,33 @@ describe('the plan, live path, against a local stub', () => {
       startedAt: since,
       finishedAt: new Date(),
     });
-    expect(report.passed).toBe(true);
+    // Every probe passed, so the report passes exactly when the
+    // reconciliation is clean. `rec.ok` is database-wide, and this shared
+    // test database holds reservations other suites leave open on purpose
+    // (see leftOpen), so it depends on which suites ran first; on the
+    // runner's own empty database, a clean session reconciles to ok.
+    expect(report.passed).toBe(rec.ok);
+    const onItsOwnDatabase = buildReport({
+      plan,
+      budgetMicros: 10_000_000n,
+      capNzd: 18,
+      run,
+      reconciliation: { ...rec, openCount: 0, unreconciledCount: 0, ok: true },
+      startedAt: since,
+      finishedAt: new Date(),
+    });
+    expect(onItsOwnDatabase.passed).toBe(true);
+    expect(
+      buildReport({
+        plan,
+        budgetMicros: 10_000_000n,
+        capNzd: 18,
+        run,
+        reconciliation: { ...rec, openCount: 1, ok: false },
+        startedAt: since,
+        finishedAt: new Date(),
+      }).passed,
+    ).toBe(false);
     for (const text of [report.json, report.markdown]) {
       expect(text).not.toContain(CANARY);
       expect(text).not.toContain(KEY);

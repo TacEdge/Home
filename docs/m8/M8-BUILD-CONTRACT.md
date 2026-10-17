@@ -813,6 +813,21 @@ Every other gate is unchanged by Package 3.
 
 Every other gate is unchanged by Package 4.
 
+**Live verification #1 update (2026-10-17; ADR 0012 §50; run 38996104678 on commit a743d7d, plan `f7f82b9a…`, budget US$10, the owner's approval).** Synthetic prompts, the runner's own fixture-only database, the evaluation key. HOME recorded US$0.14 (`docs/m8/M8-LIVE-LEDGER.json`); 0 open, 0 unreconciled, 0 settlement discrepancies; Anthropic's billing NOT RECONCILED. Every probe carrying Kev's tools (`strict: true`) and answer format was refused at the preflight count with **HTTP 400** (the owner read the report): Kev's generated tool schemas carried keywords outside the provider's strict subset (`get_agenda` `maxItems`; `get_gaps` `minimum`, `maximum`, `maxItems`; `search` `minLength`, `maxLength`). Every tool-free count returned 200. Corrected in the provider's copy of the schemas only (`src/kev/tools/strict-schema.ts`); the Zod schemas still enforce every limit.
+
+| # | Run #1 result | Status | Next |
+|---|---|---|---|
+| G1 | The Models API resolved all three ids; effort `low` accepted on Opus 5.5, Sonnet 5.5 and Haiku 5.5; `medium` (the tiers' effort) accepted by every call that ran | **PASS** (live) | — |
+| G7 | Not reached on any tier: the preflight count refused the request (HOME's schemas) | NOT VERIFIED | Re-run after the correction |
+| G8 | Accepted on Opus 5.5, Sonnet 5.5 and Haiku 5.5 | Recorded (accepted); decides nothing further (the user-turn regeneration form is adopted, Package 1b review) | — |
+| G9, G21 | The turn ended at its first preflight count (no model call) | NOT VERIFIED | Re-run after the correction |
+| G10 | `inference_geo` `us` on every response received | **PASS** for the calls made; the tool-carrying shape not yet seen | Seen again in the re-run |
+| G19 | Not reached (preflight refused) | NOT VERIFIED | Re-run after the correction |
+| G20 live | Aborted after `message_start`; partial usage recorded; charged at least the per-call maximum | **PASS** (HOME's accounting); the comparison with the Console's usage is pending | The owner compares the call's tokens with the Console |
+| G22 | Counted before every model call that ran (200); a refused count (400) stopped the call with no model call and no charge (fail closed, as specified). Not yet shown for Kev's real request shape | **Partial**: the fail-closed half passes; NOT PASSED | Re-run after the correction; compare a count with the following `message_start` |
+
+Every other gate is unchanged by run #1.
+
 **What this means for merging** (*as staged by the owner, 2026-10-14*). Package 1b merges on the stage-A gates: G2, G5 and G6 pass, with G16's local half and G20's stub half. Every other gate is recorded with its status and waits for its stage: B (an authorised synthetic verification under its conditions, before any live orchestrated use), C (Package 3), D (Package 4's Preview route) and E (real family data, DEPLOY.md §E item 23). Kev stays off everywhere deployed, with no key, until the stage B, C and D gates have passed and the §E items say so.
 
 **Package 1b merge readiness** (*recorded 2026-10-15, at the owner's final decisions*):

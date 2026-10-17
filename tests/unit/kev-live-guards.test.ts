@@ -5,6 +5,7 @@ import {
   assertCapCovers,
   assertEnvironment,
   assertLedgerCovers,
+  ledgerRemainder,
   assertNoKey,
   assertNoRealData,
   assertNotDeployed,
@@ -238,9 +239,12 @@ describe('the campaign ledger', () => {
     recordedUsdMicros: recorded,
   });
 
-  it('the committed ledger starts at US$0 spent of US$200', () => {
+  it('the committed ledger: live verification #1 recorded at its upper bound, the remainder covering a US$10 session', () => {
     const l = parseLedger(readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8'));
-    expect(l.sessions).toEqual([]);
+    expect(l.sessions.map((s) => [s.date, s.planHash, s.recordedUsdMicros])).toEqual([
+      ['2026-10-17', 'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8', '145000'],
+    ]);
+    expect(ledgerRemainder(l)).toBe(199_855_000n);
     expect(() => assertLedgerCovers(l, SESSION_CEILING_USD_MICROS)).not.toThrow();
   });
 
