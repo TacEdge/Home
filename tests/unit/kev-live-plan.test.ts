@@ -10,6 +10,8 @@ import {
   buildPlan,
   canonicalJson,
   plannedCalls,
+  PLANS,
+  planProbes,
   PROBES,
   probeMaxUsdMicros,
   systemFor,
@@ -17,7 +19,13 @@ import {
   type ProbeSpec,
 } from '../../scripts/kev-live/plan';
 import { planLines, runMode } from '../../scripts/kev-live/runner';
-import { EXIT, SESSION_CEILING_USD_MICROS } from '../../scripts/kev-live/guards.mts';
+import {
+  assertCapCovers,
+  capNzdFor,
+  capUsdMicros,
+  EXIT,
+  SESSION_CEILING_USD_MICROS,
+} from '../../scripts/kev-live/guards.mts';
 
 // The live verification plan (M8 live-verification plan §4, §7; owner
 // decisions 2 and 4): its maxima are the gateway's own, its total fits the
@@ -43,8 +51,63 @@ describe('the plan’s maxima are the gateway’s', () => {
     }
   });
 
-  it('the total is US$7.277024, within the approved US$10, and the sum of the probes', () => {
+  it('live verification #2: only G1, G7 on the three models, G19 and the turn; its maximum within its US$6 cap; G1 first', () => {
     const plan = buildPlan();
+    expect(plan.name).toBe('verification-2');
+    expect(plan.probes.map((p) => p.id)).toEqual([
+      'g1-models',
+      'g7-fast',
+      'g7-deep',
+      'g19-cache-fast',
+      'haiku-g7',
+      'g9-g21-turn',
+    ]);
+    // 4 × 133,056 (G7 fast, G19, Haiku G7) + 4 × 356,224 (G7 deep) + 1,500,000 (the turn).
+    expect(plan.totalMaxUsdMicros).toBe(4_521_568n);
+    expect(plan.probes[0]).toMatchObject({ id: 'g1-models', stopOnFail: true });
+    // Run #1's passes are not repeated.
+    for (const id of ['g8-fast', 'g8-deep', 'haiku-g8', 'g20-abort-fast', 'g1-effort-low-fast'])
+      expect(plan.probes.map((p) => p.id)).not.toContain(id);
+    expect(plan.totalMaxUsdMicros).toBe(plan.probes.reduce((a, p) => a + p.maxUsdMicros, 0n));
+    expect(plan.sessionCapUsdMicros).toBe(6_000_000n);
+    expect(plan.totalMaxUsdMicros <= plan.sessionCapUsdMicros).toBe(true);
+    expect(plan.sessionCapUsdMicros <= SESSION_CEILING_USD_MICROS).toBe(true);
+    // The turn alone is held at the US$1.50 ceiling.
+    expect(plan.probes.at(-1)!.maxUsdMicros).toBe(1_500_000n);
+  });
+
+  it('a US$6 budget: HOME’s own cap (whole NZ$) holds the plan, and every reservation fits even if each earlier probe settled at its maximum', () => {
+    const plan = buildPlan();
+    const cap = capUsdMicros(capNzdFor(plan.sessionCapUsdMicros));
+    expect(capNzdFor(plan.sessionCapUsdMicros)).toBe(10);
+    expect(cap).toBe(5_555_556n);
+    expect(() => assertCapCovers(cap, 0n, plan.totalMaxUsdMicros)).not.toThrow();
+    let settled = 0n;
+    for (const p of plan.probes) {
+      // The largest hold the probe can take at once: an attempt's reservation
+      // (a turn: its fast attempt, then an escalation within US$1.50 together).
+      const hold =
+        p.kind === 'models'
+          ? 0n
+          : p.kind === 'turn'
+            ? LIMITS.turnCeilingUsdMicros
+            : attemptReservation(p.tier);
+      expect(settled + hold <= cap, p.id).toBe(true);
+      settled += p.maxUsdMicros;
+    }
+    expect(settled).toBe(plan.totalMaxUsdMicros);
+  });
+
+  it('every named plan names only probes that exist, each once, with a cap no higher than US$10', () => {
+    for (const [name, p] of Object.entries(PLANS)) {
+      expect(new Set(p.probes).size, name).toBe(p.probes.length);
+      expect(planProbes(name as keyof typeof PLANS).length, name).toBe(p.probes.length);
+      expect(p.sessionCapUsdMicros <= SESSION_CEILING_USD_MICROS, name).toBe(true);
+    }
+  });
+
+  it('the full plan (run #1): US$7.277024, within the approved US$10, and the sum of the probes', () => {
+    const plan = buildPlan('full');
     expect(plan.totalMaxUsdMicros).toBe(plan.probes.reduce((a, p) => a + p.maxUsdMicros, 0n));
     expect(plan.totalMaxUsdMicros).toBe(7_277_024n);
     expect(plan.totalMaxUsdMicros <= SESSION_CEILING_USD_MICROS).toBe(true);
@@ -94,9 +157,12 @@ describe('the plan hash', () => {
   });
 
   it('changes with any probe: its question, its options, its tier, its order or its removal', () => {
-    const base = buildPlan().hash;
+    const base = buildPlan('full').hash;
     const edit = (i: number, f: (p: ProbeSpec) => ProbeSpec) =>
-      buildPlan(PROBES.map((p, j) => (j === i ? f(p) : p))).hash;
+      buildPlan(
+        'full',
+        PROBES.map((p, j) => (j === i ? f(p) : p)),
+      ).hash;
     const g7 = PROBES.findIndex((p) => p.id === 'g7-fast');
     const g8 = PROBES.findIndex((p) => p.id === 'g8-fast');
     const changed = [
@@ -114,9 +180,19 @@ describe('the plan hash', () => {
       ),
       edit(g8, (p) => ({ ...p, tier: 'deep' }) as ProbeSpec),
       edit(g7, (p) => ({ ...p, expect: 'changed' })),
-      buildPlan([...PROBES].reverse()).hash,
-      buildPlan(PROBES.slice(1)).hash,
+      buildPlan('full', [...PROBES].reverse()).hash,
+      buildPlan('full', PROBES.slice(1)).hash,
     ];
+    // The plan's name and session cap are part of what is approved.
+    changed.push(buildPlan('verification-2', planProbes('full')).hash);
+    expect(buildPlan().hash).not.toBe(base);
+    expect(buildPlan().hash).not.toBe(
+      'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
+    );
+    expect(buildPlan().canonical).toMatchObject({
+      plan: 'verification-2',
+      sessionCapUsdMicros: 6_000_000n,
+    });
     for (const h of changed) expect(h).not.toBe(base);
     expect(new Set(changed).size).toBe(changed.length);
   });
@@ -172,9 +248,13 @@ describe('the dry run', () => {
     expect(out).toEqual({ exitCode: EXIT.ok, code: 'dry_run' });
     const plan = buildPlan();
     const text = lines.join('\n');
+    expect(plan.name).toBe('verification-2');
     expect(text).toContain(`plan hash: ${plan.hash}`);
-    expect(text).toContain('total maximum: US$7.28');
-    for (const p of PROBES) expect(text).toContain(p.id);
+    expect(text).toContain('verification-2 (session cap US$6.00)');
+    expect(text).toContain('total maximum: US$4.52 (no retries: US$3.01)');
+    for (const p of PROBES)
+      if (PLANS['verification-2'].probes.includes(p.id)) expect(text).toContain(p.id);
+      else expect(text).not.toContain(`${p.id} `);
     expect(text).not.toContain(KEY);
     // No prompt is printed.
     for (const p of PROBES)
@@ -200,14 +280,35 @@ describe('the dry run', () => {
         reportDir: '/nonexistent',
         log: () => undefined,
       });
+    expect(await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).toEqual(
+      {
+        exitCode: EXIT.ok,
+        code: 'plan_checked',
+      },
+    );
+    // Live verification #2's cap is US$6: anything above it is refused,
+    // US$10 (run #1's ceiling) included, and so is a budget below the plan.
+    for (const above of ['6.01', '7', '10'])
+      expect(
+        (await run({ KEV_LIVE_BUDGET_USD: above, KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }))
+          .exitCode,
+        above,
+      ).toBe(EXIT.budget);
     expect(
-      await run({ KEV_LIVE_BUDGET_USD: '10', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }),
-    ).toEqual({
-      exitCode: EXIT.ok,
-      code: 'plan_checked',
-    });
+      (await run({ KEV_LIVE_BUDGET_USD: '4.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+    ).toBe(EXIT.budget);
+    // Run #1's approved hash is not this plan's.
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '10', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
+      (
+        await run({
+          KEV_LIVE_BUDGET_USD: '6',
+          KEV_LIVE_APPROVED_PLAN_HASH:
+            'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
+        })
+      ).exitCode,
+    ).toBe(EXIT.plan_hash);
+    expect(
+      (await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
         .exitCode,
     ).toBe(EXIT.plan_hash);
     expect(
@@ -218,13 +319,13 @@ describe('the dry run', () => {
         .exitCode,
     ).toBe(EXIT.budget);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '10', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
+      (await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
         .exitCode,
     ).toBe(EXIT.ledger);
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '10',
+          KEV_LIVE_BUDGET_USD: '6',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           KEV_EVAL_PROVIDER_KEY: 'test-key-not-real-0000',
         })
@@ -233,7 +334,7 @@ describe('the dry run', () => {
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '10',
+          KEV_LIVE_BUDGET_USD: '6',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           VERCEL: '1',
         })

@@ -15,7 +15,9 @@ Owner decisions this follows (2026-10-16): the runner uses HOME's own gateway, s
 | `scripts/kev-live/isolation-check.mts` | Read-only evidence for owner decision 6, against any database but Production. |
 | `scripts/kev-live/g16-pooled.mts` | G16 on home-dev's pooled connection: reservations only, no model, no key. |
 
-The plan today (`node scripts/kev-live/run.mts`): G1's Models API read of the three ids; G7 (a tool round and an answer plan) on fast, deep and Haiku 5.5; G19 (the same request twice); G20 (a stream aborted after its first event); G8 (one system message) on fast, deep and Haiku; `low` effort on all three (G1); and one turn through `kev.handle()` for G9 and G21. G10 and G22 are checked on every call. **Maximum US$7.28** (every call retried once, each attempt within its reservation, the turn at US$1.50); **US$4.39** if no call is retried. The dry run prints the hash to approve.
+**The plan today: `verification-2`** (live verification #2, 2026-10-17; ADR 0012 §51), re-running only what run #1 could not reach after the strict-schema correction (§50): G1's Models API read of the three ids (first; it stops the session if an id fails); G7 on fast, deep and Haiku 5.5; G19; and one turn through `kev.handle()` for G9 and G21. G10 and G22 are checked on every model call, and each probe records the largest difference between a count and the input its call reported (G22's comparison). **Maximum US$4.52** (US$4.521568: every call retried once, the turn at US$1.50); **US$3.01** if no call is retried. **Session cap US$6** (the plan's own; a budget above it is refused). The dry run prints the plan's name, cap, maximum and hash.
+
+Run #1's plan (`full`, kept in code for its tests and its record): G1's Models API read of the three ids; G7 (a tool round and an answer plan) on fast, deep and Haiku 5.5; G19 (the same request twice); G20 (a stream aborted after its first event); G8 (one system message) on fast, deep and Haiku; `low` effort on all three (G1); and one turn through `kev.handle()` for G9 and G21. G10 and G22 are checked on every call. **Maximum US$7.28** (every call retried once, each attempt within its reservation, the turn at US$1.50); **US$4.39** if no call is retried. The dry run prints the hash to approve.
 
 ## Guards, before any network call
 
@@ -27,7 +29,7 @@ Each refuses with its own exit code (`scripts/kev-live/guards.mts`), never echoi
 | 11 | `HOME_REAL_DATA` is set, to anything |
 | 12 | `DATABASE_URL` is not `localhost`/`127.0.0.1` with the database `home_live_verify`, or overrides its host; or its `current_database()` differs |
 | 13 | `KEV_EVAL_PROVIDER_KEY` is missing or malformed (the runner reads no other key variable: `HOME_KEV_PROVIDER_KEY` and `ANTHROPIC_API_KEY` are ignored); or it is present for `--check-plan` |
-| 14 | `KEV_LIVE_BUDGET_USD` is malformed, above **US$10**, or below the plan's maximum |
+| 14 | `KEV_LIVE_BUDGET_USD` is malformed, above **US$10**, above the plan's own session cap (**US$6** for `verification-2`), or below the plan's maximum |
 | 15 | `KEV_LIVE_APPROVED_PLAN_HASH` is not exactly this plan's hash |
 | 16 | the ledger is missing or malformed, or its remainder is below the budget |
 | 17 | HOME's reservation cap for the run, less what the database already counts, cannot hold the plan |
@@ -38,12 +40,12 @@ Each refuses with its own exit code (`scripts/kev-live/guards.mts`), never echoi
 ## Budget enforcement, in layers
 
 1. **The plan:** each probe's maximum from the gateway's own per-call maxima (`perCallMax`: Sonnet 5.5 US$0.133056, Opus 5.5 US$0.356224; Haiku 5.5 runs on a fast budget, so it is reserved and bounded at Sonnet's per-call maximum, and a completed Haiku call is recorded at Haiku's own prices; unknown or partial usage is still charged conservatively at the fast tier's maximum), so the total is known before anything runs; the owner approves its hash.
-2. **The runner:** the budget must hold the plan and be at most US$10 (a constant tied to owner decision 4); no probe starts if the maxima of those already run plus its own would pass the budget.
+2. **The runner:** the budget must hold the plan, be at most the plan's session cap (US$6 for `verification-2`) and at most US$10 (a constant tied to owner decision 4); no probe starts if the maxima of those already run plus its own would pass the budget.
 3. **HOME's own cap:** the runner sets `HOME_KEV_MONTHLY_CAP_NZD` to the budget in whole NZ dollars (US$10 → NZ$18 → exactly US$10.00), so `reserveAttempt` refuses any attempt the run's own ledger cannot hold, and each call is held to its attempt's reservation by `TurnBudget`. A refusal stops the session.
 4. **The provider:** the evaluation workspace's spend limit and the prepaid credit (plan §3), set by the owner.
 5. **The campaign ledger:** the budget must fit the US$200 less every recorded session.
 
-Choose a budget of **US$10**: a smaller one may refuse at layer 3, because HOME's cap is whole NZ dollars and each attempt reserves up to five calls before it starts.
+For `verification-2`, choose a budget of **US$6**: HOME's cap is then NZ$10 (US$5.555556), which holds the plan's US$4.521568 and every reservation even if each earlier probe settled at its maximum (tested). A smaller budget may refuse at layer 3, because HOME's cap is whole NZ dollars and each attempt reserves up to five calls before it starts. (Run #1's `full` plan used US$10.)
 
 ## Owner steps
 
@@ -56,7 +58,7 @@ Choose a budget of **US$10**: a smaller one may refuse at layer 3, because HOME'
    It prints the database and host, counts and latest `created_at` per table, how many person names are not the fixture family's (a count), accounts not on a `.test` address (the adults' own sign-in accounts appear here) and calendar connections. Record the date and the result. Also confirm in Neon that the Vercel integration is not creating Preview branches from Production, and in Vercel that no provider key is set anywhere (plan §6).
 3. **GitHub:** create the environment **`kev-evals`** (Settings › Environments) with **required reviewer: the owner**, deployment branches limited to `main`; add the secret **`KEV_EVAL_PROVIDER_KEY`** to that environment only (never a repository secret, never Vercel). The key is the evaluation workspace's own (plan §3 step 4).
 4. **Dry run, locally:** `node scripts/kev-live/run.mts`. Read the table; note the hash.
-5. **Approve:** record the plan hash and the budget (US$10) as approved.
+5. **Approve:** record the plan hash and the budget (US$6 for `verification-2`) as approved. A hash approved for an earlier plan is refused.
 6. **Dispatch:** Actions › Kev live verification › Run workflow on `main`, with `plan_hash` and `budget_usd`. The `plan` job checks them without any key; the `run` job then waits for the owner's approval in `kev-evals`.
 7. **Reconcile (plan §9):** download the `kev-live-report` artifact. `report.md` gives each probe and call (tokens, HOME's cost, stop, `inference_geo`, `request-id`) and the reconciliation (no open or unreconciled reservation; each attempt settled at Σ its usage; conservative charges; tokens by model and UTC day). It keeps three figures apart: **reserved** (the session's maximum exposure, its reservations at the tier's prices), **recorded** (what HOME charged, each completed call at its own model's prices, Haiku at Haiku's, unknown or partial usage conservatively), and **at list prices** (every call's reported tokens at its model's prices × 1.1, the figure the provider's bill should match; recorded exceeds it only by the conservative charges). Compare the last table and the list-price figure with the evaluation workspace's Usage and Cost in the Console: HOME's recorded figure must be at least the provider's. Match calls by `request-id` where needed.
 8. **Ledger:** add the session to `docs/m8/M8-LIVE-LEDGER.json` (date, workflow run, plan hash, planned maximum, HOME's recorded µ$) in a reviewed PR before any further session.

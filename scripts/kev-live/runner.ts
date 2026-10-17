@@ -7,6 +7,7 @@ import { systemActor } from '@/trust/actor';
 import { assertFixtureDatabase, fixtureAdult } from './db-checks';
 import {
   assertBudgetCovers,
+  assertBudgetWithinPlanCap,
   assertCapCovers,
   assertEnvironment,
   assertLedgerCovers,
@@ -55,7 +56,7 @@ export type RunnerOptions = {
 /** The plan as a table: ids, gates, tiers, calls and maxima. Never a prompt. */
 export function planLines(plan: Plan): string[] {
   const lines = [
-    `Kev live verification plan v${String(plan.canonical.version)}`,
+    `Kev live verification plan v${String(plan.canonical.version)}: ${plan.name} (session cap US$${usd(plan.sessionCapUsdMicros)})`,
     '',
     'probe                  gates                tier  max US$ (with retry)  max US$ (no retry)',
   ];
@@ -86,6 +87,7 @@ export async function runMode(
       return { exitCode: EXIT.ok, code: 'dry_run' };
     }
     const budget = parseBudgetUsd(env.KEV_LIVE_BUDGET_USD);
+    assertBudgetWithinPlanCap(budget, plan.sessionCapUsdMicros);
     assertBudgetCovers(budget, plan.totalMaxUsdMicros);
     assertPlanHash(env.KEV_LIVE_APPROVED_PLAN_HASH, plan.hash);
     if (opts.ledgerText === null)

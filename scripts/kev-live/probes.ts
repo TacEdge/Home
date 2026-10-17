@@ -99,16 +99,21 @@ const STOPPING = new Set(['auth', 'rate_limited', 'cap_reached']);
 /**
  * G22 and G10 over a probe's evidence: every model call was preceded, in
  * its attempt, by a successful count (or is the retry of a call that was),
- * and every reported usage ran in the US.
+ * and every reported usage ran in the US. Also G22's comparison (recorded,
+ * not a pass condition): the largest difference, in tokens, between a
+ * count and the input its call then reported (uncached, cache read and
+ * cache write together); null when no counted call reported usage.
  */
 export function evidenceChecks(evidence: readonly ProbeEvidence[]): {
   calls: number;
   countedFirst: boolean;
   usInference: boolean;
+  maxCountDelta: number | null;
 } {
   let calls = 0;
   let countedFirst = true;
   let usInference = true;
+  let maxCountDelta: number | null = null;
   const last = new Map<string, ProbeEvidence>();
   for (const e of evidence) {
     if (e.kind === 'models') continue;
@@ -120,10 +125,15 @@ export function evidenceChecks(evidence: readonly ProbeEvidence[]): {
         (before?.kind === 'message' && e.retried);
       if (!ok) countedFirst = false;
       if (e.usage && e.usage.inferenceGeo !== INFERENCE_GEO) usInference = false;
+      if (before?.kind === 'count' && before.counted !== null && e.usage) {
+        const reported = e.usage.inputTokens + e.usage.cacheReadTokens + e.usage.cacheWriteTokens;
+        const delta = Math.abs(reported - before.counted);
+        maxCountDelta = maxCountDelta === null ? delta : Math.max(maxCountDelta, delta);
+      }
     }
     last.set(e.attemptId, e);
   }
-  return { calls, countedFirst, usInference };
+  return { calls, countedFirst, usInference, maxCountDelta };
 }
 
 async function settle(
@@ -338,6 +348,7 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       attempted.checks.modelCalls = ev.calls;
       attempted.checks.countedFirst = ev.countedFirst;
       attempted.checks.usInference = ev.usInference;
+      attempted.checks.maxCountDelta = ev.maxCountDelta;
       if (!ev.countedFirst) attempted.reasons.push('call_not_counted_first');
       if (!ev.usInference) attempted.reasons.push('not_us_inference');
       if (p.kind === 'turn') {

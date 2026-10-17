@@ -828,6 +828,8 @@ Every other gate is unchanged by Package 4.
 
 Every other gate is unchanged by run #1.
 
+**Live verification #2 plan (2026-10-17; ADR 0012 §51; prepared, not run).** The runner's plan is now `verification-2`: G1, G7 on Sonnet 5.5, Opus 5.5 and Haiku 5.5, G19 and the orchestrated turn (G9, G21), with G22 and G10 on every model call and G22's count compared with each call's reported input; maximum US$4.521568, session cap US$6 (live verification plan §12). No gate changes status until that session runs and its report is read.
+
 **What this means for merging** (*as staged by the owner, 2026-10-14*). Package 1b merges on the stage-A gates: G2, G5 and G6 pass, with G16's local half and G20's stub half. Every other gate is recorded with its status and waits for its stage: B (an authorised synthetic verification under its conditions, before any live orchestrated use), C (Package 3), D (Package 4's Preview route) and E (real family data, DEPLOY.md §E item 23). Kev stays off everywhere deployed, with no key, until the stage B, C and D gates have passed and the §E items say so.
 
 **Package 1b merge readiness** (*recorded 2026-10-15, at the owner's final decisions*):

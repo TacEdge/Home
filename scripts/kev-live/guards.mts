@@ -163,6 +163,19 @@ export function parseBudgetUsd(raw: string | undefined): bigint {
   return micros;
 }
 
+/**
+ * The budget may not exceed the plan's own session cap (US$6 for live
+ * verification #2, the owner's planning limit of 2026-10-17; never above
+ * the US$10 ceiling, which parseBudgetUsd enforces).
+ */
+export function assertBudgetWithinPlanCap(budgetMicros: bigint, planCapMicros: bigint): void {
+  if (budgetMicros > planCapMicros)
+    throw new LiveRefusal(
+      'budget',
+      `KEV_LIVE_BUDGET_USD, US$${usd(budgetMicros)}, is above this plan's session cap of US$${usd(planCapMicros)}.`,
+    );
+}
+
 /** The plan's computed maximum must fit the approved budget. */
 export function assertBudgetCovers(budgetMicros: bigint, planMaxMicros: bigint): void {
   if (planMaxMicros > budgetMicros)

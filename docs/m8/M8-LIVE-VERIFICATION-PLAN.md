@@ -127,3 +127,23 @@ The minimum workspace spend limit; how an aborted stream is billed; which retent
 7. **Reconcile** (§9) and record each gate with its date in the register.
 8. **G16** reservation script on home-dev's pooled URL (separate approval).
 9. **Decision:** Package 5 readiness. G4 and G17 follow Package 5 and item 27, with their own budget approval.
+
+## 12. Live verification #2: the reduced plan (prepared 2026-10-17; not run)
+
+Run #1 (2026-10-17, US$0.14 recorded) passed G1, G8 and G20 and was refused at the preflight count on every probe carrying Kev's tools (HTTP 400; Kev's strict tool schemas, corrected in ADR 0012 §50, PR #90). Session 2 re-runs only what run #1 could not reach, on the corrected schemas, under the same conditions: synthetic prompts, the runner's own fixture-only database, the evaluation key, `HOME_REAL_DATA` closed.
+
+| Probe | Gates | Tier | Maximum (with HOME's one retry) |
+|---|---|---|---|
+| `g1-models` (first; stops the session if an id fails) | G1 | — | US$0.00 |
+| `g7-fast` | G7, G22, G10 | Sonnet 5.5 | US$0.532224 |
+| `g7-deep` | G7, G22, G10 | Opus 5.5 | US$1.424896 |
+| `g19-cache-fast` | G19, G22, G10 | Sonnet 5.5 | US$0.532224 |
+| `haiku-g7` | G7, G22, G10 | Haiku 5.5 on a fast budget | US$0.532224 |
+| `g9-g21-turn` | G9, G21, G22, G10 | fast, escalation within the ceiling | US$1.500000 (the turn ceiling) |
+| **Total** | | | **US$4.521568** (US$3.01 with no retry) |
+
+- **Session cap US$6** (the owner's planning limit), carried by the plan and inside its hash; the runner refuses a budget above it. With a US$6 budget HOME's own cap is NZ$10 (US$5.555556), which holds the plan and every reservation even if each earlier probe settled at its maximum.
+- **G22's comparison:** each probe records the largest difference between a count and the input its call then reported.
+- **Not repeated:** G8 (three tiers), G20 and the `low`-effort probes, which passed in run #1.
+- **Plan hash** (the dry run prints it; `node scripts/kev-live/run.mts`): the owner approves the hash printed on `main` after the PR merges. Run #1's `f7f82b9a…` is refused.
+- **Ledger:** US$199.855 of US$200 remains (run #1 recorded at its upper bound); a US$6 budget fits.
