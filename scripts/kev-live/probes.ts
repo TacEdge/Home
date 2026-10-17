@@ -7,6 +7,7 @@ import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { INFERENCE_GEO, LIMITS, TIERS } from '@/kev/config';
 import { handle, type KevEvent } from '@/kev/orchestrator';
 import type { ProbeGateway } from '@/kev/providers/anthropic';
+import { diagnosticLine } from '@/kev/providers/diagnostics';
 import {
   ProviderError,
   type NeutralToolResult,
@@ -375,6 +376,11 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
     ctx.log?.(
       `${p.id}: ${attempted.outcome}${attempted.reasons.length ? ` (${attempted.reasons.join(', ')})` : ''}`,
     );
+    // The provider's refusals, one line each, so the job log alone says what
+    // was refused (no artifact download): structural fields and recognised
+    // detail only, never the provider's message (diagnostics.ts).
+    for (const e of evidence)
+      if (e.error) ctx.log?.(`  ${e.kind} ${e.model}: ${diagnosticLine(e.error, e.error.message)}`);
     if (attempted.stop) stopped = attempted.stop;
     else if (attempted.outcome === 'fail' && p.stopOnFail) stopped = `${p.id}_failed`;
   }

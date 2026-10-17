@@ -29,6 +29,15 @@ import {
   type RunOptions,
   type StopCode,
 } from './types';
+import {
+  detailOfMessage,
+  providerDiagnostic,
+  providerMessageOf,
+  schemaNamesOf,
+  validRequestId,
+  type ProbeErrorDetail,
+  type ProviderDiagnostic,
+} from './diagnostics';
 import { preflightError, validCount } from './preflight';
 
 // The Anthropic adapter (M8 contract §5.1, §5.3, §5.4; ADR 0012 §13, §14):
@@ -248,6 +257,8 @@ export type Mapped = {
   retryable: boolean;
   notSent: boolean;
   retryAfterMs: number | null;
+  /** The provider's structural diagnostic (status, category, request id): an API error's only. */
+  provider: ProviderDiagnostic | null;
 };
 
 /** The provider's per-tier spend cap: a 429 that keeps failing until the month turns. */
@@ -269,6 +280,26 @@ export function retryAfterMs(headers: Headers | undefined): number | null {
   return Number(raw) * 1000;
 }
 
+/**
+ * The probe path's error detail (the live verification runner only, on
+ * synthetic data; never called for a production call): the structural
+ * diagnostic, and the provider message's recognised paths and signals
+ * (diagnostics.ts, detailOfMessage), never its text. Null for an error the
+ * provider did not send (HOME's own refusals, the network, timeouts).
+ */
+function probeErrorOf(
+  err: unknown,
+  mapped: Mapped,
+  params: Parameters<typeof schemaNamesOf>[0],
+): ProbeErrorDetail | null {
+  if (!mapped.provider) return null;
+  const body = err instanceof Anthropic.APIError ? err.error : undefined;
+  return Object.freeze({
+    ...mapped.provider,
+    message: detailOfMessage(providerMessageOf(body), schemaNamesOf(params)),
+  });
+}
+
 export function mapProviderError(err: unknown): Mapped {
   const net = netErrorIn(err);
   if (net)
@@ -277,21 +308,47 @@ export function mapProviderError(err: unknown): Mapped {
       retryable: net.retryable,
       notSent: !net.sent,
       retryAfterMs: null,
+      provider: null,
     };
   if (err instanceof Anthropic.APIUserAbortError)
-    return { code: 'timeout', retryable: false, notSent: false, retryAfterMs: null };
+    return {
+      code: 'timeout',
+      retryable: false,
+      notSent: false,
+      retryAfterMs: null,
+      provider: null,
+    };
   if (err instanceof Anthropic.APIConnectionTimeoutError)
-    return { code: 'timeout', retryable: false, notSent: false, retryAfterMs: null };
+    return {
+      code: 'timeout',
+      retryable: false,
+      notSent: false,
+      retryAfterMs: null,
+      provider: null,
+    };
   if (err instanceof Anthropic.APIConnectionError)
-    return { code: 'unreachable', retryable: true, notSent: false, retryAfterMs: null };
+    return {
+      code: 'unreachable',
+      retryable: true,
+      notSent: false,
+      retryAfterMs: null,
+      provider: null,
+    };
   if (err instanceof Anthropic.APIError) {
     const status = err.status as number | undefined;
     const after = retryAfterMs(err.headers as Headers | undefined);
+    // Typed fields only: the body's category and request id, never its message.
+    const provider = providerDiagnostic({
+      status,
+      body: err.error,
+      headerRequestId: err.requestID,
+    });
     const r = (code: ProviderErrorCode, retryable: boolean): Mapped => ({
       code,
       retryable,
       notSent: false,
       retryAfterMs: after,
+      provider,
     });
     if (status === undefined) {
       // An error event inside a stream that had begun: never retried.
@@ -309,7 +366,13 @@ export function mapProviderError(err: unknown): Mapped {
     // 400 (a workspace spend limit is one, `invalid_request_error`), 404, 422.
     return r('bad_response', false);
   }
-  return { code: 'bad_response', retryable: false, notSent: false, retryAfterMs: null };
+  return {
+    code: 'bad_response',
+    retryable: false,
+    notSent: false,
+    retryAfterMs: null,
+    provider: null,
+  };
 }
 
 /**
@@ -406,9 +469,10 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
     if (signal?.aborted) onOuter();
     else signal?.addEventListener('abort', onOuter, { once: true });
     const observer: FetchObserver = { requests: 0, responseBytes: 0, status: null };
-    const failed = (code: ProviderErrorCode) =>
-      preflightError(code, budget.attemptId, Date.now() - started, 'failed');
+    const failed = (code: ProviderErrorCode, provider: ProviderDiagnostic | null = null) =>
+      preflightError(code, budget.attemptId, Date.now() - started, 'failed', provider);
     let counted: number | null = null;
+    let errorDetail: ProbeErrorDetail | null = null;
     try {
       const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
       counted = validCount(
@@ -418,7 +482,10 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
       return counted;
     } catch (err) {
       if (err instanceof ProviderError) throw err;
-      throw failed(call.signal.aborted ? 'timeout' : mapProviderError(err).code);
+      if (call.signal.aborted) throw failed('timeout');
+      const mapped = mapProviderError(err);
+      if (probe) errorDetail = probeErrorOf(err, mapped, params);
+      throw failed(mapped.code, mapped.provider);
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onOuter);
@@ -428,8 +495,9 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
           attemptId: budget.attemptId,
           model: params.model,
           status: observer.status,
-          requestId: observer.requestId ?? null,
+          requestId: validRequestId(observer.requestId),
           counted,
+          error: errorDetail,
           ms: Date.now() - started,
         }),
       );
@@ -477,6 +545,8 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
     let record: CallRecord | null = null;
     let outcome: 'ok' | ProviderErrorCode = 'ok';
     let blocks: Readonly<Record<string, number>> = Object.freeze({});
+    // The probe path's error detail (synthetic runner only; never production).
+    let errorDetail: ProbeErrorDetail | null = null;
     const growOnly = probe ? probe.growOnly(budget.attemptId, params) : null;
     try {
       const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
@@ -555,7 +625,13 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
         return {
           ok: false,
           error,
-          mapped: { code: 'refusal', retryable: false, notSent: false, retryAfterMs: null },
+          mapped: {
+            code: 'refusal',
+            retryable: false,
+            notSent: false,
+            retryAfterMs: null,
+            provider: null,
+          },
           noResponseBytes: false,
         };
       }
@@ -593,14 +669,33 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
       const neverSent = observer.requests === 0;
       const base: Mapped =
         err instanceof InputOverCap || overInput
-          ? { code: 'too_large', retryable: false, notSent: false, retryAfterMs: null }
+          ? {
+              code: 'too_large',
+              retryable: false,
+              notSent: false,
+              retryAfterMs: null,
+              provider: null,
+            }
           : err instanceof GeoRefused || geoRefused
-            ? { code: 'bad_response', retryable: false, notSent: false, retryAfterMs: null }
+            ? {
+                code: 'bad_response',
+                retryable: false,
+                notSent: false,
+                retryAfterMs: null,
+                provider: null,
+              }
             : timedOut || outerAborted || probeAborted
-              ? { code: 'timeout', retryable: false, notSent: false, retryAfterMs: null }
+              ? {
+                  code: 'timeout',
+                  retryable: false,
+                  notSent: false,
+                  retryAfterMs: null,
+                  provider: null,
+                }
               : mapProviderError(err);
       const mapped: Mapped = neverSent ? { ...base, notSent: true } : base;
       outcome = mapped.code;
+      if (probe) errorDetail = probeErrorOf(err, mapped, params);
       // Final usage when the stream completed (a geo or cap refusal after
       // it); otherwise what message_start and the deltas reported, which is
       // partial and charged conservatively (I2).
@@ -620,6 +715,7 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
         ms,
         partialUsage: reported,
         retried,
+        ...(mapped.provider ? { provider: mapped.provider } : {}),
       });
       const streamStarted =
         observer.status !== null && observer.status < 300 && observer.responseBytes > 0;
@@ -633,8 +729,9 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
           attemptId: budget.attemptId,
           model,
           status: observer.status,
-          requestId: observer.requestId ?? null,
+          requestId: validRequestId(observer.requestId),
           outcome,
+          error: errorDetail,
           stop: record ? record.stop : null,
           usage: record ? record.usage : null,
           costUsdMicros: record ? record.costUsdMicros : null,
@@ -791,20 +888,23 @@ export function buildProbeGateway(
           kind: 'models' as const,
           model: id,
           status: observer.status,
-          requestId: observer.requestId ?? null,
+          requestId: validRequestId(observer.requestId),
           outcome: 'ok' as const,
+          error: null,
           id: typeof info.id === 'string' ? info.id : null,
           maxInputTokens: typeof info.max_input_tokens === 'number' ? info.max_input_tokens : null,
           maxTokens: typeof info.max_tokens === 'number' ? info.max_tokens : null,
           ms: Date.now() - started,
         });
       } catch (err) {
+        const mapped = call.signal.aborted ? null : mapProviderError(err);
         entry = Object.freeze({
           kind: 'models' as const,
           model: id,
           status: observer.status,
-          requestId: observer.requestId ?? null,
-          outcome: call.signal.aborted ? ('timeout' as const) : mapProviderError(err).code,
+          requestId: validRequestId(observer.requestId),
+          outcome: mapped ? mapped.code : ('timeout' as const),
+          error: mapped ? probeErrorOf(err, mapped, {}) : null,
           id: null,
           maxInputTokens: null,
           maxTokens: null,

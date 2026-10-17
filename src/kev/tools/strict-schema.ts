@@ -5,6 +5,10 @@ import 'server-only';
 // `output_config.format`; both take only a subset of JSON Schema, and a
 // schema outside it is refused with HTTP 400 on the Messages API and on the
 // token-counting endpoint (G22's preflight), which is how run #1 failed.
+// Inside the subset is necessary, not sufficient: the count does not compile
+// strict schemas into grammars ("Count tokens without compilation"), so a
+// 200 from it is no proof the Messages API will accept them (run #2: counted
+// 200, refused 400; ADR 0012 §52).
 // Source: the provider's Structured outputs page, "JSON Schema limitations"
 // (verified 2026-10-17): numerical constraints (`minimum`, `maximum`,
 // `multipleOf`), string constraints (`minLength`, `maxLength`) and array
