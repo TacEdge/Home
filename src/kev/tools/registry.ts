@@ -17,6 +17,7 @@ import { getTasks } from './get-tasks';
 import { getToday } from './get-today';
 import { getWeather } from './get-weather';
 import { search } from './search';
+import { toStrictSubset } from './strict-schema';
 import {
   assertKevContext,
   MAX_ITEMS,
@@ -115,7 +116,11 @@ export const REGISTRY: ReadonlyMap<string, RegistryEntry> = defineRegistry(ENTRI
 /**
  * A tool's input as a static JSON schema: generated from its Zod schema, so
  * the two never disagree; no `$schema`; a string's `format` kept without
- * Zod's long equivalent `pattern` (the Zod schema still checks every call).
+ * Zod's long equivalent `pattern` (the Zod schema still checks every call);
+ * and, since the tools are sent `strict: true`, inside the provider's strict
+ * subset: the length, range and count limits it refuses are left out of the
+ * provider's copy (`strict-schema.ts`; live verification #1, 2026-10-17),
+ * while the Zod schema keeps enforcing every one of them.
  * Byte-stable: the same bytes every build, for every adult, on every day.
  */
 export function jsonSchemaOf(schema: z.ZodType): Record<string, unknown> {
@@ -135,7 +140,7 @@ export function jsonSchemaOf(schema: z.ZodType): Record<string, unknown> {
     }
     return out;
   };
-  return clean(raw) as Record<string, unknown>;
+  return toStrictSubset(clean(raw)) as Record<string, unknown>;
 }
 
 /**

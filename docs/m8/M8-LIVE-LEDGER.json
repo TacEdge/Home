@@ -2,5 +2,18 @@
   "format": "home-kev-live-ledger",
   "version": 1,
   "campaignUsdMicros": "200000000",
-  "sessions": []
+  "sessions": [
+    {
+      "date": "2026-10-17",
+      "workflowRun": "Kev live verification #1 (run 38996104678, commit a743d7d)",
+      "planHash": "f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8",
+      "plannedMaxUsdMicros": "7277024",
+      "recordedUsdMicros": "145000",
+      "recordedBasis": "HOME recorded US$0.14 (the report's figure, rounded half-up to the cent, so 135,000 to 144,999 µ$). Entered at the upper bound until the exact figure from the report's JSON replaces it, so the remainder is never overstated.",
+      "providerListPrice": "The report's at-list-prices figure (reported tokens at each model's prices × 1.1); below HOME's recorded figure by the aborted G20 call's conservative charge.",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "Twelve attempts, one each, held and released in turn: 9 fast × US$0.66528 + 3 deep × US$1.50 = US$10.48752 summed; at most one hold open at a time, under the US$10 session cap. 0 open, 0 unreconciled, 0 settlement discrepancies at the end.",
+      "outcome": "Five tool-carrying probes refused at the preflight count with HTTP 400 (strict schema keywords; corrected, ADR 0012 §50); see the gate register's live verification #1 update (contract §5.7)."
+    }
+  ]
 }

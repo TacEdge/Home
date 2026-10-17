@@ -8,6 +8,7 @@ import { createProject } from '@/domain/projects/service';
 import { createTask } from '@/domain/tasks/service';
 import { INJECTIONS, SCENARIOS } from '@/kev/evals/scenarios';
 import { resolveRef, scriptFor, type FixtureIds } from '@/kev/evals/scripted';
+import { STRICT_LIMITS, strictComplexity, strictSchemaViolations } from '@/kev/tools/strict-schema';
 import { SCENARIO_CLASSES, type Scenario } from '@/kev/evals/types';
 import { CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { WEATHER_VARIABLES, WELLINGTON, weatherEnv } from '../fixtures/weather';
@@ -209,6 +210,20 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
         `${n} in ${JSON.stringify(shownTexts)}`,
       ).toBe(true);
     if (e.salvaged !== undefined) expect(content.salvaged === true).toBe(e.salvaged);
+    // Structural, every scenario (live verification #1, ADR 0012 §50): every
+    // tool schema and answer format sent is inside the provider's strict
+    // subset, and each request within its complexity limits.
+    for (const r of all.flatMap((t) => t.provider.requests)) {
+      const schemas = [
+        ...r.tools.map((d) => d.inputSchema),
+        ...(r.outputFormat ? [r.outputFormat] : []),
+      ];
+      for (const sc of schemas) expect(strictSchemaViolations(sc)).toEqual([]);
+      const c = strictComplexity(schemas);
+      expect(r.tools.length).toBeLessThanOrEqual(STRICT_LIMITS.strictTools);
+      expect(c.optionalParameters).toBeLessThanOrEqual(STRICT_LIMITS.optionalParameters);
+      expect(c.unionParameters).toBeLessThanOrEqual(STRICT_LIMITS.unionParameters);
+    }
     // Structural, every scenario: nothing of the other adult's or sensitive, anywhere.
     const requests = all.flatMap((t) => t.provider.requests.map(requestBytes)).join('\n');
     for (const n of [`ni-${other}-`, CANARY_MARK[other], SENSITIVE_MARK]) {
