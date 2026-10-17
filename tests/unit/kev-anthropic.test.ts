@@ -31,6 +31,7 @@ const { createProviderFetchForTests, PROVIDER_FETCH_LIMITS } =
 const {
   anthropicClientOptions,
   buildAnthropicProvider,
+  buildProbeGateway,
   createAnthropicProvider,
   messagesParams,
   retryAfterMs,
@@ -249,6 +250,7 @@ describe('N7: HOME’s one retry', () => {
       retryable,
       notSent: false,
       retryAfterMs,
+      provider: null,
     });
     expect(retryDelayMs(m(true), false)).toBe(1_000);
     expect(retryDelayMs(m(true), true)).toBeNull(); // after the first byte: never
@@ -414,6 +416,7 @@ describe('N7: HOME’s one retry', () => {
       retryable: true,
       notSent: false,
       retryAfterMs,
+      provider: null,
     });
     expect(retryDelayMs(m(retryAfterMs(h({ 'retry-after': '2' }))), false)).toBe(2_000);
     for (const v of ['3', '0x2', '1e0', 'Wed, 21 Oct 2026 07:28:00 GMT', '-1', ''])
@@ -742,3 +745,179 @@ describe('I4: the provider’s own input count over 32,000 tokens ends the call 
     expect(b.halted).toBeNull();
   });
 });
+
+describe('provider error diagnostics (ADR 0012 §52): structural fields kept, never the message', () => {
+  const REQ = 'req_011CSHoEeqs5C35K2UUqR7Fy';
+  const PROMPT = 'canary-question-fragment';
+  const TEXT = 'canary-provider-text';
+  /** A 400 as the provider sends it, its message carrying the key, a prompt and free text. */
+  const refusal =
+    (
+      code: number,
+      type: unknown,
+      opts: { bodyId?: unknown; headerId?: string; message?: unknown } = {},
+    ) =>
+    (_req: http.IncomingMessage, res: http.ServerResponse) => {
+      res.writeHead(code, {
+        'content-type': 'application/json',
+        ...(opts.headerId ? { 'request-id': opts.headerId } : {}),
+      });
+      res.end(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type,
+            message:
+              opts.message ??
+              `tools.0.custom.input_schema.properties.${TEXT}: Schema is too complex for compilation (${KEY}; ${PROMPT})`,
+          },
+          ...(opts.bodyId !== undefined ? { request_id: opts.bodyId } : {}),
+        }),
+      );
+    };
+  const ask = () =>
+    request({ messages: [{ role: 'user', content: [{ type: 'text', text: PROMPT }] }] });
+
+  it('an HTTP 400 keeps bad_response, and gains status, category and request id: nothing else', async () => {
+    stub.queue.push(refusal(400, 'invalid_request_error', { bodyId: REQ }));
+    const lines: string[] = [];
+    const log = createLogger({ sink: (l) => lines.push(l) });
+    const e = await failure(provider().run(ask(), { budget: budget() }));
+    expect(e.code).toBe('bad_response');
+    expect(e.detail.provider).toEqual({
+      status: 400,
+      type: 'invalid_request_error',
+      requestId: REQ,
+    });
+    log.error('kev_call', { code: e.code, error: e, detail: e.detail });
+    const texts = [String(e), e.message, JSON.stringify(e), inspect(e, { depth: 6 }), ...lines];
+    for (const t of texts)
+      for (const s of [KEY, PROMPT, TEXT, 'too complex', 'compilation'])
+        expect(t, s).not.toContain(s);
+    expect(lines.join('')).toContain(REQ);
+  });
+
+  it('the request id: the body’s, else the header’s, and only in the provider’s shape', async () => {
+    stub.queue.push(refusal(400, 'invalid_request_error', { headerId: 'req_HEADER00001' }));
+    expect(
+      (await failure(provider().run(ask(), { budget: budget() }))).detail.provider?.requestId,
+    ).toBe('req_HEADER00001');
+    stub.queue.push(
+      refusal(400, 'invalid_request_error', {
+        bodyId: `req_${TEXT} ${KEY}`,
+        headerId: 'req_bad id',
+      }),
+    );
+    const e = await failure(provider().run(ask(), { budget: budget() }));
+    expect(e.detail.provider).toEqual({
+      status: 400,
+      type: 'invalid_request_error',
+      requestId: null,
+    });
+    expect(JSON.stringify(e.detail)).not.toContain(TEXT);
+  });
+
+  it('a category outside the documented list is `unrecognised`; a malformed body keeps the status alone', async () => {
+    stub.queue.push(refusal(400, `invalid_request_error ${TEXT}`));
+    expect((await failure(provider().run(ask(), { budget: budget() }))).detail.provider).toEqual({
+      status: 400,
+      type: 'unrecognised',
+      requestId: null,
+    });
+    stub.queue.push((_req, res) => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(`not json ${TEXT} ${KEY}`);
+    });
+    const e = await failure(provider().run(ask(), { budget: budget() }));
+    expect(e.code).toBe('bad_response');
+    expect(e.detail.provider).toEqual({ status: 400, type: null, requestId: null });
+    expect(inspect(e, { depth: 6 })).not.toContain(TEXT);
+  });
+
+  it('the closed codes are unchanged, and each status is kept beside them', async () => {
+    const cases: [number, string, string][] = [
+      [400, 'invalid_request_error', 'bad_response'],
+      [401, 'authentication_error', 'auth'],
+      [403, 'permission_error', 'auth'],
+      [404, 'not_found_error', 'bad_response'],
+      [413, 'request_too_large', 'too_large'],
+      [422, 'invalid_request_error', 'bad_response'],
+    ];
+    for (const [code, type, expected] of cases) {
+      stub.queue.push(refusal(code, type, { bodyId: REQ }));
+      const e = await failure(provider().run(ask(), { budget: budget() }));
+      expect(e.code, String(code)).toBe(expected);
+      expect(e.detail.provider, String(code)).toEqual({ status: code, type, requestId: REQ });
+    }
+  });
+
+  it('a refused preflight count carries the same structural diagnostic, and no model call is made', async () => {
+    stub.countQueue.push(refusal(400, 'invalid_request_error', { bodyId: REQ }));
+    const e = await failure(provider().run(ask(), { budget: budget() }));
+    expect(e.code).toBe('bad_response');
+    expect(e.detail.preflight).toBe('failed');
+    expect(e.detail.provider).toEqual({
+      status: 400,
+      type: 'invalid_request_error',
+      requestId: REQ,
+    });
+    expect(stub.seen).toHaveLength(0);
+    expect(inspect(e, { depth: 6 })).not.toContain(TEXT);
+  });
+
+  it('HOME’s own failures carry no provider diagnostic', async () => {
+    stub.queue.push(
+      (req) => req.socket.destroy(),
+      (req) => req.socket.destroy(),
+    );
+    const e = await failure(provider().run(ask(), { budget: budget() }));
+    expect(e.detail.provider).toBeUndefined();
+  });
+
+  it('the probe path alone reads the message, keeping recognised paths and signals, never its text', async () => {
+    const g = buildProbeGateway(KEY, createProviderFetchForTests(KEY, { stubPort: stub.port }), {});
+    const tools = [
+      {
+        name: 'get_tasks',
+        description: 'Synthetic tool.',
+        inputSchema: {
+          type: 'object',
+          properties: { assignee: { type: 'string' } },
+          additionalProperties: false,
+        },
+      },
+    ];
+    stub.countQueue.push(countOk);
+    stub.queue.push(
+      refusal(400, 'invalid_request_error', {
+        bodyId: REQ,
+        message: `tools.0.custom.input_schema.properties.assignee.anyOf: 'const' is not supported; tools.0.custom.input_schema.properties.${TEXT}: ${KEY} ${PROMPT}`,
+      }),
+    );
+    await failure(g.run(request({ tools, messages: ask().messages }), { budget: budget() }));
+    const msg = g.evidence().find((x) => x.kind === 'message');
+    expect(msg?.kind === 'message' && msg.error).toEqual({
+      status: 400,
+      type: 'invalid_request_error',
+      requestId: REQ,
+      message: {
+        paths: [
+          'tools.0.custom.input_schema.properties.assignee.anyOf',
+          'tools.0.custom.input_schema.properties.*',
+        ],
+        signals: expect.arrayContaining(['not_supported', 'keyword:const', 'keyword:anyOf']),
+        chars: expect.any(Number),
+      },
+    });
+    const text = JSON.stringify(g.evidence(), (_k, v) => (typeof v === 'bigint' ? String(v) : v));
+    for (const s of [KEY, PROMPT, TEXT, 'is not supported']) expect(text, s).not.toContain(s);
+    // The probe's count before it succeeded: no error on it.
+    const count = g.evidence().find((x) => x.kind === 'count');
+    expect(count?.kind === 'count' && count.error).toBeNull();
+  });
+});
+
+function countOk(_req: http.IncomingMessage, res: http.ServerResponse) {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ input_tokens: 10 }));
+}

@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { user } from '@/db/schema';
 import { createPerson } from '@/domain/people/service';
 import type { UserActor } from '@/trust/actor';
@@ -71,7 +73,7 @@ const thinking = (index: number) =>
 
 /** One handler for every request: it answers by what the request is (synthetic). */
 const smart: Handler = (req, res, raw) => {
-  const id = `req_synthetic_${++ids}`;
+  const id = `req_synthetic${++ids}`;
   if (req.method === 'GET') {
     const model = (req.url ?? '').split('/').pop();
     res.writeHead(200, { 'content-type': 'application/json', 'request-id': id });
@@ -347,7 +349,7 @@ describe('the plan, live path, against a local stub', () => {
         if (p.kind !== 'models' && p.kind !== 'turn')
           expect(text).not.toContain(p.request.question);
         else if (p.kind === 'turn') expect(text).not.toContain(p.question);
-      expect(text).toContain('req_synthetic_');
+      expect(text).toContain('req_synthetic');
       expect(text).toContain(plan.hash);
     }
     const parsed = JSON.parse(report.json) as { probes: { calls: { inferenceGeo?: string }[] }[] };
@@ -450,6 +452,220 @@ describe('the plan, live path, against a local stub', () => {
     expectNothingLeftOpen(rec, before);
     expect(perCallMax('fast')).toBe(133_056n);
     expect(TIERS.fast.maxTokens).toBe(4_096);
+  });
+});
+
+describe('provider refusals are diagnosable from the job log, and nothing else leaks (ADR 0012 §52)', () => {
+  const MESSAGE_TEXT = 'canary-provider-free-text';
+  /** Every Messages API call refused as run #2's were, the message carrying the key, a prompt and free text. */
+  const refuse: Handler = (_req, res, raw) => {
+    const id = `req_refused${++ids}`;
+    const body = JSON.parse(raw) as { messages: { content: unknown }[] };
+    res.writeHead(400, { 'content-type': 'application/json', 'request-id': id });
+    res.end(
+      JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message:
+            `tools.3.custom.input_schema.properties.assignee.anyOf.0: Schema is too complex for compilation; ` +
+            `tools.3.custom.input_schema.properties.${MESSAGE_TEXT}: ${KEY} ${CANARY} ${JSON.stringify(body.messages[0]?.content)}`,
+        },
+        request_id: id,
+      }),
+    );
+  };
+
+  it('each refused call prints its status, category, request id, paths and signals; the report keeps them; no secret, prompt or provider text anywhere', async () => {
+    const plan = buildPlan();
+    stub.queue.length = 0;
+    for (let i = 0; i < 50; i++)
+      stub.queue.push((req, res, raw) =>
+        req.method === 'GET' ? smart(req, res, raw) : refuse(req, res, raw),
+      );
+    const logged: string[] = [];
+    const out: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        out.push(String(chunk));
+        return true;
+      });
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        out.push(String(chunk));
+        return true;
+      });
+    const since = new Date(Date.now() - 1_000);
+    let run: Awaited<ReturnType<typeof executePlan>>;
+    try {
+      run = await executePlan(plan, {
+        gateway: gateway(),
+        actor: runner,
+        deps: { db },
+        budgetMicros: plan.sessionCapUsdMicros,
+        log: (l) => logged.push(l),
+      });
+    } finally {
+      spy.mockRestore();
+      errSpy.mockRestore();
+    }
+    // The closed codes are unchanged.
+    const by = Object.fromEntries(run.results.map((r) => [r.id, r]));
+    for (const id of ['g7-fast', 'g7-deep', 'g19-cache-fast', 'haiku-g7'])
+      expect(by[id]!.reasons, id).toContain('bad_response');
+    expect(by['g9-g21-turn']!.reasons).toContain('turn_bad_response');
+
+    // The job log: one diagnostic line under each refused call.
+    const diag = logged.filter((l) => l.startsWith('  message '));
+    expect(diag.length).toBe(5);
+    for (const l of diag)
+      expect(l).toMatch(
+        /^ {2}message \S+: status 400; type invalid_request_error; request-id req_refused\d+; paths tools\.3\.custom\.input_schema\.properties\.assignee\.anyOf\.0 tools\.3\.custom\.input_schema\.properties\.\*; signals [^;]*schema_too_complex[^;]*; message \d+ chars \(not kept\)$/,
+      );
+
+    // The production turn's one log line: structural fields only.
+    const turnLine = out.find((l) => l.includes('"event":"kev_turn"'));
+    expect(turnLine).toBeDefined();
+    expect(JSON.parse(turnLine!)).toMatchObject({
+      outcome: 'error',
+      errorCode: 'bad_response',
+      providerStatus: 400,
+      providerErrorType: 'invalid_request_error',
+      providerRequestId: expect.stringMatching(/^req_refused\d+$/),
+    });
+
+    const rec = await reconcile(
+      db,
+      run.results.flatMap((r) => r.attemptIds),
+    );
+    const report = buildReport({
+      plan,
+      budgetMicros: plan.sessionCapUsdMicros,
+      capNzd: 10,
+      run,
+      reconciliation: rec,
+      startedAt: since,
+      finishedAt: new Date(),
+    });
+    expect(report.markdown).toContain('## Provider errors');
+    expect(report.json).toContain('schema_too_complex');
+    expect(report.json).toContain('tools.3.custom.input_schema.properties.assignee.anyOf.0');
+
+    // What the family's records hold: no provider text, no request id.
+    const stored = await db.execute(
+      sql`select content::text as c from message where created_at >= ${since.toISOString()}::timestamptz`,
+    );
+    const storedText = JSON.stringify(stored.rows);
+    expect(storedText).not.toContain('req_refused');
+
+    const question = plan.probes.find((p) => p.kind === 'turn');
+    for (const text of [
+      report.json,
+      report.markdown,
+      logged.join('\n'),
+      out.join(''),
+      storedText,
+    ]) {
+      for (const s of [KEY, CANARY, MESSAGE_TEXT, 'too complex for compilation'])
+        expect(text, s).not.toContain(s);
+      for (const p of plan.probes)
+        if (p.kind !== 'models' && p.kind !== 'turn')
+          expect(text).not.toContain(p.request.question);
+    }
+    for (const text of [report.json, report.markdown, logged.join('\n'), out.join('')])
+      if (question?.kind === 'turn') expect(text).not.toContain(question.question);
+  });
+});
+
+describe('the live probes’ request shapes (a regression snapshot)', () => {
+  const SNAPSHOT = join('tests', 'integration', 'kev-live-request-shapes.json');
+  const sha = (v: unknown) =>
+    createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
+  type Body = {
+    model?: string;
+    max_tokens?: number;
+    stream?: boolean;
+    inference_geo?: string;
+    thinking?: unknown;
+    tool_choice?: unknown;
+    output_config?: { effort?: string; format?: { type?: string; schema?: unknown } };
+    system?: { type: string; cache_control?: unknown }[];
+    tools?: { name: string; strict?: boolean; input_schema?: unknown }[];
+    messages?: { role: string; content: unknown }[];
+  };
+  /** A body's shape: every request setting, the schemas by hash, the messages by role and block type; no text. */
+  const shapeOf = (b: Body) => ({
+    model: b.model ?? null,
+    max_tokens: b.max_tokens ?? null,
+    stream: b.stream ?? null,
+    inference_geo: b.inference_geo ?? null,
+    thinking: b.thinking ?? null,
+    tool_choice: b.tool_choice ?? null,
+    output_config: b.output_config
+      ? {
+          effort: b.output_config.effort ?? null,
+          format: b.output_config.format
+            ? { type: b.output_config.format.type, schema: sha(b.output_config.format.schema) }
+            : null,
+        }
+      : null,
+    system: (b.system ?? []).map((s) => ({ type: s.type, cache_control: s.cache_control ?? null })),
+    tools: (b.tools ?? []).map((t) => ({
+      name: t.name,
+      strict: t.strict ?? null,
+      schema: sha(t.input_schema),
+    })),
+    messages: (b.messages ?? []).map((m) => ({
+      role: m.role,
+      blocks: Array.isArray(m.content)
+        ? (m.content as { type: string }[]).map((c) => c.type)
+        : [typeof m.content],
+    })),
+    keys: Object.keys(b).sort(),
+  });
+
+  it('every Messages API body and count body the verification-2 plan sends, as sent on the wire', async () => {
+    const plan = buildPlan();
+    // A fresh synthetic adult, so the turn starts with no history whatever ran before.
+    const id = `live-shapes-${randomUUID()}`;
+    const email = `${id}@example.test`;
+    await admin.db.insert(user).values({ id, name: 'Synthetic shapes adult', email });
+    const fresh: UserActor = { kind: 'user', userId: id, email, via: 'kev', channel: 'web' };
+    await executePlan(plan, {
+      gateway: gateway(),
+      actor: fresh,
+      deps: { db },
+      budgetMicros: plan.sessionCapUsdMicros,
+    });
+    const shapes = {
+      plan: plan.name,
+      messages: stub.seen
+        .filter((x) => x.method === 'POST')
+        .map((x) => shapeOf(JSON.parse(x.body) as Body)),
+      counts: stub.counts.map((x) => shapeOf(JSON.parse(x.body) as Body)),
+    };
+    const text = JSON.stringify(shapes);
+    if (process.env.KEV_SCHEMA_SNAPSHOT === 'write') writeFileSync(SNAPSHOT, `${text}\n`);
+    expect(existsSync(SNAPSHOT)).toBe(true);
+    expect(JSON.stringify(JSON.parse(readFileSync(SNAPSHOT, 'utf8')))).toBe(text);
+    // What run #2 established, held here so a change is deliberate: the
+    // tool probes send every strict tool and the answer format together
+    // with tool_choice auto (G7, refused live); G19 the same with none
+    // (accepted live).
+    const first = (n: number) => shapes.messages[n]!;
+    expect(first(0)).toMatchObject({
+      tool_choice: { type: 'auto' },
+      output_config: { format: { type: 'json_schema' } },
+    });
+    expect(first(0).tools.every((t) => t.strict === true)).toBe(true);
+    expect(
+      shapes.messages.some((m) => (m.tool_choice as { type?: string } | null)?.type === 'none'),
+    ).toBe(true);
+    // A count is the body without max_tokens, inference_geo and stream.
+    for (const c of shapes.counts)
+      for (const k of ['max_tokens', 'inference_geo', 'stream']) expect(c.keys).not.toContain(k);
   });
 });
 

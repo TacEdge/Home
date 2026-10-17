@@ -14,6 +14,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "Twelve attempts, one each, held and released in turn: 9 fast × US$0.66528 + 3 deep × US$1.50 = US$10.48752 summed; at most one hold open at a time, under the US$10 session cap. 0 open, 0 unreconciled, 0 settlement discrepancies at the end.",
       "outcome": "Five tool-carrying probes refused at the preflight count with HTTP 400 (strict schema keywords; corrected, ADR 0012 §50); see the gate register's live verification #1 update (contract §5.7)."
+    },
+    {
+      "date": "2026-10-17",
+      "workflowRun": "Kev live verification #2 (run 39007719396, commit ba77d7f)",
+      "planHash": "fbc4a53624226bc5a057d6f59c3a57738480c26a3b81939bd4f9bd2de95e55fd",
+      "plannedMaxUsdMicros": "4521568",
+      "recordedUsdMicros": "778283",
+      "recordedBasis": "Exact: the report's JSON reconciliation (artifact 12092017837), read by the owner 2026-10-17: recordedUsdMicros 778,283; openCount 0, unreconciledCount 0, mismatched 0; conservativeRows 4 (the four calls refused with HTTP 400 before any usage, each charged its per-call maximum: 3 × 133,056 µ$ fast, Haiku included, + 356,224 µ$ deep = 755,392 µ$); G19's two completed calls the remaining 22,891 µ$.",
+      "providerListPrice": "atListPricesUsdMicros 22,891 (the report's figure: G19's two completed calls' reported tokens at list prices × 1.1). The refused calls reported no tokens.",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet. The four 400s are expected not to be billed by the provider; unconfirmed.",
+      "reservations": "Five model attempts (g7-fast, g7-deep, g19-cache-fast, haiku-g7, the G9/G21 turn), each held and released in turn under the US$6 session cap; settled.",
+      "outcome": "All five count_tokens preflights 200 (the owner's reading of the report). The first Messages API call of g7-fast, g7-deep, haiku-g7 and the G9/G21 turn refused with HTTP 400 (bad_response); the provider's explanation was discarded (diagnostics added, ADR 0012 §52). g19-cache-fast's two calls 200, cache written then read. G7, G9, G21 and full G22 not verified."
     }
   ]
 }
