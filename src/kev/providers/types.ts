@@ -264,6 +264,9 @@ export type ProbeEvidence =
       usage: CallUsage | null;
       /** What HOME charged for the call (µ$), or null when nothing was recorded (never sent). */
       costUsdMicros: bigint | null;
+      /** The request's `tool_choice` type and whether it carried the answer format (ADR 0012 §54). */
+      toolChoice: string | null;
+      answerFormat: boolean;
       /** Content block types in the final message, counted (never their content). */
       blocks: Readonly<Record<string, number>>;
       /** Whether this request's system, tools and messages extend the attempt's previous request (G9); null for the first. */

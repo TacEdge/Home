@@ -20,6 +20,7 @@ import { LIMITS } from '@/kev/config';
 import { estimateTokens, requestTokens } from '@/kev/context/tokens';
 import {
   ANSWER_NOW_NOTE,
+  ANSWER_PHASE_NOTE,
   BUNDLE_LEAD,
   handle,
   HOME_LABEL,
@@ -27,6 +28,7 @@ import {
 } from '@/kev/orchestrator';
 import { ProviderError, type KevProvider } from '@/kev/providers/types';
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
+import type { ScriptStep } from '@/kev/providers/scripted';
 import type { Ref } from '@/kev/tools/types';
 import { listAudit } from '@/trust/audit';
 import { systemActor, type UserActor } from '@/trust/actor';
@@ -267,10 +269,20 @@ describe('the event stream (§4.4, §11.4): progress first, the checked answer o
       }),
       answer('Here’s {when}.', [swim]),
     ]);
-    expect(t.provider.requests).toHaveLength(2);
+    // The read phase's end, the answer phase, the regeneration (ADR 0012 §54).
+    expect(t.provider.requests).toHaveLength(3);
     // M-1: every model call was counted first (G22), the regeneration's too.
     expect(t.provider.counted).toHaveLength(t.provider.requests.length);
-    const second = t.provider.requests[1]!;
+    // The answer phase: HOME's fixed note, then `none` with the format.
+    const phase = t.provider.requests[1]!;
+    expect(phase.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: ANSWER_PHASE_NOTE }],
+    });
+    expect(phase.toolChoice).toBe('none');
+    expect(phase.outputFormat).toBeDefined();
+    expect(t.provider.requests[0]!.outputFormat).toBeUndefined();
+    const second = t.provider.requests[2]!;
     const note = second.messages.at(-1)!;
     expect(note.role).toBe('user');
     const noteText = 'content' in note ? (note.content.at(-1) as { text: string }).text : '';
@@ -285,7 +297,8 @@ describe('the event stream (§4.4, §11.4): progress first, the checked answer o
       text: 'Here’s today.',
     });
     const [kev] = await kevRows(f.kev.sam);
-    expect((kev!.content as { calls: unknown[] }).calls).toHaveLength(2);
+    // Each call's record: the read phase's end, the answer phase, the regeneration.
+    expect((kev!.content as { calls: unknown[] }).calls).toHaveLength(3);
   });
 
   it('V18: two failing plans: the fallback with the ledger’s rows rendered, stored with codes, the rejected words neither shown nor stored', async () => {
@@ -330,7 +343,8 @@ describe('the event stream (§4.4, §11.4): progress first, the checked answer o
       answer('flagged', [football]),
       answer('here_you_go', [football], { type: 'suggestion', phrase: 'raincoat', about: [0] }),
     ]);
-    expect(t.provider.requests).toHaveLength(3);
+    // The read, the read phase's end, the two plans (ADR 0012 §54).
+    expect(t.provider.requests).toHaveLength(4);
     expect(t.done).toMatchObject({ outcome: 'answer', escalated: false });
     expect(t.events.find((e) => e.type === 'say')).toEqual({ type: 'say', text: SALVAGE_LEAD });
     expect(t.events.find((e) => e.type === 'detail')).toEqual({
@@ -552,7 +566,8 @@ describe('G22 in the turn: the preflight count fails closed, with zero model cal
           count: () => n,
         },
       );
-      expect(t.provider.requests).toHaveLength(made ? 1 : 0);
+      // Made: the read-phase call, then the answer phase (ADR 0012 §54).
+      expect(t.provider.requests).toHaveLength(made ? 2 : 0);
       expect(t.done.outcome).toBe(made ? 'answer' : 'fallback');
       if (!made)
         expect((await kevRows(f.kev.sam))[0]!.content).toMatchObject({
@@ -567,7 +582,8 @@ describe('G22 in the turn: the preflight count fails closed, with zero model cal
       deps: { turnDeadlineMs: 9_500 },
     });
     expect(t.done.outcome).toBe('answer');
-    expect(t.provider.requests).toHaveLength(1);
+    // The read phase, then the answer phase: each counted first.
+    expect(t.provider.requests).toHaveLength(2);
     await clockForward(admin, 2);
     const started = Date.now();
     const u = await turn(f.kev.sam, 'What’s happening today?', [answer('here_you_go', [swim])], {
@@ -589,7 +605,8 @@ describe('G22 in the turn: the preflight count fails closed, with zero model cal
       tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
       answer('Here’s {when}.', [football]),
     ]);
-    expect(t.provider.counted).toHaveLength(2);
+    // The read, the read phase's end, the answer phase (ADR 0012 §54).
+    expect(t.provider.counted).toHaveLength(3);
     expect(t.provider.counted.map(requestBytes)).toEqual(t.provider.requests.map(requestBytes));
   });
 });
@@ -711,7 +728,8 @@ describe('tool execution: choice, caps and refusals (L1–L3, S7)', () => {
       answer('Swimming at 4.', [swim]),
       tools(['get_tasks', {}]),
     ]);
-    expect(t.provider.requests.map((r) => r.toolChoice)).toEqual(['auto', 'none']);
+    // The read phase's end (auto), the answer phase (none), the regeneration (none).
+    expect(t.provider.requests.map((r) => r.toolChoice)).toEqual(['auto', 'none', 'none']);
     expect(t.done.outcome).toBe('error');
   });
 
@@ -873,7 +891,8 @@ describe('escalation (N11, C15)', () => {
     ];
     expect(attempts).toHaveLength(2);
     const usage = (await usageRows(f.kev.sam)).filter((u) => attempts.includes(u.attempt_id));
-    expect(usage).toHaveLength(4);
+    // Fast: the read and `escalate`; deep: the read, its end and the answer (ADR 0012 §54).
+    expect(usage).toHaveLength(5);
     expect(usage.filter((u) => u.tier === 'fast').every((u) => !u.escalated)).toBe(true);
     expect(usage.filter((u) => u.tier === 'deep').every((u) => u.escalated)).toBe(true);
     const res = (await reservations(f.kev.sam)).slice(-2);
@@ -888,6 +907,7 @@ describe('escalation (N11, C15)', () => {
     expect((kev!.content as { calls: { tier: string }[] }).calls.map((c) => c.tier)).toEqual([
       'fast',
       'fast',
+      'deep',
       'deep',
       'deep',
     ]);
@@ -968,7 +988,15 @@ describe('escalation (N11, C15)', () => {
       contradicted,
       contradicted,
     ]);
-    expect(u.provider.requests.map((r) => r.tier)).toEqual(['fast', 'fast', 'deep', 'deep']);
+    // Each attempt: the read phase's end, the answer phase, the regeneration (ADR 0012 §54).
+    expect(u.provider.requests.map((r) => r.tier)).toEqual([
+      'fast',
+      'fast',
+      'fast',
+      'deep',
+      'deep',
+      'deep',
+    ]);
     expect(u.done).toMatchObject({ outcome: 'answer', escalated: true });
     expect((await kevRows(f.kev.sam)).at(-1)!.content).toMatchObject({ salvaged: true });
     await clockForward(admin, 2);
@@ -987,7 +1015,8 @@ describe('escalation (N11, C15)', () => {
       tools(['escalate', { reason: 'long_range' }]),
       answer('Here’s {when}.', [swim]),
     ]);
-    expect(t.provider.requests.map((r) => r.tier)).toEqual(['fast', 'deep', 'deep']);
+    // Deep: `escalate` refused, the read phase's end, the answer phase (ADR 0012 §54).
+    expect(t.provider.requests.map((r) => r.tier)).toEqual(['fast', 'deep', 'deep', 'deep']);
     expect(lastResults(t.provider.requests[2]!)).toEqual([{ error: 'unavailable' }]);
   });
 });
@@ -1227,7 +1256,8 @@ describe('the conversation (C3–C11, C16, C17)', () => {
       answer('here_you_go', [{ ref: football, show: ['people'] }]),
       answer('Here’s {when}.', [swim, TODAY_ELSE]),
     ]);
-    const note = t.provider.requests[1]!.messages.at(-1)!;
+    // After the read phase's end and the answer phase, the regeneration (ADR 0012 §54).
+    const note = t.provider.requests[2]!.messages.at(-1)!;
     expect(JSON.stringify('content' in note ? note.content : '')).toContain('cite.unknown');
   });
 
@@ -1483,7 +1513,7 @@ describe('the request (N15’s scripted half, L4’s first half)', () => {
     }
   });
 
-  it('N15 (scripted): each request extends the one before: same system and tools; messages appended; only the final request changes tool_choice', async () => {
+  it('N15 (scripted): each request extends the one before: same system and tools; messages appended; only the answer phase changes tool_choice and adds the format', async () => {
     const t = await turn(f.kev.sam, 'Weekend?', [
       tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
       tools(['get_weather', { from: SAT, to: '2026-10-18' }]),
@@ -1491,7 +1521,8 @@ describe('the request (N15’s scripted half, L4’s first half)', () => {
       answer('Here’s {when}.', [football]),
     ]);
     const reqs = t.provider.requests;
-    expect(reqs).toHaveLength(4);
+    // Two reads, the read phase's end, the answer phase, the regeneration (ADR 0012 §54).
+    expect(reqs).toHaveLength(5);
     for (let i = 1; i < reqs.length; i++) {
       expect(reqs[i]!.system).toBe(reqs[0]!.system);
       expect(JSON.stringify(reqs[i]!.tools)).toBe(JSON.stringify(reqs[0]!.tools));
@@ -1503,7 +1534,14 @@ describe('the request (N15’s scripted half, L4’s first half)', () => {
         reqs[i - 1]!.messages,
       );
     }
-    expect(reqs.map((r) => r.toolChoice)).toEqual(['auto', 'auto', 'auto', 'none']);
+    expect(reqs.map((r) => r.toolChoice)).toEqual(['auto', 'auto', 'auto', 'none', 'none']);
+    expect(reqs.map((r) => r.outputFormat !== undefined)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+    ]);
   });
 
   it('the bundle is the last thing before the question, after the window, labelled as HOME’s data', async () => {
@@ -1718,8 +1756,12 @@ describe('Package 3 review: orchestration (I-1, I-6) and the conversation (I-4, 
   it('I-5: a turn really in flight still refuses the next message and Clear, past 70 s too (M-6)', async () => {
     let during: unknown;
     let clear: unknown;
+    let once = false;
     await turn(f.kev.sam, 'What’s happening today?', [answer('Here’s {when}.', [swim])], {
       onCall: async () => {
+        // The first call only (the answer phase makes a second).
+        if (once) return;
+        once = true;
         // 75 seconds into the call: the person's message is older than the 70-second window,
         // but the attempt's reservation is open.
         await clockForward(admin, 1.25);
@@ -1942,10 +1984,11 @@ describe('the cap and the month (L7, L8)', () => {
       tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
       answer('Here’s {when}.', [football]),
     ]);
-    expect(t.provider.counted).toHaveLength(2);
+    // The read, the read phase's end, the answer phase (ADR 0012 §54).
+    expect(t.provider.counted).toHaveLength(3);
     const [res] = (await reservations(f.kev.sam)).slice(-1);
     const rows = (await usageRows(f.kev.sam)).filter((u) => u.attempt_id === res!.attempt_id);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.reduce((n, r) => n + BigInt(r.cost), 0n)).toBe(BigInt(res!.settled!));
     expect(res).toMatchObject({ tier: 'fast', status: 'settled', reserved: '665280' });
   });
@@ -1960,7 +2003,8 @@ describe('the cap and the month (L7, L8)', () => {
 
   it('L4 (I4 half, in the turn): the provider’s own count over 32,000 at message_start: no further call, the fallback', async () => {
     const t = await turn(f.kev.sam, 'Synthetic question.', [
-      { kind: 'answer', text: ['x'], usage: { inputTokens: 33_000 } },
+      // The read phase's own reply, over the cap at message_start.
+      { kind: 'answer', text: ['x'], usage: { inputTokens: 33_000 }, readPhase: true },
       answer('Here’s {when}.', [swim]),
     ]);
     expect(t.provider.requests).toHaveLength(1);
@@ -2010,5 +2054,212 @@ describe('L19: the per-adult limits through kev.handle(), on the real clock', ()
 describe('the clock seam', () => {
   it('the ticking clock is the test’s own month', async () => {
     expect((await clockNow(admin)).slice(0, 7)).toBe('2040-12');
+  });
+});
+
+describe('two phases (ADR 0012 §54): reads under auto without the format, the answer under none with it', () => {
+  type T = Awaited<ReturnType<typeof turn>>;
+  /** The hard invariant, over every counted request and every call made. */
+  const neverFormatWithAuto = (t: T) => {
+    for (const r of [...t.provider.counted, ...t.provider.requests]) {
+      expect(Boolean(r.outputFormat) && r.toolChoice === 'auto').toBe(false);
+      if (r.outputFormat) expect(r.toolChoice).toBe('none');
+    }
+    // Each attempt sends one tool list on every call (the cache and G9).
+    for (const tier of ['fast', 'deep'] as const) {
+      const reqs = t.provider.requests.filter((r) => r.tier === tier);
+      for (const r of reqs) expect(JSON.stringify(r.tools)).toBe(JSON.stringify(reqs[0]!.tools));
+    }
+  };
+  const PROSE = 'canary-read-phase-prose-19';
+  const prose: ScriptStep = {
+    kind: 'answer',
+    text: [`Synthetic prose ${PROSE}.`],
+    readPhase: true,
+  };
+
+  it('never the format with auto: a direct answer, a tool round, three rounds, escalation, and the deep tier', async () => {
+    const turns: T[] = [];
+    turns.push(
+      await turn(f.kev.sam, 'What’s happening today?', [answer('Here’s {when}.', [swim])]),
+    );
+    await clockForward(admin, 2);
+    turns.push(
+      await turn(f.kev.sam, 'What have we got this weekend?', [
+        tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+        answer('Here’s {when}.', [football]),
+      ]),
+    );
+    await clockForward(admin, 2);
+    turns.push(
+      await turn(f.kev.sam, 'Weekend?', [
+        tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+        tools(['get_weather', { from: SAT, to: '2026-10-18' }]),
+        tools(['get_tasks', {}]),
+        answer('Here’s {when}.', [football]),
+      ]),
+    );
+    await clockForward(admin, 2);
+    turns.push(
+      await turn(f.kev.sam, 'Help me think through our weekend.', [
+        tools(['escalate', { reason: 'multi_step_planning' }]),
+        tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+        answer('Here’s {when}.', [football]),
+      ]),
+    );
+    await clockForward(admin, 2);
+    turns.push(
+      await turn(
+        f.kev.sam,
+        'What have we got this weekend?',
+        [
+          tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+          answer('Here’s {when}.', [football]),
+        ],
+        { deps: { startTier: 'deep' } },
+      ),
+    );
+    for (const t of turns) {
+      expect(t.done.outcome).toBe('answer');
+      neverFormatWithAuto(t);
+      // The format arrives once, on the answering attempt's answer phase.
+      const formatted = t.provider.requests.filter((r) => r.outputFormat);
+      expect(formatted).toHaveLength(1);
+      expect(formatted[0]).toBe(t.provider.requests.at(-1));
+    }
+    // Three rounds: the reads end on the round limit, so the next call is the answer phase.
+    expect(turns[2]!.provider.requests.map((r) => r.toolChoice)).toEqual([
+      'auto',
+      'auto',
+      'auto',
+      'none',
+    ]);
+    expect(turns[3]!.done).toMatchObject({ escalated: true });
+    expect(turns[4]!.provider.requests.every((r) => r.tier === 'deep')).toBe(true);
+  });
+
+  it('the read phase ends in prose: never shown, stored or logged; the answer phase extends the same conversation, tool results and all', async () => {
+    const out: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    const ewrite = process.stderr.write.bind(process.stderr);
+    process.stdout.write = ((c: string | Uint8Array) => (out.push(String(c)), true)) as never;
+    process.stderr.write = ((c: string | Uint8Array) => (out.push(String(c)), true)) as never;
+    let t: T;
+    try {
+      t = await turn(f.kev.sam, 'What have we got this weekend?', [
+        tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+        prose,
+        answer('Here’s {when}.', [football]),
+      ]);
+    } finally {
+      process.stdout.write = write;
+      process.stderr.write = ewrite;
+    }
+    expect(t.done).toMatchObject({ outcome: 'answer', escalated: false });
+    const [read, end, answerPhase] = t.provider.requests;
+    expect(t.provider.requests).toHaveLength(3);
+    expect([read!.toolChoice, end!.toolChoice, answerPhase!.toolChoice]).toEqual([
+      'auto',
+      'auto',
+      'none',
+    ]);
+    expect([read!.outputFormat, end!.outputFormat]).toEqual([undefined, undefined]);
+    expect(answerPhase!.outputFormat).toBeDefined();
+    // Append-only: the answer phase is the read phase's request, the prose turn, HOME's note.
+    expect(answerPhase!.messages.slice(0, end!.messages.length)).toEqual(end!.messages);
+    expect(answerPhase!.messages).toHaveLength(end!.messages.length + 2);
+    expect(answerPhase!.messages.at(-2)).toHaveProperty('replay');
+    expect(answerPhase!.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: ANSWER_PHASE_NOTE }],
+    });
+    // The tool result the answer cites is still in the conversation.
+    expect(lastResults(end!)).toHaveLength(1);
+    expect(t.events.find((e) => e.type === 'cite')).toBeDefined();
+    // The prose: nowhere.
+    expect(JSON.stringify(t.events)).not.toContain(PROSE);
+    expect(JSON.stringify(await messagesOf(admin, f.kev.sam.userId))).not.toContain(PROSE);
+    expect(out.join('')).not.toContain(PROSE);
+    expect(out.join('')).toContain('"event":"kev_turn"');
+  });
+
+  it('the transition is not a failed answer: the one regeneration is still there, and nothing escalates', async () => {
+    const t = await turn(f.kev.sam, 'When is swimming?', [
+      prose,
+      answer('Here you go.', [UNREAD]),
+      answer('Here’s {when}.', [swim]),
+    ]);
+    expect(t.done).toMatchObject({ outcome: 'answer', escalated: false });
+    expect(types(t)).not.toContain('escalated');
+    expect(t.provider.requests.map((r) => r.tier)).toEqual(['fast', 'fast', 'fast']);
+    // Exactly one check note, in the last request; the phase note before it.
+    const last = requestBytes(t.provider.requests[2]!);
+    expect(last.split('did not pass HOME').length - 1).toBe(1);
+    expect(last).toContain(ANSWER_PHASE_NOTE.slice(0, 40));
+  });
+
+  it('five calls at most: three rounds, the answer phase, the regeneration; or two rounds, prose, the answer phase, the regeneration', async () => {
+    const rounds = [
+      tools(['get_agenda', { from: SAT, to: '2026-10-18' }]),
+      tools(['get_weather', { from: SAT, to: '2026-10-18' }]),
+    ];
+    const bad = answer('Here you go.', [UNREAD]);
+    const a = await turn(
+      f.kev.sam,
+      'Weekend?',
+      [...rounds, tools(['get_tasks', {}]), bad, bad, bad, bad],
+      { deps: { startTier: 'deep' } },
+    );
+    await clockForward(admin, 2);
+    const b = await turn(f.kev.sam, 'Weekend?', [...rounds, prose, bad, bad, bad, bad], {
+      deps: { startTier: 'deep' },
+    });
+    for (const t of [a, b]) {
+      expect(t.provider.requests).toHaveLength(LIMITS.modelCallsPerAttempt);
+      expect(t.provider.requests.map((r) => r.toolChoice)).toEqual([
+        'auto',
+        'auto',
+        'auto',
+        'none',
+        'none',
+      ]);
+      expect(t.provider.requests.map((r) => Boolean(r.outputFormat))).toEqual([
+        false,
+        false,
+        false,
+        true,
+        true,
+      ]);
+      expect(t.provider.counted).toHaveLength(t.provider.requests.length);
+      expect(t.done.outcome).toBe('fallback');
+      neverFormatWithAuto(t);
+    }
+  });
+
+  it('too little time after the read phase: no answer call, the timeout state, settled, the prose nowhere', async () => {
+    const t = await turn(f.kev.sam, 'What’s happening today?', [{ kind: 'stall', ms: 2_000 }], {
+      deps: { turnDeadlineMs: 9_500 },
+    });
+    expect(t.provider.requests).toHaveLength(1);
+    expect(t.events).toContainEqual({
+      type: 'error',
+      code: 'timeout',
+      message: ERROR_TEXT.timeout,
+    });
+    expect((await reservations(f.kev.sam)).at(-1)).toMatchObject({ status: 'settled' });
+    expect(JSON.stringify(t.events)).not.toContain('Scripted reply');
+    expect(JSON.stringify(await messagesOf(admin, f.kev.sam.userId))).not.toContain(
+      'Scripted reply',
+    );
+  });
+
+  it('no budget left after the read phase: HOME’s safe fallback, no answer call', async () => {
+    const t = await turn(f.kev.sam, 'What’s happening today?', [
+      { ...prose, usage: { outputTokens: 60_000 } } as ScriptStep,
+      answer('Here’s {when}.', [swim]),
+    ]);
+    expect(t.provider.requests).toHaveLength(1);
+    expect(t.done.outcome).toBe('fallback');
+    expect(JSON.stringify(t.events)).not.toContain(PROSE);
   });
 });

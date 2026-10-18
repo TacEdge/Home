@@ -88,6 +88,8 @@ type KevEvent =
 
 *Approved in M8 Package 0 (ADR 0012, owner decision, 2026-10-13):* M8's context bundle is smaller than step 3 lists: the date and time, the reader, the people the reader can see (age, not date of birth), the reader's today, calendar and forecast freshness and the To sort count. The next seven days, conflicts, projects and context come through tools when a question needs them. The home location is never sent: it stays in private configuration (ADR 0011). Step 5's capture is M9's; in M8 the person's words are stored verbatim as their conversation message before any model call (ADR 0012 §21, §24).
 
+*Two phases (ADR 0012 §54, owner-approved 2026-10-18, after live verification #3):* within an attempt Kev first reads (tools offered, `tool_choice: auto`, no answer format), then answers (the same tools, `tool_choice: none`, HOME's answer format). When a read ends without a tool call, what Kev wrote is discarded unseen and HOME asks for the answer; that is not a failed answer. The provider refuses the answer format with strict tools under `auto`; nothing else about the turn changes.
+
 ### Prompting principles
 - A short, stable system prompt (cached) defines persona, principles and rules. Volatile context comes after it.
 - Answers about specific times cite the underlying items.

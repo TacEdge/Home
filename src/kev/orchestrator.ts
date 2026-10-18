@@ -483,6 +483,13 @@ type AttemptInput = {
 /** A HOME note on the `answer` tool path when no more reads are allowed (I-2). */
 export const ANSWER_NOW_NOTE = `${HOME_LABEL}: no more reads this turn. Give your answer now with the answer tool, from what you already have.`;
 
+/**
+ * The format path's answer-phase note (ADR 0012 §54): sent when a read-phase
+ * call ends without a tool call. Fixed copy; it never quotes what the model
+ * wrote.
+ */
+export const ANSWER_PHASE_NOTE = `${HOME_LABEL}: no more reads this turn. Give your answer now in HOME's answer format, from what you already have.`;
+
 /** One attempt (§4.2 steps 4–8): its own reservation, ledger, request and settlement. */
 async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
   const { req, deps, db, provider, tier, month, turn } = a;
@@ -550,12 +557,15 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
     const replayTokens: number[] = [];
     /**
      * Whether reads are over: after the last tool round or the eighth call,
-     * and for the regeneration. The format path then sends `tool_choice:
-     * none` (§4.2). The `answer` tool path cannot (it would forbid the
-     * answer tool too) nor force the tool (`any`/`tool` are refused by the
-     * pinned models: ADR 0012 §45, I-2), so it keeps `auto` with the same
-     * tool list, refuses every further read in code, and appends a labelled
-     * note asking for the answer tool.
+     * when a read-phase call ends without a tool call, and for the
+     * regeneration. The format path then sends `tool_choice: none` (§4.2)
+     * and, only then, the answer format: two phases (ADR 0012 §54), because
+     * the provider refuses the format with strict tools under `auto` (live
+     * verification #3). The `answer` tool path cannot send `none` (it would
+     * forbid the answer tool too) nor force the tool (`any`/`tool` are
+     * refused by the pinned models: ADR 0012 §45, I-2), so it keeps `auto`
+     * with the same tool list, refuses every further read in code, and
+     * appends a labelled note asking for the answer tool.
      */
     let readsOver = false;
     let failedOnce: Violation[] | null = null;
@@ -567,7 +577,8 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
         tools: Object.freeze([...tools]),
         toolChoice: readsOver && path === 'format' ? 'none' : 'auto',
         messages: Object.freeze([...messages]),
-        ...(path === 'format' ? { outputFormat: ANSWER_JSON_SCHEMA } : {}),
+        // Never with `auto`: the answer phase only (ADR 0012 §54).
+        ...(readsOver && path === 'format' ? { outputFormat: ANSWER_JSON_SCHEMA } : {}),
       });
     const lateNote = (): NeutralText[] => (path === 'tool' ? [text(ANSWER_NOW_NOTE)] : []);
     // A budget refusal ends the attempt in the fallback, never as a failed
@@ -626,6 +637,21 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
       if (escalate && escalateOffered && isEscalateInput(escalate.input))
         return { kind: 'escalate', ledger, coverage };
       const answerUse = path === 'tool' ? uses.find((u) => u.name === 'answer') : undefined;
+      if (path === 'format' && !readsOver && uses.length === 0) {
+        // The read phase ended without a tool call (ADR 0012 §54): what the
+        // model wrote is not an answer and is never checked, shown, stored or
+        // logged; it stays in this attempt's request only, as the provider's
+        // own turn (append-only, G9). Not a failed answer, so no regeneration
+        // is spent and nothing escalates; the answer phase follows.
+        readsOver = true;
+        messages.push(
+          Object.freeze({
+            role: 'user' as const,
+            content: Object.freeze([text(ANSWER_PHASE_NOTE)]),
+          }),
+        );
+        continue;
+      }
       if (answerUse || uses.length === 0) {
         // 7. The answer, checked.
         const raw = answerUse ? answerUse.input : result.text.join('');

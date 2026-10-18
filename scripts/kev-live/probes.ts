@@ -287,15 +287,40 @@ async function turnProbe(
   const done = events.at(-1);
   checks.outcome = done?.type === 'done' ? done.outcome : null;
   checks.escalated = done?.type === 'done' ? done.escalated : null;
+  // HOME's checked answer, citing what it read: never the fallback, a
+  // salvage or a decline (event types and counts only; never their text).
+  checks.cites = events.filter((e) => e.type === 'cite').length;
   const error = events.find((e) => e.type === 'error');
   if (error?.type === 'error') {
     checks.error = error.code;
     reasons.push(`turn_${error.code}`);
-  }
+  } else if (checks.outcome !== 'answer') reasons.push(`turn_${String(checks.outcome)}`);
+  else if (checks.cites === 0) reasons.push('no_citation');
   return { outcome: reasons.length === 0 ? 'pass' : 'fail', reasons, checks, stop: null };
 }
 
-/** Whether every probe a rule names ran and ended as it requires. */
+/**
+ * A turn's two phases (ADR 0012 §54), from its Messages calls' evidence:
+ * its tool rounds (at least one), whether one call sent the answer format
+ * under `none` (the answer phase, required), and whether any sent it under
+ * `auto` (never allowed); with the reasons a failure names.
+ */
+export function phaseChecks(evidence: readonly ProbeEvidence[]): {
+  toolRounds: number;
+  answerPhase: boolean;
+  formatWithAuto: boolean;
+  reasons: string[];
+} {
+  const calls = evidence.filter((e) => e.kind === 'message');
+  const toolRounds = calls.filter((e) => e.stop === 'tool_use').length;
+  const answerPhase = calls.some((e) => e.answerFormat && e.toolChoice === 'none');
+  const formatWithAuto = calls.some((e) => e.answerFormat && e.toolChoice === 'auto');
+  const reasons: string[] = [];
+  if (toolRounds < 1) reasons.push('no_tool_round');
+  if (!answerPhase) reasons.push('no_answer_phase');
+  if (formatWithAuto) reasons.push('format_with_auto');
+  return { toolRounds, answerPhase, formatWithAuto, reasons };
+}
 
 /**
  * Whether a refusal's recognised detail names a request parameter below the
@@ -398,11 +423,13 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
               : 0),
           0,
         );
-        attempted.checks.toolRounds = msgs.filter(
-          (e) => e.kind === 'message' && e.stop === 'tool_use',
-        ).length;
         if (attempted.checks.growOnly === false) attempted.reasons.push('history_not_grow_only');
-        if (ev.calls < 2) attempted.reasons.push('no_tool_round');
+        // The two phases (ADR 0012 §54).
+        const phases = phaseChecks(msgs);
+        attempted.checks.toolRounds = phases.toolRounds;
+        attempted.checks.answerPhase = phases.answerPhase;
+        attempted.checks.formatWithAuto = phases.formatWithAuto;
+        attempted.reasons.push(...phases.reasons);
       }
       if (attempted.reasons.length > 0)
         attempted.outcome = attempted.outcome === 'not_run' ? 'not_run' : 'fail';

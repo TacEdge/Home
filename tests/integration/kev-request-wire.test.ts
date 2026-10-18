@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTask } from '@/domain/tasks/service';
 import { TIERS } from '@/kev/config';
-import { handle, type KevEvent } from '@/kev/orchestrator';
+import { ANSWER_PHASE_NOTE, handle, type KevEvent } from '@/kev/orchestrator';
 import { buildAnthropicProvider } from '@/kev/providers/anthropic';
 import { createProviderFetchForTests } from '@/kev/providers/fetch';
 import {
@@ -60,6 +60,7 @@ const sse =
     res.end(body);
   };
 const usage = { input_tokens: 2_000, cache_creation_input_tokens: 0 };
+const PROSE_CANARY = 'canary-read-phase-prose-41';
 /** An answer plan (owner amendment, ADR 0012 §46): a lead and the records chosen, by ref. */
 /** A lead by HOME's catalogue id ('when'); any other string is a model's own words (refused whole). */
 const planOf = (lead: string, refs: { type: string; id: string; at?: string }[]) => ({
@@ -107,7 +108,7 @@ afterAll(async () => {
 });
 
 describe('N15: the grow-only request, on the wire', () => {
-  it('two tool rounds, thinking (one empty), a truncated result and a regeneration: each body extends the one before', async () => {
+  it('two tool rounds, thinking (one empty), a truncated result, the answer phase and a regeneration: each body extends the one before', async () => {
     const football = { type: 'event', id: f.id.football, at: `${SAT}T09:00:00+13:00` };
     stub.queue.push(
       sse(
@@ -122,10 +123,16 @@ describe('N15: the grow-only request, on the wire', () => {
           toolBlock(1, 'toolu_synthetic_2', 'get_tasks', {}) +
           messageEnd('tool_use', 140),
       ),
+      // The read phase ends in prose (ADR 0012 §54): never checked, shown or stored.
       sse(
         messageStart(FAST, usage) +
           thinking(0, '', 'sig-empty-3') +
-          textBlock(1, answerJson('Football on Saturday at 4.', [football])) +
+          textBlock(1, `Synthetic read-phase prose ${PROSE_CANARY}.`) +
+          messageEnd('end_turn', 30),
+      ),
+      sse(
+        messageStart(FAST, usage) +
+          textBlock(0, answerJson('Football on Saturday at 4.', [football])) +
           messageEnd('end_turn', 90),
       ),
       sse(
@@ -150,8 +157,8 @@ describe('N15: the grow-only request, on the wire', () => {
     ))
       events.push(e);
     expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'answer' });
-    expect(stub.seen).toHaveLength(4);
-    expect(stub.counts).toHaveLength(4);
+    expect(stub.seen).toHaveLength(5);
+    expect(stub.counts).toHaveLength(5);
 
     const bodies = stub.seen.map((s) => JSON.parse(s.body) as Record<string, unknown>);
     const counted = stub.counts.map((s) => JSON.parse(s.body) as Record<string, unknown>);
@@ -182,10 +189,26 @@ describe('N15: the grow-only request, on the wire', () => {
       'auto',
       'auto',
       'none',
+      'none',
     ]);
+    // The answer format only in the answer phase, never with `auto` (ADR 0012 §54).
+    expect(
+      bodies.map((b) => Boolean((b.output_config as { format?: unknown } | undefined)?.format)),
+    ).toEqual([false, false, false, true, true]);
+    for (const c of counted)
+      expect(
+        Boolean((c.output_config as { format?: unknown } | undefined)?.format) &&
+          (c.tool_choice as { type: string }).type === 'auto',
+      ).toBe(false);
+    // The answer phase opens with HOME's fixed note, after the prose turn.
+    const phase = (bodies[3]!.messages as { role: string; content: unknown }[]).at(-1)!;
+    expect(phase).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: ANSWER_PHASE_NOTE }],
+    });
 
     // Thinking blocks, the empty one included, replayed verbatim with their signatures.
-    const last = bodies[3]!.messages as {
+    const last = bodies[4]!.messages as {
       role: string;
       content: { type: string; thinking?: string; signature?: string }[];
     }[];
@@ -230,8 +253,17 @@ describe('N15: the grow-only request, on the wire', () => {
 
     // Nothing provider-shaped was stored (N13).
     const stored = JSON.stringify(await messagesOf(admin, f.kev.sam.userId));
-    for (const s of ['sig-empty-1', 'sig-2', 'toolu_synthetic', 'thinking', 'Synthetic thinking'])
+    for (const s of [
+      'sig-empty-1',
+      'sig-2',
+      'toolu_synthetic',
+      'thinking',
+      'Synthetic thinking',
+      PROSE_CANARY,
+    ])
       expect(stored).not.toContain(s);
+    // The read phase's prose is never shown either.
+    expect(JSON.stringify(events)).not.toContain(PROSE_CANARY);
   });
 
   it('I-2 on the wire, the answer-tool path: after the last round and for the regeneration, tool_choice stays auto with the same tools, and the answer tool answers', async () => {

@@ -74,8 +74,9 @@ describe('the scripted model on every day of the week', () => {
         await clockForward(admin, 2);
         const t = await runTurn(f.kev.sam, q, l.script, { now, db: clocked });
         expect(t.done, `${date} ${q}`).toMatchObject({ outcome: 'answer', escalated: false });
-        // The read, then the answer: no regeneration after a refused plan.
-        expect(t.provider.requests.length, `${date} ${q}`).toBe(2);
+        // The read, the read phase's end and the answer phase (ADR 0012
+        // §54): no regeneration after a refused plan.
+        expect(t.provider.requests.length, `${date} ${q}`).toBe(3);
       }
     });
 });

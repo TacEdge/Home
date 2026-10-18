@@ -45,8 +45,9 @@ function bodyOf(id: string) {
 }
 
 describe('the diagnostic’s probes: one call each, Sonnet 5.5, Kev’s prompt, tool_choice auto', () => {
-  it('is the session plan: C, D, E, then F1–F4, each with a shape and a hypothesis', () => {
-    expect(buildPlan().name).toBe('tool-diagnostic');
+  it('the diagnostic plan: C, D, E, then F1–F4, each with a shape and a hypothesis', () => {
+    // Run #3's plan (live verification #3, 2026-10-18); the session plan is now ADR 0012 §54's.
+    expect(buildPlan().name).toBe('two-phase-acceptance');
     expect(plan.probes.map((p) => p.id)).toEqual([
       'dx-c-one-tool',
       'dx-d-all-tools',
