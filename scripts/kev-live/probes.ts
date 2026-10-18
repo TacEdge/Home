@@ -5,8 +5,10 @@ import { parsePlan } from '@/kev/answer/schema';
 import { BudgetExhausted, TurnBudget } from '@/kev/budget';
 import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { INFERENCE_GEO, LIMITS, TIERS } from '@/kev/config';
+import type { Verdict } from '@/kev/evals/judge';
 import { SCENARIOS } from '@/kev/evals/scenarios';
 import type { EvalRecord } from '@/kev/evals/summary';
+import type { Transcript } from '@/kev/evals/transcript';
 import { handle, type KevEvent } from '@/kev/orchestrator';
 import type { ProbeGateway } from '@/kev/providers/anthropic';
 import { diagnosticLine, type ProbeErrorDetail } from '@/kev/providers/diagnostics';
@@ -30,7 +32,7 @@ import {
   type ProbeRequest,
   type ProbeSpec,
 } from './plan';
-import { runScenario, type ScenarioContext } from './eval';
+import { runScenario, transcriptOf, type ScenarioContext } from './eval';
 
 // Runs the plan's probes, one after another (M8 live-verification plan §7,
 // §11): each model probe on its own attempt, reserved through HOME's
@@ -76,7 +78,14 @@ export type RunContext = Readonly<{
    * Absent, a scenario probe is not run. Live, each turn's provider is the
    * gateway's; a test may give its own (`providerFor`).
    */
-  evaluation?: Omit<ScenarioContext, 'providerFor'> & Partial<Pick<ScenarioContext, 'providerFor'>>;
+  evaluation?: Omit<ScenarioContext, 'providerFor'> &
+    Partial<Pick<ScenarioContext, 'providerFor'>> & {
+      /**
+       * Receives each run's readable transcript (Package 5C), for the run's
+       * own review files beside the report: never the report, ledger or log.
+       */
+      onTranscript?: (t: Transcript) => void;
+    };
   /**
    * When to start no further probe (ms since the epoch): an evaluation run
    * stops cleanly, its report written, before the job's own time limit
@@ -333,10 +342,20 @@ async function scenarioProbe(
       checks: {},
       stop: null,
     };
-  const run = await runScenario(s, p.tier, p.repeat, {
+  const scenarioCtx: ScenarioContext = {
     providerFor: () => ctx.gateway.provider(),
     ...ctx.evaluation,
-  });
+  };
+  const run = await runScenario(s, p.tier, p.repeat, scenarioCtx);
+  // The readable transcript (Package 5C), withheld (and the run failed) if
+  // it would hold anything the asker must never see.
+  let withheld = false;
+  if (ctx.evaluation.onTranscript)
+    try {
+      ctx.evaluation.onTranscript(await transcriptOf(run, s, scenarioCtx, 'live'));
+    } catch {
+      withheld = true;
+    }
   const last = run.record.turns.at(-1);
   const checks: Record<string, boolean | number | string | null> = {
     passed: run.verdict.pass,
@@ -347,11 +366,24 @@ async function scenarioProbe(
     escalated: last?.escalated ?? null,
   };
   return {
-    outcome: run.verdict.pass ? 'pass' : 'fail',
-    reasons: run.verdict.failed.map((f) => `scenario_${f}`),
+    ...scenarioOutcome(run.verdict, withheld),
     checks,
     stop: null,
     evaluation: run.record,
+  };
+}
+
+/** A scenario probe's outcome: the checker's verdict, and a fail too when its transcript was withheld. */
+export function scenarioOutcome(
+  verdict: Verdict,
+  transcriptWithheld: boolean,
+): { outcome: 'pass' | 'fail'; reasons: string[] } {
+  return {
+    outcome: verdict.pass && !transcriptWithheld ? 'pass' : 'fail',
+    reasons: [
+      ...verdict.failed.map((f) => `scenario_${f}`),
+      ...(transcriptWithheld ? ['transcript_withheld'] : []),
+    ],
   };
 }
 

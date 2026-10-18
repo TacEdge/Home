@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createDb } from '@/db/create';
 import { getSpendReport } from '@/domain/kev-bookkeeping/service';
+import type { Transcript } from '@/kev/evals/transcript';
 import { createProbeGateway, type ProbeGateway } from '@/kev/providers/anthropic';
 import { systemActor } from '@/trust/actor';
 import { assertFixtureDatabase, fixtureAdult } from './db-checks';
@@ -29,7 +30,7 @@ import {
 import { buildPlan, type Plan } from './plan';
 import { applyState, buildEvalWorld } from '../../tests/integration/kev-eval-world';
 import { WELLINGTON } from '../../tests/fixtures/weather';
-import { paceTurn } from './eval';
+import { paceTurn, reviewFiles } from './eval';
 import { executePlan, type RunContext } from './probes';
 import { reconcile } from './reconcile';
 import { buildReport } from './report';
@@ -189,6 +190,9 @@ export async function runMode(
       // throwaway database with this process's own synthetic keys and
       // synthetic weather point (never a deployment's), after the check above.
       let evaluation: RunContext['evaluation'];
+      // The runs' readable transcripts (Package 5C): only to the review
+      // files beside the report, never into the report, ledger or log.
+      const transcripts: Transcript[] = [];
       if (admin) {
         setEvaluationEnvironment(process.env);
         const world = await buildEvalWorld(db, admin.db);
@@ -200,6 +204,7 @@ export async function runMode(
           reader: admin.db,
           beforeTurn: (actor) => paceTurn(admin.db, actor.userId).then(() => undefined),
           prepare: (s) => applyState(s.state, admin.db),
+          onTranscript: (t) => void transcripts.push(t),
         };
         opts.log(
           'evaluation world built: the fixture family, both adults’ private records, the injected records',
@@ -246,6 +251,11 @@ export async function runMode(
       mkdirSync(opts.reportDir, { recursive: true });
       writeFileSync(join(opts.reportDir, 'report.json'), report.json);
       writeFileSync(join(opts.reportDir, 'report.md'), report.markdown);
+      if (transcripts.length > 0) {
+        for (const [name, text] of Object.entries(reviewFiles(transcripts, 'live')))
+          writeFileSync(join(opts.reportDir, name), text);
+        opts.log(`review files written: ${transcripts.length} synthetic transcript(s)`);
+      }
       opts.log(`report written; HOME recorded US$${usd(reconciliation.recordedUsdMicros)}`);
       return report.passed
         ? { exitCode: EXIT.ok, code: 'passed' }

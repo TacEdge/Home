@@ -1,11 +1,14 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '@/db/create';
 import { TURNS_PER_MINUTE } from '@/domain/kev-bookkeeping/constants';
+import { listCitedRecords } from '@/domain/citations/service';
 import { clearConversation } from '@/domain/kev-bookkeeping/service';
 import { kevContentV2, type KevContentV2 } from '@/domain/kev-bookkeeping/schema';
 import { judge, relevanceOf, type Markers, type Verdict } from '@/kev/evals/judge';
 import type { FixtureIds } from '@/kev/evals/scripted';
 import { attemptIdsOf, turnRecord, type EvalRecord, type TurnRecord } from '@/kev/evals/summary';
+import { reviewPageHtml, reviewTranscripts } from '@/kev/evals/review-page';
+import { buildTranscript, citedRefs, type Transcript } from '@/kev/evals/transcript';
 import { topicsOf, type Scenario, type TurnSpec } from '@/kev/evals/types';
 import { handle, type KevDeps, type KevEvent } from '@/kev/orchestrator';
 import type { KevProvider } from '@/kev/providers/types';
@@ -144,6 +147,57 @@ export async function runScenario(
     turns: Object.freeze(turns.map((t) => t.record)),
   });
   return Object.freeze({ record, verdict, turns: Object.freeze(turns) });
+}
+
+/**
+ * A run's readable transcript (Package 5C, ADR 0012 §58), for the owner's
+ * review: built from what HOME showed and stored, with each cited record's
+ * title as the asker sees it now (the citations service, acting as the
+ * asker), and refused if it holds anything the asker must never see. It
+ * goes only to the evaluation's own outputs, never to the report, the
+ * ledger or a log.
+ */
+export async function transcriptOf(
+  run: ScenarioRun,
+  s: Scenario,
+  ctx: ScenarioContext,
+  mode: 'scripted' | 'live',
+  timeZone = 'Pacific/Auckland',
+): Promise<Transcript> {
+  const cited = await listCitedRecords(ctx.adults[s.asker], citedRefs(run.turns), { db: ctx.db });
+  return buildTranscript({
+    scenario: s,
+    tier: run.record.tier,
+    repeat: run.record.repeat,
+    mode,
+    turns: run.turns,
+    verdict: run.verdict,
+    relevance: run.record.relevance ?? null,
+    cited,
+    timeZone,
+    markers: typeof ctx.markers === 'function' ? ctx.markers(s.asker) : ctx.markers,
+  });
+}
+
+/**
+ * The evaluation's review files (Package 5C), by file name: every run's
+ * transcript, and per tier configuration the review set's transcripts and
+ * their review page. Synthetic only; written beside the run's other outputs.
+ */
+export function reviewFiles(
+  transcripts: readonly Transcript[],
+  mode: 'scripted' | 'live',
+): Record<string, string> {
+  const files: Record<string, string> = {
+    'transcripts.json': JSON.stringify(transcripts, null, 2),
+  };
+  for (const tier of ['fast', 'deep'] as const) {
+    const set = reviewTranscripts(transcripts, tier);
+    if (set.length === 0) continue;
+    files[`review-${tier}.json`] = JSON.stringify(set, null, 2);
+    files[`review-${tier}.html`] = reviewPageHtml(set, { mode, tier });
+  }
+  return files;
 }
 
 /**

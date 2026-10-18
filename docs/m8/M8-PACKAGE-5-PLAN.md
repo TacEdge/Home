@@ -1,6 +1,6 @@
 # M8 Package 5 — Evaluation and tuning: the plan
 
-*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57). No provider call and no dispatch has been made. 5C, 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
+*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57; PR #98). **5C is built** (§14; ADR 0012 §58). No provider call and no dispatch has been made. 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
 
 ## 1. Where M8 stands
 
@@ -306,3 +306,32 @@ The detail is in ADR 0012 §57; the catalogue, with its coverage and run sizing,
   - the run's identity;
   - the three kinds of evidence kept apart (deterministic guarantees, model measurements, the owner's judgement).
 - **Run sizing.** A fast pass is two runs (Sam has 83 turns of 124). §12.3's full suite is about 854 turns, so about 16 runs. The full campaign's budget stays the owner's separate decision (§10, §11).
+
+## 14. 5C as built (2026-10-18; ADR 0012 §58)
+
+The detail is in ADR 0012 §58 and `M8-QUALITY-RUBRIC.md`. In short:
+
+- **The rubric.** §7's eight marks, regrouped under the seven headings of the 5C brief. Each dimension separates:
+  - what HOME's code guarantees;
+  - what live runs measure against §12.3's targets;
+  - what the owner judges.
+
+  No threshold is added or changed. Usefulness is the owner's judgement alone.
+- **Transcripts.** One per scenario run, scripted or live. Each holds:
+  - the question;
+  - the shown answer, with each citation on its block, titled as the asker sees it;
+  - the reads;
+  - the answer check;
+  - time, cost and HOME's verdict.
+
+  Rejected answers appear as closed codes only. A transcript holding a private marker or a sensitive string is refused. Transcripts go only to the evaluation's own outputs.
+- **The review set.** Twenty scenarios across eight categories, in a fixed order, reviewed on a self-contained page in HOME's design language. The owner rates each answer:
+  - Useful / Partly useful / Not useful;
+  - Clear / Needs refinement;
+  - Natural / Awkward;
+  - with an optional note.
+
+  The ratings download as a review sheet, and `quality-review.mts` summarises it. The automated and human results are kept apart. Answers that are **correct but not useful** are listed.
+- **The scripted baseline** (`M8-QUALITY-BASELINE.md`). Labelled scripted; it is not evidence of a real model's quality.
+- **Not done (deviation):** phone-width screenshots of the Kev screen. They go with the live transcripts (5E, Package 6).
+- **For 5D and 5E:** a live run writes `transcripts.json`, `review-<tier>.json` and `review-<tier>.html` into its artefact. Nothing here runs a live call.

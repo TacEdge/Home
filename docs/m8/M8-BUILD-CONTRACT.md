@@ -1999,6 +1999,13 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
   - the relevance diagnostic, pass rates by topic, failed runs by closed check names, and refusals (E9's summary);
   - the live path: the world, pacing, the per-adult day limit and the wall clock, tested in `tests/integration/kev-eval-harness.test.ts`, `kev-live-runner.test.ts` (scenario turns through the real gateway, against the local stub) and `tests/unit/kev-eval-dataset.test.ts`.
 - **E13, tested with the scripted provider** (`tests/integration/kev-eval-harness.test.ts`). The run stops before the scenario whose maximum would cross the budget and finishes no further scenario. A call of unknown usage is counted at its per-call maximum by the bookkeeping path, as before. The runner uses its own database and cap, never the household's.
+- **Package 5C** (ADR 0012 §58; `docs/m8/M8-QUALITY-RUBRIC.md`) added the product-quality review. No threshold changes. It adds:
+  - the rubric: seven dimensions, each separating the deterministic, the measured and the owner's judgement;
+  - readable synthetic transcripts of every run, scripted or live, kept only in the evaluation's own outputs, with rejected answers as closed codes only;
+  - the owner's twenty-scenario review set and page, and the review sheet's summary, which keeps the automated result and the ratings apart and lists answers that were correct but not useful;
+  - the scripted baseline (`docs/m8/M8-QUALITY-BASELINE.md`), labelled scripted.
+
+  No row passes from it: §17.1 #15 still needs the live transcripts (30 per tier) and screenshots.
 
 ---
 

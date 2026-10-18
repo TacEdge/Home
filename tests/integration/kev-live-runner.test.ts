@@ -19,7 +19,7 @@ import {
   isolationReport,
   type Queryable,
 } from '../../scripts/kev-live/isolation-check.mts';
-import { paceTurn } from '../../scripts/kev-live/eval';
+import { paceTurn, reviewFiles } from '../../scripts/kev-live/eval';
 import { buildPlan, scenarioProbes } from '../../scripts/kev-live/plan';
 import { evidenceChecks, executePlan } from '../../scripts/kev-live/probes';
 import { reconcile } from '../../scripts/kev-live/reconcile';
@@ -40,6 +40,7 @@ import { adminDb, testDb } from './db';
 import { markersFor } from './kev-eval-world';
 import { buildKevFixture, clearKevFixture, type KevFixture } from './kev-fixture';
 import type { FixtureIds } from '@/kev/evals/scripted';
+import type { Transcript } from '@/kev/evals/transcript';
 
 // The live verification runner's live path, end to end against a local
 // stub of the provider (never the provider): the approved plan's probes run
@@ -261,6 +262,7 @@ describe('the plan, live path, against a local stub', () => {
       channel: 'web',
     };
     let paced = 0;
+    const transcripts: Transcript[] = [];
     const run = await executePlan(plan, {
       gateway: gateway(),
       actor: runner,
@@ -276,6 +278,7 @@ describe('the plan, live path, against a local stub', () => {
           paced += 1;
           await paceTurn(admin.db, a.userId);
         },
+        onTranscript: (t) => void transcripts.push(t),
       },
     });
     expect(run.stopped).toBeNull();
@@ -309,6 +312,60 @@ describe('the plan, live path, against a local stub', () => {
     for (const id of ['realistic.today', 'realistic.today_alex', 'realistic.sunday'])
       expect(report.json).not.toContain(SCENARIOS.find((x) => x.id === id)!.turns[0]!.question);
     expect(report.json).not.toContain(KEY);
+    // Package 5C: each run's readable transcript, live, goes to the review
+    // files only; the report still holds no question.
+    expect(transcripts.map((t) => [t.key, t.mode])).toEqual(
+      run.results.map((r) => [`${r.evaluation!.scenario}@fast#1`, 'live']),
+    );
+    for (const t of transcripts) {
+      expect(t.turns[0]!.question).toBe(
+        SCENARIOS.find((x) => x.id === t.scenario)!.turns[0]!.question,
+      );
+      expect(t.turns[0]!.check.result).toBe(
+        run.results.find((r) => r.evaluation!.scenario === t.scenario)!.evaluation!.turns[0]!
+          .result,
+      );
+    }
+    expect(Object.keys(reviewFiles(transcripts, 'live'))).toEqual(['transcripts.json']);
+    expect(JSON.stringify(transcripts)).not.toContain(KEY);
+
+    // A transcript that would hold a marker is withheld, and its run fails,
+    // even where nothing shown held it (here the question itself is the marker).
+    const one = scenarioProbes({ scenarios: ['realistic.sunday'], tiers: ['fast'], repeats: 1 });
+    const withheld: Transcript[] = [];
+    const question = SCENARIOS.find((x) => x.id === 'realistic.sunday')!.turns[0]!.question;
+    const again = await executePlan(
+      buildPlan('evaluation-stub-2', one, {
+        kind: 'evaluation',
+        probes: one.map((p) => p.id),
+        sessionCapUsdMicros: 10_000_000n,
+      }),
+      {
+        gateway: gateway(),
+        actor: runner,
+        deps: { db },
+        budgetMicros: 10_000_000n,
+        evaluation: {
+          adults: { sam: adult, alex: adult },
+          ids,
+          markers: { otherAdult: [question], sensitive: [] },
+          db,
+          reader: admin.db,
+          beforeTurn: (a) => paceTurn(admin.db, a.userId).then(() => undefined),
+          onTranscript: (t) => void withheld.push(t),
+        },
+      },
+    );
+    expect(withheld).toEqual([]);
+    expect(again.results[0]!.outcome).toBe('fail');
+    expect(again.results[0]!.reasons).toContain('transcript_withheld');
+    expectNothingLeftOpen(
+      await reconcile(
+        db,
+        again.results.flatMap((r) => r.attemptIds),
+      ),
+      before,
+    );
   }, 60_000);
 
   it('live verification #2’s plan: the six probes pass through the real gateway; every model call counted first, in the US, its count compared with the reported input; reconciled', async () => {

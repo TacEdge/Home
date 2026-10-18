@@ -3,12 +3,22 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { INJECTIONS, SCENARIOS } from '@/kev/evals/scenarios';
 import { scriptFor, type FixtureIds } from '@/kev/evals/scripted';
+import { scriptedBaselineMarkdown } from '@/kev/evals/baseline';
+import { transcriptsDigest } from '@/kev/evals/quality';
+import { REVIEW_SET } from '@/kev/evals/review-set';
 import { summarise, summaryJson, summaryMarkdown, type EvalRecord } from '@/kev/evals/summary';
+import type { Transcript } from '@/kev/evals/transcript';
 import { createScriptedProvider } from '@/kev/providers/scripted';
 import type { ProviderRequest } from '@/kev/providers/types';
 import { STRICT_LIMITS, strictComplexity, strictSchemaViolations } from '@/kev/tools/strict-schema';
 import { SCENARIO_CLASSES, type Scenario } from '@/kev/evals/types';
-import { runScenario, type ScenarioRun } from '../../scripts/kev-live/eval';
+import {
+  reviewFiles,
+  runScenario,
+  transcriptOf,
+  type ScenarioContext,
+  type ScenarioRun,
+} from '../../scripts/kev-live/eval';
 import { CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { WEATHER_VARIABLES, WELLINGTON, weatherEnv } from '../fixtures/weather';
 import { clockedPool, dropTestClock } from './clock';
@@ -62,12 +72,15 @@ const records: EvalRecord[] = [];
 /** The injected texts some run sent to the (scripted) model, labelled. */
 const injectionsSent = new Set<string>();
 
+/** Every run's readable transcript (Package 5C), built as the live runner builds its own. */
+const transcripts: Transcript[] = [];
+
 async function play(
   s: Scenario,
   tier: 'fast' | 'deep',
-): Promise<ScenarioRun & { requests: ProviderRequest[][] }> {
+): Promise<ScenarioRun & { requests: ProviderRequest[][]; transcript: Transcript }> {
   const providers: ReturnType<typeof createScriptedProvider>[] = [];
-  const run = await runScenario(s, tier, 1, {
+  const ctx: ScenarioContext = {
     adults: f.kev,
     ids,
     markers: markersFor,
@@ -81,10 +94,23 @@ async function play(
     beforeScenario: () => clockForward(admin, 31),
     beforeTurn: () => clockForward(admin, 2),
     prepare: (sc) => applyState(sc.state, admin.db),
-  });
+  };
+  const run = await runScenario(s, tier, 1, ctx);
   records.push(run.record);
-  return { ...run, requests: providers.map((p) => [...p.requests]) };
+  const transcript = await transcriptOf(run, s, ctx, 'scripted');
+  transcripts.push(transcript);
+  return { ...run, requests: providers.map((p) => [...p.requests]), transcript };
 }
+
+/** The words a scenario's script has the model write itself (always refused). */
+const scriptedWords = (s: Scenario): string[] =>
+  s.turns.flatMap((t) =>
+    t.script.flatMap((step) =>
+      'plan' in step && step.plan && 'words' in step.plan && step.plan.words
+        ? [step.plan.words]
+        : [],
+    ),
+  );
 
 const runs = SCENARIOS.flatMap((s) =>
   (s.tiers ?? (['fast', 'deep'] as const)).map((tier) => [s.id, tier, s] as const),
@@ -185,6 +211,50 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
       if (sent.some((t) => t.includes(n))) injectionsSent.add(n);
       for (const t of unlabelled) expect(t, n).not.toContain(n);
     }
+
+    // The readable transcript (Package 5C): complete, each citation on the
+    // block that cites it, no rejected answer's words, nothing of the other
+    // adult's or sensitive, and HOME's verdict kept apart from any rating.
+    const tr = run.transcript;
+    expect(tr.key).toBe(`${s.id}@${tier}#1`);
+    expect(tr.turns.map((t) => t.question)).toEqual(s.turns.map((t) => t.question));
+    expect(tr.automated).toEqual({
+      pass: run.verdict.pass,
+      failed: run.verdict.failed,
+      relevance: run.record.relevance ?? null,
+    });
+    expect(tr).not.toHaveProperty('human');
+    for (const [i, t] of run.turns.entries()) {
+      const x = tr.turns[i]!;
+      expect(x.outcome).toBe(t.done.outcome);
+      expect(x.check.result).toBe(t.record.result);
+      expect(x.tools.map((r) => r.tool)).toEqual((t.stored?.trace ?? []).map((r) => r.tool));
+      if (t.stored) {
+        // What was shown: the stored, checked lead and blocks, in order.
+        expect(x.say).toBe(t.stored.say);
+        const blocks = t.stored.blocks;
+        expect([...x.facts, ...x.view].map((b) => b.text)).toEqual([
+          ...blocks.filter((b) => b.kind === 'fact').map((b) => b.text),
+          ...blocks.filter((b) => b.kind === 'view').map((b) => b.text),
+        ]);
+        expect(x.facts.map((b) => b.cites.map((c) => `${c.type}:${c.id}:${c.at ?? ''}`))).toEqual(
+          blocks
+            .filter((b) => b.kind === 'fact')
+            .map((b) => b.cites.map((c) => `${c.type}:${c.id}:${c.at ?? ''}`)),
+        );
+        expect(new Set(x.citations.map((c) => `${c.type}:${c.id}`))).toEqual(
+          new Set(t.stored.cites.map((c) => `${c.type}:${c.id}`)),
+        );
+        // A rejected answer leaves its closed codes only.
+        expect(x.check.rejectedCodes).toEqual(
+          (t.stored.check?.attempts ?? []).flatMap((a) => a.failures),
+        );
+      } else expect(x.say).toBe(t.events.find((e) => e.type === 'error')?.message ?? null);
+    }
+    const trJson = JSON.stringify(tr);
+    for (const w of scriptedWords(s)) expect(trJson, 'a rejected answer’s words').not.toContain(w);
+    for (const n of [`ni-${other}-`, CANARY_MARK[other], SENSITIVE_MARK])
+      expect(trJson, n).not.toContain(n);
   });
 });
 
@@ -214,6 +284,40 @@ describe('the evaluation summary', () => {
       mkdirSync(process.env.KEV_EVAL_OUT, { recursive: true });
       writeFileSync(join(process.env.KEV_EVAL_OUT, 'eval-scripted.json'), json);
       writeFileSync(join(process.env.KEV_EVAL_OUT, 'eval-scripted.md'), summaryMarkdown(summary));
+    }
+  });
+
+  it('writes the owner’s review files and the scripted baseline (Package 5C)', () => {
+    expect(transcripts).toHaveLength(runs.length);
+    const files = reviewFiles(transcripts, 'scripted');
+    for (const tier of ['fast', 'deep'] as const) {
+      // The review set, in its order, every scenario of it played.
+      const set = JSON.parse(files[`review-${tier}.json`]!) as Transcript[];
+      expect(set.map((t) => t.scenario)).toEqual(
+        REVIEW_SET.filter((e) => runs.some(([id, t]) => id === e.scenario && t === tier)).map(
+          (e) => e.scenario,
+        ),
+      );
+      // The page is bound to exactly those transcripts, and labelled scripted.
+      const html = files[`review-${tier}.html`]!;
+      expect(html).toContain(transcriptsDigest(set));
+      expect(html).toContain('Scripted answers.');
+      for (const t of set) expect(html).toContain(`id="${t.key}"`);
+    }
+    expect(files['review-fast.json']).toBeDefined();
+    expect(JSON.parse(files['review-fast.json']!)).toHaveLength(REVIEW_SET.length);
+    const baseline = scriptedBaselineMarkdown(
+      summarise(records, { mode: 'scripted', fastModel: 'sonnet' }),
+      transcripts,
+    );
+    // Codes, counts and ids: no question or answer text.
+    for (const s of SCENARIOS) for (const t of s.turns) expect(baseline).not.toContain(t.question);
+    for (const n of Object.values(INJECTIONS)) expect(baseline).not.toContain(n);
+    if (process.env.KEV_EVAL_OUT) {
+      mkdirSync(process.env.KEV_EVAL_OUT, { recursive: true });
+      for (const [name, text] of Object.entries(files))
+        writeFileSync(join(process.env.KEV_EVAL_OUT, name), text);
+      writeFileSync(join(process.env.KEV_EVAL_OUT, 'baseline-scripted.md'), baseline);
     }
   });
 });
