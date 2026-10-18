@@ -5,6 +5,8 @@ import { parsePlan } from '@/kev/answer/schema';
 import { BudgetExhausted, TurnBudget } from '@/kev/budget';
 import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { INFERENCE_GEO, LIMITS, TIERS } from '@/kev/config';
+import { SCENARIOS } from '@/kev/evals/scenarios';
+import type { EvalRecord } from '@/kev/evals/summary';
 import { handle, type KevEvent } from '@/kev/orchestrator';
 import type { ProbeGateway } from '@/kev/providers/anthropic';
 import { diagnosticLine, type ProbeErrorDetail } from '@/kev/providers/diagnostics';
@@ -25,8 +27,10 @@ import {
   systemFor,
   TURN_NOW,
   type Plan,
+  type ProbeRequest,
   type ProbeSpec,
 } from './plan';
+import { runScenario, type ScenarioContext } from './eval';
 
 // Runs the plan's probes, one after another (M8 live-verification plan §7,
 // §11): each model probe on its own attempt, reserved through HOME's
@@ -53,6 +57,8 @@ export type ProbeResult = Readonly<{
   maxUsdMicros: bigint;
   attemptIds: readonly string[];
   evidence: readonly ProbeEvidence[];
+  /** A scenario probe's record (Package 5A): closed check names, codes and counts only. */
+  evaluation?: EvalRecord;
 }>;
 
 export type RunContext = Readonly<{
@@ -64,6 +70,13 @@ export type RunContext = Readonly<{
   budgetMicros: bigint;
   /** Progress lines (ids, outcomes, counts only). */
   log?: (line: string) => void;
+  /**
+   * What scenario probes need (Package 5A): the fixture adults, the
+   * evaluation fixture's ids, the markers never to show, and the database.
+   * Absent, a scenario probe is not run. Live, each turn's provider is the
+   * gateway's; a test may give its own (`providerFor`).
+   */
+  evaluation?: Omit<ScenarioContext, 'providerFor'> & Partial<Pick<ScenarioContext, 'providerFor'>>;
 }>;
 
 export type RunOutcome = Readonly<{
@@ -79,7 +92,7 @@ const userTurn = (t: string): ProviderMessage =>
   Object.freeze({ role: 'user' as const, content: Object.freeze([text(t)]) });
 
 function requestFor(
-  p: Extract<ProbeSpec, { tier: KevTier }>,
+  p: Extract<ProbeSpec, { request: ProbeRequest }>,
   messages: ProviderMessage[],
 ): ProviderRequest {
   const r = p.request;
@@ -187,7 +200,7 @@ type Attempted = {
 /** One model probe on its own attempt: reserve, open the budget, call, settle. */
 async function modelProbe(
   ctx: RunContext,
-  p: Extract<ProbeSpec, { tier: KevTier }>,
+  p: Extract<ProbeSpec, { request: ProbeRequest }>,
   attemptId: string,
 ): Promise<Attempted> {
   const reasons: string[] = [];
@@ -299,6 +312,41 @@ async function turnProbe(
   return { outcome: reasons.length === 0 ? 'pass' : 'fail', reasons, checks, stop: null };
 }
 
+/** One run of a dataset scenario, judged by the scripted evals' checker (Package 5A). */
+async function scenarioProbe(
+  ctx: RunContext,
+  p: Extract<ProbeSpec, { kind: 'scenario' }>,
+): Promise<Attempted & { evaluation?: EvalRecord }> {
+  const s = SCENARIOS.find((x) => x.id === p.scenario);
+  if (!ctx.evaluation || !s)
+    return {
+      outcome: 'not_run',
+      reasons: [s ? 'no_evaluation_fixture' : 'no_scenario'],
+      checks: {},
+      stop: null,
+    };
+  const run = await runScenario(s, p.tier, p.repeat, {
+    providerFor: () => ctx.gateway.provider(),
+    ...ctx.evaluation,
+  });
+  const last = run.record.turns.at(-1);
+  const checks: Record<string, boolean | number | string | null> = {
+    passed: run.verdict.pass,
+    turns: run.record.turns.length,
+    outcome: last?.outcome ?? null,
+    answerResult: last?.result ?? null,
+    firstPass: last && last.answers.length > 0 ? last.answers[0] === 'pass' : null,
+    escalated: last?.escalated ?? null,
+  };
+  return {
+    outcome: run.verdict.pass ? 'pass' : 'fail',
+    reasons: run.verdict.failed.map((f) => `scenario_${f}`),
+    checks,
+    stop: null,
+    evaluation: run.record,
+  };
+}
+
 /**
  * A turn's two phases (ADR 0012 §54), from its Messages calls' evidence:
  * its tool rounds (at least one), whether one call sent the answer format
@@ -396,6 +444,8 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       attempted = { outcome: reasons.length ? 'fail' : 'pass', reasons, checks, stop: null };
     } else if (p.kind === 'turn') {
       attempted = await turnProbe(ctx, p);
+    } else if (p.kind === 'scenario') {
+      attempted = await scenarioProbe(ctx, p);
     } else {
       const attemptId = crypto.randomUUID();
       attemptIds.push(attemptId);
@@ -434,7 +484,16 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       if (attempted.reasons.length > 0)
         attempted.outcome = attempted.outcome === 'not_run' ? 'not_run' : 'fail';
     }
-    results.push(Object.freeze({ ...base, ...attempted, attemptIds, evidence }));
+    const { evaluation, ...rest } = attempted as Attempted & { evaluation?: EvalRecord };
+    results.push(
+      Object.freeze({
+        ...base,
+        ...rest,
+        attemptIds,
+        evidence,
+        ...(evaluation ? { evaluation } : {}),
+      }),
+    );
     ctx.log?.(
       `${p.id}: ${attempted.outcome}${attempted.reasons.length ? ` (${attempted.reasons.join(', ')})` : ''}`,
     );

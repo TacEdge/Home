@@ -1,3 +1,5 @@
+import { TIERS } from '@/kev/config';
+import { summarise, summaryMarkdown } from '@/kev/evals/summary';
 import { diagnosticLine } from '@/kev/providers/diagnostics';
 import { usd } from './guards.mts';
 import type { Plan } from './plan';
@@ -182,6 +184,19 @@ export function buildReport(input: {
   }));
   const diagnostic = diagnosticRows(plan, run);
   const gates = gateSummary(run.results);
+  // The scenario probes' records and §12.3's summary (Package 5A): closed
+  // check names, codes and counts only.
+  const records = run.results.flatMap((r) => (r.evaluation ? [r.evaluation] : []));
+  const evaluation =
+    records.length > 0
+      ? {
+          summary: summarise(records, {
+            mode: 'live',
+            fastModel: TIERS.fast.model.id.includes('haiku') ? 'haiku' : 'sonnet',
+          }),
+          records,
+        }
+      : null;
   const passed =
     run.stopped === null && run.results.every((r) => r.outcome === 'pass') && (rec?.ok ?? false);
   const doc = {
@@ -201,6 +216,7 @@ export function buildReport(input: {
     gates,
     probes,
     ...(diagnostic.length > 0 ? { diagnostic, stoppedBecause: run.stopped } : {}),
+    ...(evaluation ? { evaluation } : {}),
     reconciliation: rec,
     note: 'Synthetic data only. No prompt, answer, tool content, header or key is recorded here. No gate is PASS until the owner records it in the contract’s register.',
   };
@@ -259,6 +275,18 @@ export function buildReport(input: {
       md.push(
         `| ${d.id} | ${d.shape} | ${d.model ?? '—'} | ${d.toolChoice} | ${d.strictTools ? 'yes' : 'no'} | ${d.answerFormat ? 'yes' : 'no'} | ${d.outcome}${d.reasons.length ? ` (${d.reasons.join(', ')})` : ''} | ${d.countPassed === null ? '—' : d.countPassed ? 'passed' : 'failed'} | ${d.messageAttempted ? 'yes' : 'no'} | ${d.status ?? '—'} | ${d.category ?? '—'} | ${d.paths.join(' ') || '—'} | ${d.signals.join(' ') || '—'} | ${d.requestId ?? '—'} | ${d.usage ? `${d.usage.inputTokens}/${d.usage.outputTokens}` : '—'} | ${d.chargedUsdMicros}${d.conservative ? ' (conservative)' : ''} |`,
       );
+  }
+  if (evaluation) {
+    md.push('', '## Evaluation (§12.3)', '');
+    // The summary's own Markdown, its headings one level down.
+    md.push(
+      summaryMarkdown(evaluation.summary)
+        .trimEnd()
+        .split('\n')
+        .slice(2)
+        .map((l) => (l.startsWith('## ') ? `#${l}` : l))
+        .join('\n'),
+    );
   }
   md.push('', '## Provider errors', '');
   const refused = probes.flatMap((p) =>

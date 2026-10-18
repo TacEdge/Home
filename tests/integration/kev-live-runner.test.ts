@@ -392,8 +392,7 @@ describe('the plan, live path, against a local stub', () => {
       expect(text).not.toContain(CANARY);
       expect(text).not.toContain(KEY);
       for (const p of plan.probes)
-        if (p.kind !== 'models' && p.kind !== 'turn')
-          expect(text).not.toContain(p.request.question);
+        if ('request' in p) expect(text).not.toContain(p.request.question);
         else if (p.kind === 'turn') expect(text).not.toContain(p.question);
       expect(text).toContain('req_synthetic');
       expect(text).toContain(plan.hash);
@@ -617,8 +616,7 @@ describe('provider refusals are diagnosable from the job log, and nothing else l
       for (const s of [KEY, CANARY, MESSAGE_TEXT, 'too complex for compilation'])
         expect(text, s).not.toContain(s);
       for (const p of plan.probes)
-        if (p.kind !== 'models' && p.kind !== 'turn')
-          expect(text).not.toContain(p.request.question);
+        if ('request' in p) expect(text).not.toContain(p.request.question);
     }
     for (const text of [report.json, report.markdown, logged.join('\n'), out.join('')])
       if (question?.kind === 'turn') expect(text).not.toContain(question.question);
@@ -886,8 +884,7 @@ describe('the tool-use diagnostic (ADR 0012 §53): adaptive, one call a probe, c
     for (const text of [report.json, report.markdown, r.logged.join('\n')]) {
       for (const s of [KEY, CANARY, MESSAGE_TEXT]) expect(text, s).not.toContain(s);
       for (const p of r.plan.probes)
-        if (p.kind !== 'models' && p.kind !== 'turn')
-          expect(text).not.toContain(p.request.question);
+        if ('request' in p) expect(text).not.toContain(p.request.question);
     }
   });
 });

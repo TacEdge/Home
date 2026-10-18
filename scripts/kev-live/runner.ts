@@ -15,11 +15,13 @@ import {
   assertRunnerDatabase,
   capNzdFor,
   capUsdMicros,
+  EVALUATION_RUN_CEILING_USD_MICROS,
   EXIT,
   LiveRefusal,
   parseBudgetUsd,
   parseLedger,
   readKey,
+  SESSION_CEILING_USD_MICROS,
   usd,
   type Mode,
 } from './guards.mts';
@@ -51,12 +53,17 @@ export type RunnerOptions = {
   log: (line: string) => void;
   /** Tests only: a gateway over a local stub in place of the provider's. */
   gatewayFor?: (key: string) => ProbeGateway;
+  /**
+   * Tests only: a plan in place of the session plan (an evaluation plan for
+   * E12's preflight). Every guard still applies to it, the approved hash included.
+   */
+  plan?: Plan;
 };
 
 /** The plan as a table: ids, gates, tiers, calls and maxima. Never a prompt. */
 export function planLines(plan: Plan): string[] {
   const lines = [
-    `Kev live verification plan v${String(plan.canonical.version)}: ${plan.name} (session cap US$${usd(plan.sessionCapUsdMicros)})`,
+    `Kev live ${plan.kind} plan v${String(plan.canonical.version)}: ${plan.name} (session cap US$${usd(plan.sessionCapUsdMicros)}; ceiling US$${usd(plan.ceilingUsdMicros)})`,
     '',
     'probe                  gates                tier  max US$ (with retry)  max US$ (no retry)',
   ];
@@ -110,14 +117,19 @@ export async function runMode(
 ): Promise<RunnerOutcome> {
   try {
     assertEnvironment(mode, env);
-    const plan = buildPlan();
+    const plan = opts.plan ?? buildPlan();
     for (const l of planLines(plan)) opts.log(l);
     if (mode === 'dry-run') {
       opts.log('');
       opts.log('Dry run: nothing was sent. Approve the hash above to run this plan.');
       return { exitCode: EXIT.ok, code: 'dry_run' };
     }
-    const budget = parseBudgetUsd(env.KEV_LIVE_BUDGET_USD);
+    // The plan kind's ceiling (§12.4 rule 2): US$175 for an evaluation run,
+    // the US$10 session ceiling for verification.
+    const budget = parseBudgetUsd(
+      env.KEV_LIVE_BUDGET_USD,
+      plan.kind === 'evaluation' ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS,
+    );
     assertBudgetWithinPlanCap(budget, plan.sessionCapUsdMicros);
     assertBudgetCovers(budget, plan.totalMaxUsdMicros);
     // HOME's whole-NZ$ reservation cap for this budget must hold the plan's
@@ -132,6 +144,17 @@ export async function runMode(
       `budget US$${usd(budget)} holds the plan; the hash matches; the campaign ledger holds the budget`,
     );
     if (mode === 'check-plan') return { exitCode: EXIT.ok, code: 'plan_checked' };
+    // Package 5A builds the evaluation's harness, not its live run: the
+    // runner's database holds the M2 fixture family only (no evaluation
+    // fixture: no private records, injections or forecast), and HOME's
+    // per-adult turn limits are not yet paced for a run. Package 5B wires
+    // both; until then an evaluation plan stops here, before any database,
+    // key or provider call.
+    if (plan.kind === 'evaluation')
+      throw new LiveRefusal(
+        'fixtures',
+        'An evaluation plan does not run live yet: the runner builds no evaluation fixture and does not pace turns (Package 5B).',
+      );
 
     // Live: the runner's own database, then the cap, then the key.
     assertRunnerDatabase(env.DATABASE_URL);

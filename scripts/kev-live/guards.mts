@@ -15,6 +15,14 @@
  */
 export const SESSION_CEILING_USD_MICROS = 10_000_000n;
 
+/**
+ * The most any one evaluation run may cost (contract §12.4 rule 2, O7):
+ * US$175, in µ$. An evaluation plan's cap and budget are held to it, and
+ * every run to the campaign's remainder besides (rule 4). Verification
+ * plans keep the US$10 session ceiling above.
+ */
+export const EVALUATION_RUN_CEILING_USD_MICROS = 175_000_000n;
+
 /** The Package 5 live-evaluation campaign (contract §12.4, O7): US$200, in µ$. */
 export const CAMPAIGN_USD_MICROS = 200_000_000n;
 
@@ -147,18 +155,24 @@ export function assertNoKey(env: Env): void {
 
 /**
  * The budget, in whole US dollars and cents ("10", "7.50"), as µ$: above
- * zero and at most the session ceiling (US$10, owner decision 4).
+ * zero and at most the plan kind's ceiling: the session ceiling (US$10,
+ * owner decision 4) for verification, US$175 for an evaluation run (§12.4).
  */
-export function parseBudgetUsd(raw: string | undefined): bigint {
+export function parseBudgetUsd(
+  raw: string | undefined,
+  ceilingMicros: bigint = SESSION_CEILING_USD_MICROS,
+): bigint {
   if (raw === undefined || !/^(0|[1-9][0-9]{0,2})(\.[0-9]{1,2})?$/.test(raw))
     throw new LiveRefusal('budget', 'KEV_LIVE_BUDGET_USD must be US dollars, like 10 or 7.50.');
   const [whole, cents = ''] = raw.split('.');
   const micros = BigInt(whole!) * 1_000_000n + BigInt(cents.padEnd(2, '0')) * 10_000n;
   if (micros <= 0n) throw new LiveRefusal('budget', 'KEV_LIVE_BUDGET_USD must be above zero.');
-  if (micros > SESSION_CEILING_USD_MICROS)
+  if (micros > ceilingMicros)
     throw new LiveRefusal(
       'budget',
-      `KEV_LIVE_BUDGET_USD is above the approved first-session maximum of US$${usd(SESSION_CEILING_USD_MICROS)}.`,
+      ceilingMicros === SESSION_CEILING_USD_MICROS
+        ? `KEV_LIVE_BUDGET_USD is above the approved first-session maximum of US$${usd(ceilingMicros)}.`
+        : `KEV_LIVE_BUDGET_USD is above the evaluation run ceiling of US$${usd(ceilingMicros)}.`,
     );
   return micros;
 }
