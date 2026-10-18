@@ -77,6 +77,14 @@ export type RunContext = Readonly<{
    * gateway's; a test may give its own (`providerFor`).
    */
   evaluation?: Omit<ScenarioContext, 'providerFor'> & Partial<Pick<ScenarioContext, 'providerFor'>>;
+  /**
+   * When to start no further probe (ms since the epoch): an evaluation run
+   * stops cleanly, its report written, before the job's own time limit
+   * would kill it mid-scenario. A probe already started finishes.
+   */
+  stopStartingAt?: number;
+  /** The clock for `stopStartingAt` (tests only). */
+  now?: () => number;
 }>;
 
 export type RunOutcome = Readonly<{
@@ -409,6 +417,12 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       ctx.log?.(`${p.id}: not run (rule_skipped)`);
       continue;
     }
+    if (
+      !stopped &&
+      ctx.stopStartingAt !== undefined &&
+      (ctx.now ?? Date.now)() >= ctx.stopStartingAt
+    )
+      stopped = 'time';
     if (stopped || committed + p.maxUsdMicros > ctx.budgetMicros) {
       stopped ??= 'budget';
       results.push(

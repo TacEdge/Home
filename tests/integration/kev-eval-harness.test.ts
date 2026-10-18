@@ -10,7 +10,7 @@ import type { ProbeGateway } from '@/kev/providers/anthropic';
 import { createScriptedProvider, type ScriptStep } from '@/kev/providers/scripted';
 import type { Ref } from '@/kev/tools/types';
 import type { UserActor } from '@/trust/actor';
-import { runScenario, storedTurn } from '../../scripts/kev-live/eval';
+import { paceTurn, runScenario, storedTurn } from '../../scripts/kev-live/eval';
 import { buildPlan, scenarioProbes, scenarioTurnMaxUsdMicros } from '../../scripts/kev-live/plan';
 import { executePlan } from '../../scripts/kev-live/probes';
 import { buildReport } from '../../scripts/kev-live/report';
@@ -499,5 +499,118 @@ describe('the runner’s scenario probes (Package 5A)', () => {
       outcome: 'not_run',
       reasons: ['no_evaluation_fixture'],
     });
+  });
+});
+
+describe('Package 5B’s run controls', () => {
+  // Rows as HOME writes them for each turn (`message.add`, role `user`),
+  // for a synthetic adult id no other suite uses.
+  const turnsAt = async (userId: string, ago: string, n: number) => {
+    for (let i = 0; i < n; i++)
+      await admin.db.execute(sql`
+        insert into audit_log (at, actor_user_id, actor_via, actor_channel, event, meta)
+        values (now() - ${ago}::interval, ${userId}, 'kev', 'web', 'message.add', '{"role":"user"}'::jsonb)`);
+  };
+
+  it('pacing: under HOME’s six a minute it goes straight on; at six it waits until the minute clears, by HOME’s own count', async () => {
+    const quiet = `pace-${crypto.randomUUID()}`;
+    await turnsAt(quiet, '5 seconds', 5);
+    expect(await paceTurn(admin.db, quiet, { sleep: async () => {} })).toBe(0);
+    // Six turns, 57 seconds ago: a minute is up a few seconds later.
+    const busy = `pace-${crypto.randomUUID()}`;
+    await turnsAt(busy, '57 seconds', 6);
+    const started = Date.now();
+    const waits = await paceTurn(admin.db, busy, { stepMs: 1_000 });
+    expect(waits).toBeGreaterThanOrEqual(1);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+    // Turns counted for another adult, or of another kind, do not count.
+    const other = `pace-${crypto.randomUUID()}`;
+    await turnsAt(`${other}-x`, '1 second', 6);
+    expect(await paceTurn(admin.db, other, { sleep: async () => {} })).toBe(0);
+  }, 30_000);
+
+  it('pacing never waits without end: refuses after its last wait', async () => {
+    const stuck = `pace-${crypto.randomUUID()}`;
+    await turnsAt(stuck, '1 second', 6);
+    let slept = 0;
+    await expect(
+      paceTurn(admin.db, stuck, { sleep: async () => void slept++, maxWaits: 2 }),
+    ).rejects.toThrow(/did not clear/);
+    expect(slept).toBe(2);
+  });
+
+  it('the wall clock: no scenario starts after the stop time; one started finishes; the rest are not run, at no cost', async () => {
+    const probes = scenarioProbes({
+      scenarios: ['realistic.today', 'realistic.today_alex', 'realistic.thanks'],
+      tiers: ['fast'],
+      repeats: 1,
+    });
+    const plan = buildPlan('evaluation-test', probes, {
+      kind: 'evaluation',
+      probes: probes.map((p) => p.id),
+      sessionCapUsdMicros: 10_000_000n,
+    });
+    const ids = Object.fromEntries(
+      Object.entries(f.id).filter(([k]) => k !== 'calendar'),
+    ) as FixtureIds;
+    let clock = 0;
+    const out = await executePlan(plan, {
+      gateway: { evidence: () => [] } as unknown as ProbeGateway,
+      actor: f.kev.sam,
+      deps: { db: clocked },
+      budgetMicros: 10_000_000n,
+      // The first probe starts at 0; the clock then passes the stop time.
+      now: () => (clock++ === 0 ? 0 : 100),
+      stopStartingAt: 50,
+      evaluation: {
+        adults: f.kev,
+        ids,
+        markers: { otherAdult: [], sensitive: [SENSITIVE_MARK] },
+        db: clocked,
+        reader: admin.db,
+        providerFor: (t) => createScriptedProvider(scriptFor(t, ids)),
+        beforeScenario: () => clockForward(admin, 31),
+        beforeTurn: () => clockForward(admin, 2),
+      },
+    });
+    expect(out.stopped).toBe('time');
+    expect(out.results[0]).toMatchObject({ outcome: 'pass' });
+    for (const r of out.results.slice(1))
+      expect(r).toMatchObject({ outcome: 'not_run', reasons: ['time'], attemptIds: [] });
+    expect(out.committedMaxUsdMicros).toBe(plan.probes[0]!.maxUsdMicros);
+  });
+
+  it('a scenario’s starting state is restored however it ends', async () => {
+    const ids = Object.fromEntries(
+      Object.entries(f.id).filter(([k]) => k !== 'calendar'),
+    ) as FixtureIds;
+    const s = SCENARIOS.find((x) => x.id === 'realistic.weather_no_location')!;
+    const restored: string[] = [];
+    await expect(
+      runScenario(s, 'fast', 1, {
+        adults: f.kev,
+        ids,
+        markers: { otherAdult: [], sensitive: [] },
+        db: clocked,
+        reader: admin.db,
+        providerFor: () => {
+          throw new Error('provider unavailable');
+        },
+        beforeScenario: () => clockForward(admin, 31),
+        prepare: async () => async () => void restored.push(s.id),
+      }),
+    ).rejects.toThrow('provider unavailable');
+    expect(restored).toEqual([s.id]);
+    // And a state with no way to set it is refused before any turn.
+    await expect(
+      runScenario(s, 'fast', 1, {
+        adults: f.kev,
+        ids,
+        markers: { otherAdult: [], sensitive: [] },
+        db: clocked,
+        reader: admin.db,
+        providerFor: (t) => createScriptedProvider(scriptFor(t, ids)),
+      }),
+    ).rejects.toThrow(/needs a state/);
   });
 });

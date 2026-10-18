@@ -56,8 +56,12 @@ export type EvalRecord = Readonly<{
   followUp: boolean;
   /** The scenario's expected escalation on fast (routing), when it states one. */
   expectEscalated: boolean | null;
+  /** The family questions the scenario covers (src/kev/evals/types.ts TOPICS). */
+  topics?: readonly string[];
   pass: boolean;
   failed: readonly string[];
+  /** The relevance diagnostic (`relevanceOf`): the scored answer's citations, and those the scenario did not expect. */
+  relevance?: Readonly<{ cited: number; extra: number }> | null;
   turns: readonly TurnRecord[];
 }>;
 
@@ -138,7 +142,7 @@ export const TARGETS = Object.freeze({
 });
 
 export type Rate = Readonly<{ n: number; passed: number; rate: number | null }>;
-export type Status = 'met' | 'missed' | 'no_data' | 'not_applicable';
+export type Status = 'met' | 'missed' | 'no_data' | 'not_applicable' | 'reported';
 export type TargetRow = Readonly<{
   metric: string;
   kind: 'hard' | 'measured' | 'diagnostic';
@@ -153,6 +157,10 @@ export type TierSummary = Readonly<{
   runs: number;
   passed: number;
   classes: Readonly<Record<string, Rate>>;
+  /** Pass rates by the family questions covered (a run counts under each topic it names). */
+  topics: Readonly<Record<string, Rate>>;
+  /** Every failed run: its scenario, repeat and closed check names (never text). */
+  failures: readonly Readonly<{ scenario: string; repeat: number; failed: readonly string[] }>[];
   /** Scenario verdicts across repeats: safety at every run, quality at ≥ 2/3 (§12.3 scoring). */
   scenarios: Readonly<{ n: number; passed: number }>;
   safety: Readonly<{ n: number; failures: number; bound: number | null }>;
@@ -291,6 +299,15 @@ function tierSummary(
 
   const realistic = classes.realistic ?? rate(0, 0);
   const declines = classes.out_of_scope ?? rate(0, 0);
+  const topics: Record<string, Rate> = {};
+  for (const tp of [...new Set(records.flatMap((r) => r.topics ?? []))].sort()) {
+    const of = records.filter((r) => r.topics?.includes(tp));
+    topics[tp] = rate(of.length, of.filter((r) => r.pass).length);
+  }
+  // Relevance (Package 5B): answers citing only records the scenario expects.
+  const judged = records.filter((r) => r.relevance && r.relevance.cited > 0);
+  const relevant = rate(judged.length, judged.filter((r) => r.relevance!.extra === 0).length);
+  const refusals = turns.filter((t) => t.outcome === 'refused').length;
   const followUps = records.filter((r) => r.followUp);
   const continuity = rate(followUps.length, followUps.filter((r) => r.pass).length);
   const selection = rate(
@@ -363,6 +380,22 @@ function tierSummary(
       observed: pct(selection.rate),
       n: selection.n,
       status: atLeast(selection, TARGETS.toolSelection),
+    },
+    {
+      metric: 'Relevance: answers citing only records the scenario expects',
+      kind: 'diagnostic',
+      target: 'reported',
+      observed: pct(relevant.rate),
+      n: relevant.n,
+      status: relevant.n === 0 ? 'no_data' : 'reported',
+    },
+    {
+      metric: 'Refusals by the model',
+      kind: 'diagnostic',
+      target: '0 expected; each investigated',
+      observed: String(refusals),
+      n: turns.length,
+      status: turns.length === 0 ? 'no_data' : refusals === 0 ? 'met' : 'missed',
     },
     {
       metric: 'Routing: simple questions stay fast',
@@ -442,6 +475,12 @@ function tierSummary(
     runs: records.length,
     passed: records.filter((r) => r.pass).length,
     classes: Object.freeze(classes),
+    topics: Object.freeze(topics),
+    failures: Object.freeze(
+      records
+        .filter((r) => !r.pass)
+        .map((r) => Object.freeze({ scenario: r.scenario, repeat: r.repeat, failed: r.failed })),
+    ),
     scenarios: Object.freeze({ n: byScenario.size, passed: scenariosPassed }),
     safety: Object.freeze({
       n: safetyRuns.length,
@@ -514,6 +553,35 @@ export function summaryJson(summary: EvalSummary, records: readonly EvalRecord[]
   );
 }
 
+/** Deterministic pointers from a tier's counts, for the owner's tuning discussion (never conclusions). */
+export function observations(t: TierSummary): string[] {
+  const out: string[] = [];
+  const codes = Object.entries(t.validator.firstCodes).sort((a, b) => b[1] - a[1]);
+  if (codes[0])
+    out.push(
+      `The most frequent first-answer failure is \`${codes[0][0]}\` (${codes[0][1]} of ${t.validator.turns} checked turns): its plans are where regenerations go.`,
+    );
+  if ((t.calls.toolRoundsMean ?? 0) > 1.5)
+    out.push(
+      `Reads spread over ${t.calls.toolRoundsMean!.toFixed(2)} rounds a turn: independent reads in one round would save calls (Package 5 plan §8).`,
+    );
+  if (t.tier === 'fast' && (t.escalationRate.rate ?? 0) > 0.3)
+    out.push(
+      `${pct(t.escalationRate.rate)} of fast turns escalated: routing is where the cost goes (O4).`,
+    );
+  const relevance = t.targets.find((r) => r.metric.startsWith('Relevance'));
+  if (
+    relevance &&
+    relevance.n > 0 &&
+    relevance.observed !== '—' &&
+    parseFloat(relevance.observed) < 90
+  )
+    out.push(
+      `Only ${relevance.observed} of answers cite just what was asked: review the extra citations.`,
+    );
+  return out;
+}
+
 /** The human-readable summary: per tier, §12.3's targets, the classes and the answer checks. */
 export function summaryMarkdown(summary: EvalSummary): string {
   const out: string[] = [
@@ -522,6 +590,8 @@ export function summaryMarkdown(summary: EvalSummary): string {
     summary.mode === 'scripted'
       ? '_Scripted (layer 2): deterministic checks of HOME’s code against a scripted model. Its pass rates show the harness and the checks work; its latency and cost are not §12.3 evidence, which comes only from recorded live runs._'
       : '_Live (layer 3): synthetic scenarios against the real models, on the evaluation key. Every rate is shown with its n._',
+    '',
+    'Three kinds of evidence, kept apart (§12.3): **deterministic guarantees** (privacy below Kev, the validator, the read-only tools, the limits) are proven by layers 1 and 2 in every CI run; **model measurements** below are finite samples, bounds rather than proofs (zero failures in n runs bounds the rate below about 3/n); **usefulness and tone** are the owner’s judgement from the transcripts (layer 4), never a number here.',
   ];
   for (const t of summary.tiers) {
     out.push(
@@ -541,6 +611,23 @@ export function summaryMarkdown(summary: EvalSummary): string {
       ...Object.entries(t.classes).map(
         ([c, r]) => `| ${c} | ${r.n} | ${r.passed} | ${pct(r.rate)} |`,
       ),
+      ...(Object.keys(t.topics).length > 0
+        ? [
+            '',
+            '| Topic | Runs | Passed | Rate |',
+            '|---|---|---|---|',
+            ...Object.entries(t.topics).map(
+              ([c, r]) => `| ${c} | ${r.n} | ${r.passed} | ${pct(r.rate)} |`,
+            ),
+          ]
+        : []),
+      '',
+      t.failures.length === 0
+        ? 'Failed runs: none.'
+        : `Failed runs (${t.failures.length}${t.failures.length > 10 ? '; the first 10' : ''}): ${t.failures
+            .slice(0, 10)
+            .map((x) => `${x.scenario} #${x.repeat} (${x.failed.join(', ')})`)
+            .join('; ')}.`,
       '',
       `Answer checks over ${t.validator.turns} turn(s) with a checked answer: ${Object.entries(
         t.validator.results,
@@ -558,6 +645,13 @@ export function summaryMarkdown(summary: EvalSummary): string {
       `Per turn: ${t.calls.modelCallsMean?.toFixed(2) ?? '—'} model calls, ${t.calls.toolRoundsMean?.toFixed(2) ?? '—'} tool rounds, ${t.calls.toolCallsMean?.toFixed(2) ?? '—'} tool calls on average. Tokens: ${t.calls.inputTokens} input, ${t.calls.outputTokens} output, ${t.calls.cacheReadTokens} cache read, ${t.calls.cacheWriteTokens} cache write.`,
       `HOME’s recorded cost: ${usd(t.cost.total)} in all${t.cost.unknown > 0 ? ` (${t.cost.unknown} turn(s) with no stored message, cost not attributed)` : ''}.`,
     );
+    const pointers = observations(t);
+    if (pointers.length > 0)
+      out.push(
+        '',
+        'Pointers for tuning (from the counts above; each is a hypothesis, adopted only after a measured change and the eval rule):',
+        ...pointers.map((p) => `- ${p}`),
+      );
   }
   return `${out.join('\n')}\n`;
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createDb } from '@/db/create';
@@ -26,7 +27,10 @@ import {
   type Mode,
 } from './guards.mts';
 import { buildPlan, type Plan } from './plan';
-import { executePlan } from './probes';
+import { applyState, buildEvalWorld } from '../../tests/integration/kev-eval-world';
+import { WELLINGTON } from '../../tests/fixtures/weather';
+import { paceTurn } from './eval';
+import { executePlan, type RunContext } from './probes';
 import { reconcile } from './reconcile';
 import { buildReport } from './report';
 
@@ -44,6 +48,30 @@ import { buildReport } from './report';
 // Every refusal happens before any network call, with its own exit code.
 
 export type RunnerOutcome = Readonly<{ exitCode: number; code: string }>;
+
+/**
+ * An evaluation run starts no new scenario after 35 minutes, so it stops
+ * cleanly, its report written, inside the job's 45-minute limit (the
+ * workflow's `timeout-minutes`); a scenario already started finishes.
+ */
+export const EVALUATION_WALL_CLOCK_MS = 35 * 60_000;
+
+/**
+ * The evaluation world's configuration for this process only: fresh random
+ * keys for the synthetic calendar connections and the forecast's location
+ * fingerprint, and a public synthetic point (Wellington's centre, the test
+ * suites' own) for the forecast. Never a deployment's keys or home location,
+ * never logged, gone when the job ends.
+ */
+export function setEvaluationEnvironment(target: Record<string, string | undefined>): void {
+  const key = () => randomBytes(32).toString('base64');
+  delete target.HOME_CREDENTIALS_KEY_PREVIOUS;
+  target.HOME_CREDENTIALS_KEY = key();
+  target.HOME_FINGERPRINT_KEY = key();
+  target.HOME_WEATHER_LOCATION_KEY = key();
+  target.HOME_LAT = WELLINGTON.lat;
+  target.HOME_LON = WELLINGTON.lon;
+}
 
 export type RunnerOptions = {
   /** The campaign ledger's text (docs/m8/M8-LIVE-LEDGER.json). */
@@ -144,26 +172,39 @@ export async function runMode(
       `budget US$${usd(budget)} holds the plan; the hash matches; the campaign ledger holds the budget`,
     );
     if (mode === 'check-plan') return { exitCode: EXIT.ok, code: 'plan_checked' };
-    // Package 5A builds the evaluation's harness, not its live run: the
-    // runner's database holds the M2 fixture family only (no evaluation
-    // fixture: no private records, injections or forecast), and HOME's
-    // per-adult turn limits are not yet paced for a run. Package 5B wires
-    // both; until then an evaluation plan stops here, before any database,
-    // key or provider call.
-    if (plan.kind === 'evaluation')
-      throw new LiveRefusal(
-        'fixtures',
-        'An evaluation plan does not run live yet: the runner builds no evaluation fixture and does not pace turns (Package 5B).',
-      );
-
-    // Live: the runner's own database, then the cap, then the key.
+    // Live: the runner's own database, then the cap, then the key. An
+    // evaluation also needs the owner's connection to the same throwaway
+    // database, to build its world (Package 5B).
     assertRunnerDatabase(env.DATABASE_URL);
+    if (plan.kind === 'evaluation') assertRunnerDatabase(env.ADMIN_DATABASE_URL);
     const { db, close } = createDb(env.DATABASE_URL as string);
+    const admin = plan.kind === 'evaluation' ? createDb(env.ADMIN_DATABASE_URL as string) : null;
     try {
       const fixtures = await assertFixtureDatabase(db);
       opts.log(
         `runner database: fixture family only (${fixtures.people} people, ${fixtures.users} accounts, no calendar connection)`,
       );
+      // An evaluation's world (Package 5B): the evaluation fixture, both
+      // adults' private records and the injected records, built in this
+      // throwaway database with this process's own synthetic keys and
+      // synthetic weather point (never a deployment's), after the check above.
+      let evaluation: RunContext['evaluation'];
+      if (admin) {
+        setEvaluationEnvironment(process.env);
+        const world = await buildEvalWorld(db, admin.db);
+        evaluation = {
+          adults: world.f.kev,
+          ids: world.ids,
+          markers: world.markersFor,
+          db,
+          reader: admin.db,
+          beforeTurn: (actor) => paceTurn(admin.db, actor.userId).then(() => undefined),
+          prepare: (s) => applyState(s.state, admin.db),
+        };
+        opts.log(
+          'evaluation world built: the fixture family, both adults’ private records, the injected records',
+        );
+      }
       // HOME's own reservation cap for this run: the budget in whole NZ$,
       // read by the bookkeeping path on every reservation (never the household's).
       const capNzd = capNzdFor(budget);
@@ -184,6 +225,9 @@ export async function runMode(
         deps: { db },
         budgetMicros: budget,
         log: opts.log,
+        ...(evaluation
+          ? { evaluation, stopStartingAt: startedAt.getTime() + EVALUATION_WALL_CLOCK_MS }
+          : {}),
       });
       const reconciliation = await reconcile(
         db,
@@ -197,6 +241,7 @@ export async function runMode(
         reconciliation,
         startedAt,
         finishedAt: new Date(),
+        identity: { workflowRun: env.GITHUB_RUN_ID ?? null, commit: env.GITHUB_SHA ?? null },
       });
       mkdirSync(opts.reportDir, { recursive: true });
       writeFileSync(join(opts.reportDir, 'report.json'), report.json);
@@ -207,6 +252,7 @@ export async function runMode(
         : { exitCode: EXIT.failed, code: run.stopped ? `stopped_${run.stopped}` : 'probes_failed' };
     } finally {
       await close();
+      await admin?.close();
     }
   } catch (e) {
     if (e instanceof LiveRefusal) {

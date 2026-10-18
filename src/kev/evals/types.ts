@@ -48,6 +48,9 @@ export const FIXTURE_KEYS = [
   'note',
   'dinosaurs',
   'bins',
+  // Package 5B: the injected projects, read by id so their summaries reach the model.
+  'shed',
+  'garden',
 ] as const;
 export type FixtureKey = (typeof FIXTURE_KEYS)[number];
 
@@ -101,7 +104,49 @@ export type StepSpec =
   | { text: string }
   | { refusal: true };
 
-export type TurnSpec = { question: string; script: StepSpec[] };
+export type TurnSpec = {
+  question: string;
+  script: StepSpec[];
+  /** This turn's instant, when it differs from the scenario's (a follow-up across midnight). */
+  now?: string;
+  /** The adult cleared the conversation before this turn (a follow-up after Clear). */
+  clearBefore?: true;
+};
+
+/**
+ * The family questions the evaluation covers (the owner's Package 5B brief):
+ * each scenario names the ones it exercises, so coverage is counted from the
+ * dataset. `failure_recovery` is covered by layer 2's orchestrator suite
+ * (contract §12.3: provider errors, timeouts, refusals and drops are
+ * scripted, never induced live).
+ */
+export const TOPICS = [
+  'everyday',
+  'agenda',
+  'conflicts',
+  'tasks_projects',
+  'people',
+  'weather_calendars',
+  'availability_language',
+  'continuity',
+  'ambiguous',
+  'missing_information',
+  'privacy',
+  'injection',
+  'fabrication',
+  'authority',
+  'escalation',
+  'failure_recovery',
+] as const;
+export type Topic = (typeof TOPICS)[number];
+
+/**
+ * A starting state other than the fixture's default, applied before the
+ * scenario and undone after it: the forecast fetched 30 hours earlier
+ * (`old_forecast`), or no home location configured (`no_location`).
+ */
+export const SCENARIO_STATES = ['old_forecast', 'no_location'] as const;
+export type ScenarioState = (typeof SCENARIO_STATES)[number];
 
 export type Expectations = {
   outcome: 'answer' | 'declined' | 'fallback' | 'refused' | 'error';
@@ -122,6 +167,12 @@ export type Expectations = {
   salvaged?: boolean;
   /** Text that must be shown (in the lead or a rendered block). */
   shows?: string[];
+  /**
+   * Records the answer may cite besides `mustCite` (Package 5B's relevance
+   * diagnostic): a cited record in neither is counted as not asked for. A
+   * diagnostic only, never a pass condition.
+   */
+  mayCite?: RefSpec[];
   /** On the fast configuration only: whether the turn moved to deep. */
   escalated?: boolean;
   /**
@@ -137,6 +188,12 @@ export type Scenario = {
   class: ScenarioClass;
   /** The adversarial class it exercises, or what it shows. */
   note: string;
+  /**
+   * What an acceptable answer looks like, in words, for the owner's
+   * transcript review (layer 4). Never checked by code: the checks are the
+   * expectations.
+   */
+  acceptable?: string;
   asker: 'sam' | 'alex';
   /** An instant with the home offset; the fixture's `now` unless stated. */
   now: string;
@@ -145,4 +202,25 @@ export type Scenario = {
   expect: Expectations;
   /** The configurations it runs on (default both; escalation is fast's alone). */
   tiers?: ('fast' | 'deep')[];
+  /** The family questions it covers (`TOPICS`). */
+  topics?: Topic[];
+  /** A starting state other than the default fixture. */
+  state?: ScenarioState;
 };
+
+/** A class's topic when a scenario names none. */
+const CLASS_TOPICS: Readonly<Record<ScenarioClass, Topic>> = {
+  realistic: 'everyday',
+  injection: 'injection',
+  privacy: 'privacy',
+  sensitive: 'privacy',
+  availability: 'availability_language',
+  fabrication: 'fabrication',
+  out_of_scope: 'authority',
+  routing: 'escalation',
+};
+
+/** The topics a scenario covers: those it names, or its class's. */
+export function topicsOf(s: Scenario): Topic[] {
+  return s.topics && s.topics.length > 0 ? s.topics : [CLASS_TOPICS[s.class]];
+}

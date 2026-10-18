@@ -1,6 +1,6 @@
 # M8 Package 5 — Evaluation and tuning: the plan
 
-*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96), and **5A is built** (§12; ADR 0012 §56). No provider call and no dispatch has been made. 5B, 5C, 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
+*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57). No provider call and no dispatch has been made. 5C, 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
 
 ## 1. Where M8 stands
 
@@ -8,7 +8,7 @@
 |---|---|
 | 0–4 | Merged (PRs #81–#84, #86, #87). Package 4's Preview gates (G3, G4, G16 on Neon, G17) are NOT VERIFIED. |
 | Live verification | #1–#4 ran (`M8-LIVE-LEDGER.json`). #4 passed the two-phase turn on fast (ADR 0012 §55). |
-| **5 — Evaluation and tuning** | **This plan.** 5A is built (§12): the answer check, the shared checker and summary, and the runner's evaluation plans and scenario probes. The live evaluation run (its fixture and pacing, 5B), the full scenario set and every live §12.3 measurement do not exist yet. |
+| **5 — Evaluation and tuning** | **This plan.** Two parts are built. 5A (§12): the answer check, the shared checker and summary, and the runner's evaluation plans. 5B (§13): the 113-scenario dataset, the world it runs in, and the live path for evaluation plans. No evaluation plan is named and no live evaluation has run, so no live §12.3 measurement exists yet. |
 | 6 — Acceptance | Not started. |
 
 Kev stays off everywhere deployed. `HOME_REAL_DATA` stays closed.
@@ -281,3 +281,28 @@ The detail is in ADR 0012 §56. In short:
   - **E10:** unchanged. The workflow's approval, planned maximum and ledger check are as built for the verification runs, and an evaluation plan uses the same path.
 - **Thresholds.** None changed.
 
+## 13. 5B as built (2026-10-18; ADR 0012 §57)
+
+The detail is in ADR 0012 §57; the catalogue, with its coverage and run sizing, is `M8-EVAL-SCENARIOS.md`. In short:
+
+- **The dataset.** 66 scenarios added, 113 in all (124 turns), 62 of them adversarial. Every §12.2 class minimum and every realistic sub-quota is met, and each untrusted field has two or more phrasings. The owner's examples are asked by the synthetic adults. The plan's 57 additions became 66; the catalogue explains each difference.
+- **The world.** One builder for both layers. It adds a synced household calendar with injected titles, an injected person's name, a second phrasing in every field, an old forecast and a no-location state, a turn's own instant (across midnight), and Clear before a turn.
+- **Two findings.**
+  - Package 3's `injection.project_summary` never sent its summary to the model. It is corrected, and every run now checks that each injected text reaches the model, labelled.
+  - `No worries.` is accepted as the lead to "When's the best time to do the fence?". This is for the owner's tuning decision; nothing was changed.
+- **The relevance diagnostic** (§7). Records a scenario expects are `mustCite` and `mayCite`. A cited record in neither is counted, as a diagnostic only.
+- **Live execution.** An evaluation plan now runs live:
+  - the world is built in the runner's own database, with this process's own keys;
+  - scenarios run one at a time, paced within HOME's six turns a minute;
+  - no plan gives one adult more than HOME's sixty turns a day;
+  - no scenario starts after 35 minutes;
+  - nothing retries or runs after merging.
+  No evaluation plan is named: that is 5D's, for the owner's approval.
+- **Reporting.** The report adds:
+  - pass rates by topic;
+  - failed runs by closed check names;
+  - the relevance diagnostic and refusals;
+  - code-derived tuning pointers;
+  - the run's identity;
+  - the three kinds of evidence kept apart (deterministic guarantees, model measurements, the owner's judgement).
+- **Run sizing.** A fast pass is two runs (Sam has 83 turns of 124). §12.3's full suite is about 854 turns, so about 16 runs. The full campaign's budget stays the owner's separate decision (§10, §11).
