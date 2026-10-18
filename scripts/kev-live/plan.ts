@@ -21,9 +21,10 @@ import { SESSION_CEILING_USD_MICROS } from './guards.mts';
 /**
  * Bumped with any change to the probes or how they run (2: named plans, live
  * verification #2; 3: tool selections, adaptive rules and per-probe request
- * digests, the tool-use diagnostic, ADR 0012 §53).
+ * digests, the tool-use diagnostic, ADR 0012 §53; 4: the turn probe's
+ * two-phase checks and the two-phase acceptance plan, ADR 0012 §54).
  */
-export const PLAN_VERSION = 3;
+export const PLAN_VERSION = 4;
 
 /** The fixture family's scenario instant (tests/integration/kev-fixture.ts's NOW): what the turn probe's tools read. */
 export const TURN_NOW = '2026-10-13T18:03:00.000Z';
@@ -430,11 +431,12 @@ export const PROBES: readonly ProbeSpec[] = Object.freeze([
   },
   {
     id: 'g9-g21-turn',
-    gates: ['G9', 'G21', 'G22', 'G10'],
+    // G7 as revised (ADR 0012 §54): the structured answer after a tool round, in the answer phase.
+    gates: ['G7', 'G9', 'G21', 'G22', 'G10'],
     kind: 'turn',
     question: 'What’s on this Saturday, and what’s left to do on the back fence?',
     expect:
-      'a turn with at least one tool round and no provider error; every request body extends the one before; thinking blocks replayed',
+      'HOME’s checked answer, citing what it read, after at least one tool round; the answer phase sends the format under none, and no call sends it under auto; every request body extends the one before; thinking blocks replayed',
     stopOnFail: false,
   },
   ...DIAGNOSTIC_PROBES,
@@ -480,12 +482,22 @@ export const PLANS = Object.freeze({
     // budget below US$2.23 is NZ$3 and cannot (ADR 0012 §53; tested).
     sessionCapUsdMicros: 2_500_000n,
   }),
+  // The two-phase answer's live acceptance (ADR 0012 §54): one orchestrated
+  // turn on the fast tier through kev.handle(), the production path.
+  'two-phase-acceptance': Object.freeze({
+    probes: Object.freeze(['g9-g21-turn']),
+    // The turn's maximum is the US$1.50 turn ceiling (a fast attempt and any
+    // escalation together). A US$2 budget is NZ$3 in HOME's whole-NZ$
+    // reservation cap (US$1.666667), which holds it; a budget below US$1.67
+    // is NZ$2 and cannot (ADR 0012 §54; tested).
+    sessionCapUsdMicros: 2_000_000n,
+  }),
 } satisfies Record<string, { probes: readonly string[]; sessionCapUsdMicros: bigint }>);
 
 export type PlanName = keyof typeof PLANS;
 
 /** The plan the runner runs now. */
-export const SESSION_PLAN: PlanName = 'tool-diagnostic';
+export const SESSION_PLAN: PlanName = 'two-phase-acceptance';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {

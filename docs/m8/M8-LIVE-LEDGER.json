@@ -26,6 +26,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet. The four 400s are expected not to be billed by the provider; unconfirmed.",
       "reservations": "Five model attempts (g7-fast, g7-deep, g19-cache-fast, haiku-g7, the G9/G21 turn), each held and released in turn under the US$6 session cap; settled.",
       "outcome": "All five count_tokens preflights 200 (the owner's reading of the report). The first Messages API call of g7-fast, g7-deep, haiku-g7 and the G9/G21 turn refused with HTTP 400 (bad_response); the provider's explanation was discarded (diagnostics added, ADR 0012 §52). g19-cache-fast's two calls 200, cache written then read. G7, G9, G21 and full G22 not verified."
+    },
+    {
+      "date": "2026-10-18",
+      "workflowRun": "Kev live verification #3 (run 39090124303, commit 6fbb27a)",
+      "planHash": "2033f85e8ec7e043c177700eb1ea0c973ae9a09a0edb3199107bbd80d04af0ad",
+      "plannedMaxUsdMicros": "1596672",
+      "recordedUsdMicros": "160675",
+      "recordedBasis": "HOME recorded US$0.160675 (160,675 µ$): the figure the owner read from the report's JSON (report.json, artifact 12121894673) and gave in the brief of 2026-10-18. Not re-read in the PR that records it: GitHub serves workflow artifacts from a storage host the build environment cannot reach, so the owner confirms it against report.json in review. If the refused call was charged its per-call maximum (133,056 µ$, as HOME charges a call that reports no usage), the two completed calls come to 27,619 µ$.",
+      "providerListPrice": "Not read in the PR that records this session (the report's at-list-prices figure is in report.json).",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "The tool-use diagnostic (ADR 0012 §53): one model attempt per probe run, each held and released in turn under the US$2.50 session cap.",
+      "outcome": "As the owner's brief records it: dx-c-one-tool (one strict tool, tool_choice auto, no answer format) and dx-d-all-tools (Kev's strict read tools, auto, no format) accepted, with valid tool_use and successful preflight counts; dx-e-tools-format (the strict tools with the answer format, auto) refused with HTTP 400, the diagnostic signals indicating grammar compilation; the full provider message is not available. The session stopped at E; the F rows did not run. Decision: the two-phase answer (ADR 0012 §54)."
     }
   ]
 }

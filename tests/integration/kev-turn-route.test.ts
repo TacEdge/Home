@@ -351,7 +351,8 @@ describe('G4 / U10 / U15 (local half): a client disconnect does not stop the tur
       select r.status, (select count(*)::int from kev_usage u where u.attempt_id = r.attempt_id) as n
         from kev_budget_reservation r where r.user_id = ${f.kev.sam.userId}
        order by r.created_at desc limit 1`);
-    expect(r.rows[0]).toEqual({ status: 'settled', n: 2 });
+    // The read, the read phase's end and the answer phase (ADR 0012 §54).
+    expect(r.rows[0]).toEqual({ status: 'settled', n: 3 });
     expect(await getTurnInFlight(ui(f.kev.sam), { db: clocked })).toBe(false);
   });
 });

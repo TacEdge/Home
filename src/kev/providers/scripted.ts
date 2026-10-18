@@ -34,6 +34,8 @@ export type ScriptStep =
       toolUses?: { name: string; input: unknown }[];
       stop?: StopCode;
       usage?: Partial<CallUsage>;
+      /** The model's own read-phase reply: served as is, never deferred (ADR 0012 §54). */
+      readPhase?: true;
     }
   | { kind: 'error'; code: ProviderErrorCode; partialUsage?: Partial<CallUsage> | null }
   | { kind: 'refusal'; usage?: Partial<CallUsage> }
@@ -84,6 +86,9 @@ export function scriptedCount(request: ProviderRequest): number {
   }
   return Math.ceil(bytes / 4);
 }
+
+/** What the scripted model writes when it ends its read phase without a tool call (synthetic). */
+export const SCRIPTED_READ_END = 'Scripted reads done.';
 
 const DEFAULT_USAGE: CallUsage = Object.freeze({
   inputTokens: 1_000,
@@ -202,8 +207,32 @@ export function createScriptedProvider(
         });
       };
       await opts.onCall?.();
-      const entry = steps.shift();
-      const step = typeof entry === 'function' ? entry(request) : entry;
+      // The provider refuses the answer format with strict tools under `auto`
+      // (live verifications #2 and #3: HTTP 400 after a successful count, no
+      // usage). So does this provider, loudly, whatever the script says.
+      if (request.outputFormat && request.toolChoice === 'auto' && request.tools.length > 0)
+        throw fail('bad_response', null, 'error');
+      // The two-phase format path (ADR 0012 §54): a call that offers tools
+      // under `auto` without the format (and without the `answer` tool) is a
+      // read-phase call. When the script's next step is the answer itself,
+      // the scripted model first ends its reads in prose, as a model does:
+      // one call, the step kept for the answer phase. A step marked
+      // `readPhase` is that prose, served as is.
+      const readPhase =
+        request.toolChoice === 'auto' &&
+        !request.outputFormat &&
+        request.tools.length > 0 &&
+        !request.tools.some((t) => t.name === 'answer');
+      const head = steps[0];
+      const peek = typeof head === 'function' ? head(request) : head;
+      if (readPhase && peek?.kind === 'answer' && !peek.toolUses?.length && !peek.readPhase) {
+        // A step made from the request is made once, from this one (it holds
+        // the tool results the answer is drawn from), and kept.
+        if (typeof head === 'function') steps[0] = peek;
+        return finish({ kind: 'answer', text: [SCRIPTED_READ_END] });
+      }
+      steps.shift();
+      const step = peek;
       if (!step) throw fail('bad_response', null, 'error');
       if (step.kind === 'stall') {
         const aborted = await wait(Math.min(step.ms, timeoutMs), signal);

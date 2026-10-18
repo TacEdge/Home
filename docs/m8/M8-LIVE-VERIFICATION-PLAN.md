@@ -167,3 +167,17 @@ Run #2 (2026-10-17, US$0.778283 recorded) found Kev's tool-carrying Messages API
 - **Money:** each refused call reports no usage and is charged the per-call maximum (US$0.133056), never assumed free. **Session cap US$2.50**, in the plan's hash: HOME's own cap is then NZ$4 (US$2.222222), which holds the peak hold of US$1.995840 (five probes settled at their maxima and the sixth's reservation); the smallest workable budget is US$2.23. The ledger's remainder is 199,076,717 µ$; Anthropic's bill for runs #1 and #2 is not reconciled.
 - **Plan hash** (from this branch's dry run): `2033f85e8ec7e043c177700eb1ea0c973ae9a09a0edb3199107bbd80d04af0ad`. The owner approves the hash printed on `main` after the PR merges; run #2's is refused.
 - **Gates:** none changes status. G7 on the other models, G9, G21 and the complete G22 wait for the cause and its correction.
+
+## 14. Live verification #3 and the two-phase acceptance (prepared 2026-10-18; not run)
+
+Run #3 (2026-10-18, the diagnostic of §13; HOME recorded US$0.160675, the owner's figure from the report) found strict tools accepted under `tool_choice: auto` without the answer format (C, D) and refused with it (E: HTTP 400, grammar compilation signals). The owner approved Option B: Kev's turn runs in two phases (ADR 0012 §54), reads under `auto` without the format and the answer under `none` with it. The acceptance re-runs nothing else:
+
+| Probe | What | Gates | Maximum |
+|---|---|---|---|
+| `g9-g21-turn` | One orchestrated fast turn through `kev.handle()` on the fixture database: at least one tool round, the read phase's end, the answer phase (format under `none`), HOME's checked answer citing a read record; never the format under `auto` | G7 (as revised), G9, G21, G22, G10 | US$1.50 (the turn ceiling) |
+
+- **Session cap US$2.00**, in the plan's hash: HOME's own cap is then NZ$3 (US$1.666667), which holds the turn; the smallest workable budget is US$1.67. Expected spend on fast: a few cents.
+- **Plan hash** (from this branch's dry run): `58f666f80764cba32ae665e2eb4ca15568f0fe0f68e8d0f244ef0ff95ca35b7e`; the owner approves the hash printed on `main` after the PR merges. Run #3's `2033f85e…` is refused.
+- **Ledger:** 198,916,042 µ$ of US$200 remains after run #3; Anthropic's bill for runs #1–#3 is not reconciled.
+- **Deferred:** the additional Opus (deep) probe. **Gates:** none changes status until the turn runs and its report is read.
+

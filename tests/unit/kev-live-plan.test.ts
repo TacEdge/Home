@@ -5,6 +5,7 @@ import tls from 'node:tls';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIMITS, MODELS, TIERS } from '@/kev/config';
 import { probeParams } from '@/kev/providers/anthropic';
+import type { ProbeEvidence } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
 import {
   buildPlan,
@@ -19,6 +20,7 @@ import {
   TURN_NOW,
   type ProbeSpec,
 } from '../../scripts/kev-live/plan';
+import { phaseChecks } from '../../scripts/kev-live/probes';
 import { planLines, runMode } from '../../scripts/kev-live/runner';
 import {
   assertCapCovers,
@@ -191,12 +193,12 @@ describe('the plan hash', () => {
       'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
     );
     expect(buildPlan().canonical).toMatchObject({
-      plan: 'tool-diagnostic',
-      sessionCapUsdMicros: 2_500_000n,
+      plan: 'two-phase-acceptance',
+      sessionCapUsdMicros: 2_000_000n,
     });
     // The diagnostic's rules are part of the approved plan: a changed
     // selection, rule or stop changes the hash.
-    const dx = buildPlan().hash;
+    const dx = buildPlan('tool-diagnostic').hash;
     const dxEdit = (id: string, f: (p: ProbeSpec) => ProbeSpec) =>
       buildPlan(
         'tool-diagnostic',
@@ -273,23 +275,25 @@ describe('the dry run', () => {
     expect(out).toEqual({ exitCode: EXIT.ok, code: 'dry_run' });
     const plan = buildPlan();
     const text = lines.join('\n');
-    expect(plan.name).toBe('tool-diagnostic');
+    expect(plan.name).toBe('two-phase-acceptance');
     expect(text).toContain(`plan hash: ${plan.hash}`);
-    expect(text).toContain('tool-diagnostic (session cap US$2.50)');
-    expect(text).toContain('total maximum: US$1.60 (no retries: US$0.80)');
-    expect(text).toContain('exactly 1596672 µ$ on the costliest sequence the rules allow');
-    expect(text).toContain('peak reservation hold: US$2.00');
-    // The matrix: each probe's shape and its rules, never its question.
-    expect(text).toContain('dx-e-tools-format: E: ');
-    expect(text).toContain('runs if: dx-d-all-tools passed; stops: on pass, on fail');
-    expect(text).toContain('runs if: always; stops: on fail');
+    expect(text).toContain(
+      'Kev live verification plan v4: two-phase-acceptance (session cap US$2.00)',
+    );
+    expect(text).toContain('total maximum: US$1.50 (no retries: US$1.50)');
+    expect(text).toContain('peak reservation hold: US$1.50');
+    // One probe, no rules: no diagnostic matrix and no listed-versus-reachable line.
+    expect(text).not.toContain('diagnostic matrix');
+    expect(text).not.toContain('exactly');
     for (const p of PROBES)
-      if (PLANS['tool-diagnostic'].probes.includes(p.id)) expect(text).toContain(p.id);
+      if (PLANS['two-phase-acceptance'].probes.includes(p.id)) expect(text).toContain(p.id);
       else expect(text).not.toContain(`${p.id} `);
     expect(text).not.toContain(KEY);
     // No prompt is printed.
     for (const p of PROBES)
-      if (p.kind !== 'models' && p.kind !== 'turn') expect(text).not.toContain(p.request.question);
+      expect(text).not.toContain(
+        p.kind === 'turn' ? p.question : 'request' in p ? p.request.question : '\u0000',
+      );
     expect(globalCalls).toBe(0);
     for (const s of spies) expect(s).not.toHaveBeenCalled();
     expect(planLines(plan)).toEqual(lines.slice(0, planLines(plan).length));
@@ -311,42 +315,52 @@ describe('the dry run', () => {
         reportDir: '/nonexistent',
         log: () => undefined,
       });
+    expect(await run({ KEV_LIVE_BUDGET_USD: '2', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).toEqual(
+      {
+        exitCode: EXIT.ok,
+        code: 'plan_checked',
+      },
+    );
+    // The acceptance plan's cap is US$2: anything above it is refused, the
+    // diagnostic's US$2.50, run #2's US$6 and run #1's US$10 included; so is
+    // a budget below the plan's maximum (US$1.50), and one whose whole-NZ$
+    // cap cannot hold the turn's US$1.50 (US$1.66 is NZ$2, US$1.111111), with
+    // no database. US$1.67 is NZ$3 (US$1.666667), the smallest that works.
     expect(
-      await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }),
-    ).toEqual({
-      exitCode: EXIT.ok,
-      code: 'plan_checked',
-    });
-    // The diagnostic's cap is US$2.50: anything above it is refused, run
-    // #2's US$6 and run #1's US$10 included; so is a budget below the plan's
-    // maximum (US$1.50), and one whose whole-NZ$ cap cannot hold the peak
-    // (US$2.20 is NZ$3, US$1.666667, below US$1.995840), with no database.
-    expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '2.23', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+      (await run({ KEV_LIVE_BUDGET_USD: '1.67', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
     ).toBe(EXIT.ok);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '2.20', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+      (await run({ KEV_LIVE_BUDGET_USD: '1.66', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
     ).toBe(EXIT.cap);
-    for (const above of ['2.51', '3', '6', '7', '10'])
+    for (const above of ['2.01', '2.50', '3', '6', '7', '10'])
       expect(
         (await run({ KEV_LIVE_BUDGET_USD: above, KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }))
           .exitCode,
         above,
       ).toBe(EXIT.budget);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '1.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+      (await run({ KEV_LIVE_BUDGET_USD: '1.49', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
     ).toBe(EXIT.budget);
+    // The diagnostic's approved hash is not this plan's.
+    expect(
+      (
+        await run({
+          KEV_LIVE_BUDGET_USD: '2',
+          KEV_LIVE_APPROVED_PLAN_HASH: buildPlan('tool-diagnostic').hash,
+        })
+      ).exitCode,
+    ).toBe(EXIT.plan_hash);
     // Run #2's plan's hash is not this plan's.
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '2.50',
+          KEV_LIVE_BUDGET_USD: '2',
           KEV_LIVE_APPROVED_PLAN_HASH: buildPlan('verification-2').hash,
         })
       ).exitCode,
     ).toBe(EXIT.plan_hash);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
+      (await run({ KEV_LIVE_BUDGET_USD: '2', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
         .exitCode,
     ).toBe(EXIT.plan_hash);
     expect(
@@ -357,13 +371,13 @@ describe('the dry run', () => {
         .exitCode,
     ).toBe(EXIT.budget);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
+      (await run({ KEV_LIVE_BUDGET_USD: '2', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
         .exitCode,
     ).toBe(EXIT.ledger);
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '2.50',
+          KEV_LIVE_BUDGET_USD: '2',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           KEV_EVAL_PROVIDER_KEY: 'test-key-not-real-0000',
         })
@@ -372,7 +386,7 @@ describe('the dry run', () => {
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '2.50',
+          KEV_LIVE_BUDGET_USD: '2',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           VERCEL: '1',
         })
@@ -399,5 +413,50 @@ describe('the dry run', () => {
     expect(out.exitCode).toBe(EXIT.no_key);
     expect(httpsSpy).not.toHaveBeenCalled();
     expect(globalCalls).toBe(0);
+  });
+});
+
+describe('the two-phase acceptance plan (ADR 0012 §54)', () => {
+  it('one orchestrated fast turn: G7 as revised, G9, G21, G22, G10; US$1.50 at most; cap US$2', () => {
+    const plan = buildPlan('two-phase-acceptance');
+    expect(plan.probes.map((p) => [p.id, p.kind])).toEqual([['g9-g21-turn', 'turn']]);
+    expect(plan.probes[0]!.gates).toEqual(['G7', 'G9', 'G21', 'G22', 'G10']);
+    expect(plan.totalMaxUsdMicros).toBe(LIMITS.turnCeilingUsdMicros);
+    expect(plan.totalMaxUsdMicros).toBe(1_500_000n);
+    expect(plan.peakHoldUsdMicros).toBe(1_500_000n);
+    expect(plan.sessionCapUsdMicros).toBe(2_000_000n);
+    // US$2 is NZ$3 (US$1.666667), which holds the turn; US$1.66 is NZ$2 and cannot.
+    expect(capNzdFor(2_000_000n)).toBe(3);
+    expect(capUsdMicros(3)).toBe(1_666_667n);
+    expect(() => assertCapCovers(capUsdMicros(3), 0n, plan.peakHoldUsdMicros)).not.toThrow();
+    expect(capNzdFor(1_660_000n)).toBe(2);
+    expect(() => assertCapCovers(capUsdMicros(2), 0n, plan.peakHoldUsdMicros)).toThrow();
+    expect(capNzdFor(1_670_000n)).toBe(3);
+  });
+
+  it('the turn’s phase checks: a tool round, the answer phase (the format under none), never the format under auto', () => {
+    const call = (toolChoice: string | null, answerFormat: boolean, stop = 'end_turn') =>
+      ({ kind: 'message', toolChoice, answerFormat, stop }) as unknown as ProbeEvidence;
+    const count = { kind: 'count' } as unknown as ProbeEvidence;
+    const read = call('auto', false, 'tool_use');
+    expect(
+      phaseChecks([count, read, count, call('auto', false), count, call('none', true)]),
+    ).toEqual({ toolRounds: 1, answerPhase: true, formatWithAuto: false, reasons: [] });
+    // No tool round.
+    expect(phaseChecks([call('auto', false), call('none', true)]).reasons).toEqual([
+      'no_tool_round',
+    ]);
+    // No answer phase: the format never sent, or sent only under auto.
+    expect(phaseChecks([read, call('auto', false)]).reasons).toEqual(['no_answer_phase']);
+    expect(phaseChecks([read, call('none', false)]).reasons).toEqual(['no_answer_phase']);
+    expect(phaseChecks([read, call('auto', true)]).reasons).toEqual([
+      'no_answer_phase',
+      'format_with_auto',
+    ]);
+    // The format under auto fails the turn even beside a proper answer phase.
+    expect(phaseChecks([read, call('auto', true), call('none', true)]).reasons).toEqual([
+      'format_with_auto',
+    ]);
+    expect(phaseChecks([]).reasons).toEqual(['no_tool_round', 'no_answer_phase']);
   });
 });

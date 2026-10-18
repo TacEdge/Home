@@ -71,6 +71,42 @@ const thinking = (index: number) =>
   ev('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'sig' } }) +
   ev('content_block_stop', { index });
 
+/** The first record ref in the request's tool results (a HOME read's JSON), if any. */
+function firstRef(
+  messages: { role: string; content: unknown }[],
+): { type: string; id: string; at?: string | null } | null {
+  const find = (n: unknown): { type: string; id: string; at?: string | null } | null => {
+    if (Array.isArray(n)) {
+      for (const x of n) {
+        const r = find(x);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (!n || typeof n !== 'object') return null;
+    const o = n as Record<string, unknown>;
+    const ref = o.ref as { type?: unknown; id?: unknown } | undefined;
+    if (ref && typeof ref.type === 'string' && typeof ref.id === 'string')
+      return ref as { type: string; id: string; at?: string | null };
+    for (const v of Object.values(o)) {
+      const r = find(v);
+      if (r) return r;
+    }
+    return null;
+  };
+  for (const m of messages)
+    if (Array.isArray(m.content))
+      for (const b of m.content as { type: string; content?: unknown }[])
+        if (b.type === 'tool_result' && typeof b.content === 'string')
+          try {
+            const r = find(JSON.parse(b.content));
+            if (r) return r;
+          } catch {
+            // Not JSON (a synthetic result): no record.
+          }
+  return null;
+}
+
 /** One handler for every request: it answers by what the request is (synthetic). */
 const smart: Handler = (req, res, raw) => {
   const id = `req_synthetic${++ids}`;
@@ -120,12 +156,22 @@ const smart: Handler = (req, res, raw) => {
         toolBlock(1, `toolu_${ids}`, 'get_agenda', { from: '2026-10-17', to: '2026-10-17' }) +
         messageEnd('tool_use', 60),
     );
-  if (body.output_config?.format)
+  if (body.output_config?.format) {
+    // The answer phase: a plan citing the first record the reads returned
+    // (as a model would), else a decline.
+    const ref = firstRef(body.messages);
+    const plan = ref
+      ? {
+          lead: 'here_you_go',
+          facts: [{ kind: ref.type, ref: { ...ref, at: ref.at ?? null }, show: [], scope: null }],
+          view: null,
+          decline: null,
+        }
+      : { lead: null, facts: [], view: null, decline: 'not_kept' };
     return res.end(
-      messageStart(body.model, usage) +
-        textBlock(0, JSON.stringify({ lead: null, facts: [], view: null, decline: 'not_kept' })) +
-        messageEnd('end_turn'),
+      messageStart(body.model, usage) + textBlock(0, JSON.stringify(plan)) + messageEnd('end_turn'),
     );
+  }
   return res.end(
     messageStart(body.model, usage) + textBlock(0, `${CANARY} hello`) + messageEnd('end_turn'),
   );
@@ -846,6 +892,119 @@ describe('the tool-use diagnostic (ADR 0012 §53): adaptive, one call a probe, c
   });
 });
 
+describe('the two-phase acceptance plan (ADR 0012 §54): one fast turn through kev.handle()', () => {
+  const run = async () => {
+    const plan = buildPlan('two-phase-acceptance');
+    const before = await leftOpen();
+    const out = await executePlan(plan, {
+      gateway: gateway(),
+      actor: runner,
+      deps: { db },
+      budgetMicros: plan.sessionCapUsdMicros,
+    });
+    const rec = await reconcile(
+      db,
+      out.results.flatMap((r) => r.attemptIds),
+    );
+    expectNothingLeftOpen(rec, before);
+    const turn = out.results[0]!;
+    const calls = turn.evidence.filter((e) => e.kind === 'message');
+    return { plan, out, rec, turn, calls };
+  };
+  /** Answers every Messages call with `reply` (by the request); the Models API as `smart`. */
+  const answering = (
+    reply: (body: { tools?: unknown[]; output_config?: { format?: unknown } }) => string,
+  ) => {
+    stub.queue.length = 0;
+    for (let i = 0; i < 20; i++)
+      stub.queue.push((req, res, raw) => {
+        if (req.method === 'GET') return smart(req, res, raw);
+        const body = JSON.parse(raw) as {
+          model: string;
+          tools?: unknown[];
+          output_config?: { format?: unknown };
+        };
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'request-id': `req_twophase${++ids}`,
+        });
+        res.end(
+          messageStart(body.model, { input_tokens: 2_000 }) +
+            textBlock(0, reply(body)) +
+            messageEnd('end_turn'),
+        );
+      });
+  };
+  const DECLINE = JSON.stringify({ lead: null, facts: [], view: null, decline: 'not_kept' });
+
+  it('passes: a tool round, the read phase ending in prose, the answer phase (format under none), HOME’s checked answer citing a read record', async () => {
+    const plan = buildPlan('two-phase-acceptance');
+    expect(plan.probes.map((p) => p.id)).toEqual(['g9-g21-turn']);
+    expect(plan.probes[0]!.gates).toEqual(['G7', 'G9', 'G21', 'G22', 'G10']);
+    const { out, turn, calls, rec } = await run();
+    expect(turn.outcome, turn.reasons.join(',')).toBe('pass');
+    expect(out.stopped).toBeNull();
+    expect(turn.checks).toMatchObject({
+      outcome: 'answer',
+      answerPhase: true,
+      formatWithAuto: false,
+      countedFirst: true,
+      usInference: true,
+      growOnly: true,
+    });
+    expect(turn.checks.toolRounds as number).toBeGreaterThanOrEqual(1);
+    expect(turn.checks.cites as number).toBeGreaterThan(0);
+    // The stub's turn: the read (tool_use), the read phase's prose, the answer phase.
+    expect(
+      calls.map((c) => c.kind === 'message' && `${c.toolChoice}${c.answerFormat ? '+format' : ''}`),
+    ).toEqual(['auto', 'auto', 'none+format']);
+    // G22: each call counted first.
+    expect(turn.evidence.map((e) => e.kind)).toEqual([
+      'count',
+      'message',
+      'count',
+      'message',
+      'count',
+      'message',
+    ]);
+    expect(rec.mismatched).toBe(0);
+    const report = buildReport({
+      plan: buildPlan('two-phase-acceptance'),
+      budgetMicros: 2_000_000n,
+      capNzd: 3,
+      run: out,
+      reconciliation: rec,
+      startedAt: new Date(Date.now() - 1_000),
+      finishedAt: new Date(),
+    });
+    expect(report.markdown).toContain('| none+format |');
+    expect(report.markdown).not.toContain('auto+format');
+    expect(report.json).toMatch(/"answerFormat": ?true/);
+    for (const s of [KEY, CANARY]) {
+      expect(report.markdown).not.toContain(s);
+      expect(report.json).not.toContain(s);
+    }
+  });
+
+  it('fails on an answer phase that declines: the acceptance needs HOME’s checked answer', async () => {
+    answering((b) => (b.output_config?.format ? DECLINE : 'Synthetic prose.'));
+    // The first read call must still be a tool round for this case: the smart handler gives it.
+    stub.queue.unshift(smart);
+    const { turn } = await run();
+    expect(turn.outcome).toBe('fail');
+    expect(turn.reasons).toContain('turn_declined');
+  });
+
+  it('fails without a tool round, even with a checked answer phase', async () => {
+    answering((b) => (b.output_config?.format ? DECLINE : 'Synthetic prose, no reads.'));
+    const { turn, calls } = await run();
+    expect(calls.map((c) => c.kind === 'message' && c.toolChoice)).toEqual(['auto', 'none']);
+    expect(turn.outcome).toBe('fail');
+    expect(turn.reasons).toContain('no_tool_round');
+    expect(turn.checks).toMatchObject({ answerPhase: true, formatWithAuto: false });
+  });
+});
+
 describe('the live probes’ request shapes (a regression snapshot)', () => {
   const SNAPSHOT = join('tests', 'integration', 'kev-live-request-shapes.json');
   const sha = (v: unknown) =>
@@ -930,6 +1089,16 @@ describe('the live probes’ request shapes (a regression snapshot)', () => {
     expect(
       shapes.messages.some((m) => (m.tool_choice as { type?: string } | null)?.type === 'none'),
     ).toBe(true);
+    // The orchestrated turn (the last three calls) is two-phase (ADR 0012 §54):
+    // the reads under auto without the format, the answer under none with it.
+    // Run #2's G7 probes above keep the shape that was refused live.
+    const turnCalls = shapes.messages.slice(-3);
+    expect(
+      turnCalls.map(
+        (m) =>
+          `${(m.tool_choice as { type: string }).type}${m.output_config?.format ? '+format' : ''}`,
+      ),
+    ).toEqual(['auto', 'auto', 'none+format']);
     // A count is the body without max_tokens, inference_geo and stream.
     for (const c of shapes.counts)
       for (const k of ['max_tokens', 'inference_geo', 'stream']) expect(c.keys).not.toContain(k);

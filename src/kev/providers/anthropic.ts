@@ -744,6 +744,8 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
           stop: record ? record.stop : null,
           usage: record ? record.usage : null,
           costUsdMicros: record ? record.costUsdMicros : null,
+          toolChoice: params.tool_choice?.type ?? null,
+          answerFormat: Boolean(params.output_config?.format),
           blocks,
           growOnly,
           retried,

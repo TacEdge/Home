@@ -58,6 +58,8 @@ function callRows(r: ProbeResult) {
             cacheWriteTokens: e.usage?.cacheWriteTokens ?? null,
             inferenceGeo: e.usage?.inferenceGeo ?? null,
             costUsdMicros: e.costUsdMicros,
+            toolChoice: e.toolChoice,
+            answerFormat: e.answerFormat,
             blocks: e.blocks,
             growOnly: e.growOnly,
             retried: e.retried,
@@ -231,15 +233,18 @@ export function buildReport(input: {
     );
   md.push('', '## Calls', '');
   md.push(
-    '| Probe | Kind | Model | Status | request-id | Counted | Stop | In | Out | Cache read | Cache write | Geo | HOME µ$ |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| Probe | Kind | Model | Phase | Status | request-id | Counted | Stop | In | Out | Cache read | Cache write | Geo | HOME µ$ |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   );
   for (const p of probes)
     for (const c of p.calls) {
       const x = c as Record<string, unknown>;
       const v = (k: string) => (x[k] === undefined || x[k] === null ? '—' : String(x[k]));
+      // A Messages call's phase (ADR 0012 §54): its tool_choice, and `+format` with the answer format.
+      const phase =
+        c.kind === 'message' ? `${v('toolChoice')}${x.answerFormat ? '+format' : ''}` : '—';
       md.push(
-        `| ${p.id} | ${c.kind} | ${c.model} | ${v('status')} | ${v('requestId')} | ${v('counted')} | ${v('stop')} | ${v('inputTokens')} | ${v('outputTokens')} | ${v('cacheReadTokens')} | ${v('cacheWriteTokens')} | ${v('inferenceGeo')} | ${v('costUsdMicros')} |`,
+        `| ${p.id} | ${c.kind} | ${c.model} | ${phase} | ${v('status')} | ${v('requestId')} | ${v('counted')} | ${v('stop')} | ${v('inputTokens')} | ${v('outputTokens')} | ${v('cacheReadTokens')} | ${v('cacheWriteTokens')} | ${v('inferenceGeo')} | ${v('costUsdMicros')} |`,
       );
     }
   if (diagnostic.length > 0) {

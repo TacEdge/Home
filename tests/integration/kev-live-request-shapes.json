@@ -332,10 +332,7 @@
       "inference_geo": "us",
       "thinking": null,
       "tool_choice": { "type": "auto" },
-      "output_config": {
-        "effort": "medium",
-        "format": { "type": "json_schema", "schema": "99aed718d92e9d48" }
-      },
+      "output_config": { "effort": "medium", "format": null },
       "system": [{ "type": "text", "cache_control": { "type": "ephemeral" } }],
       "tools": [
         { "name": "get_today", "strict": true, "schema": "32062bdb9024160d" },
@@ -372,6 +369,47 @@
       "inference_geo": "us",
       "thinking": null,
       "tool_choice": { "type": "auto" },
+      "output_config": { "effort": "medium", "format": null },
+      "system": [{ "type": "text", "cache_control": { "type": "ephemeral" } }],
+      "tools": [
+        { "name": "get_today", "strict": true, "schema": "32062bdb9024160d" },
+        { "name": "get_agenda", "strict": true, "schema": "afe5983ff5e16d3d" },
+        { "name": "get_conflicts", "strict": true, "schema": "46657d7bb7e93ef1" },
+        { "name": "get_insights", "strict": true, "schema": "20a4d45e32512b91" },
+        { "name": "get_tasks", "strict": true, "schema": "f1af2db994326df4" },
+        { "name": "get_projects", "strict": true, "schema": "673e3cb3b332eece" },
+        { "name": "get_people", "strict": true, "schema": "009313eecdafe682" },
+        { "name": "get_context", "strict": true, "schema": "30df18e736aa7f2b" },
+        { "name": "get_calendar_health", "strict": true, "schema": "32062bdb9024160d" },
+        { "name": "get_weather", "strict": true, "schema": "46657d7bb7e93ef1" },
+        { "name": "get_gaps", "strict": true, "schema": "037cf69eb16b5b01" },
+        { "name": "search", "strict": true, "schema": "00d66f84e6bf2135" },
+        { "name": "escalate", "strict": true, "schema": "6d255cda260ee06c" }
+      ],
+      "messages": [
+        { "role": "user", "blocks": ["text", "text"] },
+        { "role": "assistant", "blocks": ["thinking", "tool_use"] },
+        { "role": "user", "blocks": ["tool_result"] }
+      ],
+      "keys": [
+        "inference_geo",
+        "max_tokens",
+        "messages",
+        "model",
+        "output_config",
+        "stream",
+        "system",
+        "tool_choice",
+        "tools"
+      ]
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 4096,
+      "stream": true,
+      "inference_geo": "us",
+      "thinking": null,
+      "tool_choice": { "type": "none" },
       "output_config": {
         "effort": "medium",
         "format": { "type": "json_schema", "schema": "99aed718d92e9d48" }
@@ -395,7 +433,9 @@
       "messages": [
         { "role": "user", "blocks": ["text", "text"] },
         { "role": "assistant", "blocks": ["thinking", "tool_use"] },
-        { "role": "user", "blocks": ["tool_result"] }
+        { "role": "user", "blocks": ["tool_result"] },
+        { "role": "assistant", "blocks": ["text"] },
+        { "role": "user", "blocks": ["text"] }
       ],
       "keys": [
         "inference_geo",
@@ -662,10 +702,7 @@
       "inference_geo": null,
       "thinking": null,
       "tool_choice": { "type": "auto" },
-      "output_config": {
-        "effort": "medium",
-        "format": { "type": "json_schema", "schema": "99aed718d92e9d48" }
-      },
+      "output_config": { "effort": "medium", "format": null },
       "system": [{ "type": "text", "cache_control": { "type": "ephemeral" } }],
       "tools": [
         { "name": "get_today", "strict": true, "schema": "32062bdb9024160d" },
@@ -692,6 +729,37 @@
       "inference_geo": null,
       "thinking": null,
       "tool_choice": { "type": "auto" },
+      "output_config": { "effort": "medium", "format": null },
+      "system": [{ "type": "text", "cache_control": { "type": "ephemeral" } }],
+      "tools": [
+        { "name": "get_today", "strict": true, "schema": "32062bdb9024160d" },
+        { "name": "get_agenda", "strict": true, "schema": "afe5983ff5e16d3d" },
+        { "name": "get_conflicts", "strict": true, "schema": "46657d7bb7e93ef1" },
+        { "name": "get_insights", "strict": true, "schema": "20a4d45e32512b91" },
+        { "name": "get_tasks", "strict": true, "schema": "f1af2db994326df4" },
+        { "name": "get_projects", "strict": true, "schema": "673e3cb3b332eece" },
+        { "name": "get_people", "strict": true, "schema": "009313eecdafe682" },
+        { "name": "get_context", "strict": true, "schema": "30df18e736aa7f2b" },
+        { "name": "get_calendar_health", "strict": true, "schema": "32062bdb9024160d" },
+        { "name": "get_weather", "strict": true, "schema": "46657d7bb7e93ef1" },
+        { "name": "get_gaps", "strict": true, "schema": "037cf69eb16b5b01" },
+        { "name": "search", "strict": true, "schema": "00d66f84e6bf2135" },
+        { "name": "escalate", "strict": true, "schema": "6d255cda260ee06c" }
+      ],
+      "messages": [
+        { "role": "user", "blocks": ["text", "text"] },
+        { "role": "assistant", "blocks": ["thinking", "tool_use"] },
+        { "role": "user", "blocks": ["tool_result"] }
+      ],
+      "keys": ["messages", "model", "output_config", "system", "tool_choice", "tools"]
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "max_tokens": null,
+      "stream": null,
+      "inference_geo": null,
+      "thinking": null,
+      "tool_choice": { "type": "none" },
       "output_config": {
         "effort": "medium",
         "format": { "type": "json_schema", "schema": "99aed718d92e9d48" }
@@ -715,7 +783,9 @@
       "messages": [
         { "role": "user", "blocks": ["text", "text"] },
         { "role": "assistant", "blocks": ["thinking", "tool_use"] },
-        { "role": "user", "blocks": ["tool_result"] }
+        { "role": "user", "blocks": ["tool_result"] },
+        { "role": "assistant", "blocks": ["text"] },
+        { "role": "user", "blocks": ["text"] }
       ],
       "keys": ["messages", "model", "output_config", "system", "tool_choice", "tools"]
     }
