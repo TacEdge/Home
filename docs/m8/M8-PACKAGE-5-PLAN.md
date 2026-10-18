@@ -1,6 +1,6 @@
 # M8 Package 5 — Evaluation and tuning: the plan
 
-*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57; PR #98). **5C is built** (§14; ADR 0012 §58). No provider call and no dispatch has been made. 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
+*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57; PR #98). **5C is built** (§14; ADR 0012 §58; PR #99). **5D is prepared** (§15; ADR 0012 §59): the deep smoke plan, dry-run and keyless-checked only. No provider call and no dispatch has been made. 5E has not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
 
 ## 1. Where M8 stands
 
@@ -335,3 +335,18 @@ The detail is in ADR 0012 §58 and `M8-QUALITY-RUBRIC.md`. In short:
 - **The scripted baseline** (`M8-QUALITY-BASELINE.md`). Labelled scripted; it is not evidence of a real model's quality.
 - **Not done (deviation):** phone-width screenshots of the Kev screen. They go with the live transcripts (5E, Package 6).
 - **For 5D and 5E:** a live run writes `transcripts.json`, `review-<tier>.json` and `review-<tier>.html` into its artefact. Nothing here runs a live call.
+
+## 15. 5D as prepared (2026-10-18; ADR 0012 §59)
+
+§9's 5D (i), the one Opus smoke turn before any deep cell. The fast smoke run of about ten scenarios (5D (ii)) is not prepared here; it gets its own plan and approval.
+
+- **Scenario.** `realistic.weekend_look` on deep: the owner's "What does our weekend look like?", asked by the synthetic Sam. It needs a read, a citation and the forecast credit, and it is in the review set.
+- **Plan.** `deep-smoke`, an `evaluation` plan with one scenario probe and the session plan, hash `47710b79…`. On top of the scenario's expectations it requires:
+  - Opus on every call;
+  - a tool round, then the answer phase;
+  - a grow-only history;
+  - an answer HOME's checker accepted, with at least one citation.
+- **Gates.** It records G7, G9, G21, G22 and G10 evidence for deep. A failure stops the session, and nothing retries.
+- **Money.** Maximum US$1.50 (the turn ceiling binds; five Opus calls would be US$1.78). Proposed budget and cap US$1.67, the smallest HOME's whole-NZ$ cap can hold. Campaign remainder US$198.83, household cap untouched.
+- **Outputs.** The report, the transcripts and the deep review page with its scoring sheet (5C's).
+- **To run it:** the owner approves the hash and the US$1.67 budget, then dispatches (the runbook). After the run, the ledger row, then the gate register from `report.json`.

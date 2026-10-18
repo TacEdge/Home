@@ -27,9 +27,10 @@ import { EVALUATION_RUN_CEILING_USD_MICROS, SESSION_CEILING_USD_MICROS } from '.
  * digests, the tool-use diagnostic, ADR 0012 §53; 4: the turn probe's
  * two-phase checks and the two-phase acceptance plan, ADR 0012 §54; 5: plan
  * kinds, the scenario probe and the evaluation records, Package 5A, ADR 0012
- * §56).
+ * §56; 6: the smoke scenario probe's checks and the deep smoke plan, Package
+ * 5D, ADR 0012 §59).
  */
-export const PLAN_VERSION = 5;
+export const PLAN_VERSION = 6;
 
 /** The fixture family's scenario instant (tests/integration/kev-fixture.ts's NOW): what the turn probe's tools read. */
 export const TURN_NOW = '2026-10-13T18:03:00.000Z';
@@ -117,6 +118,14 @@ export type ProbeSpec = Readonly<
       repeat: number;
       /** The scenario's turns: each priced at the turn's maximum (§12.4 rule 4). */
       turns: number;
+      /**
+       * A smoke run (Package 5D): besides the scenario's own expectations,
+       * every call on the tier's model, at least one tool round, the answer
+       * phase (the format under `none`, never under `auto`), a grow-only
+       * history, and an answer accepted by HOME's checker (first time or
+       * after its one regeneration) with at least one citation.
+       */
+      smoke?: true;
       expect: string;
       stopOnFail: boolean;
     }
@@ -534,6 +543,31 @@ export const PROBES: readonly ProbeSpec[] = Object.freeze([
 ] satisfies ProbeSpec[]);
 
 /**
+ * The deep-tier smoke run (Package 5D, ADR 0012 §59): one live Opus turn on
+ * one catalogue scenario, the owner's own "What does our weekend look
+ * like?", asked by the synthetic adult Sam on the evaluation world. It
+ * needs a read (the weekend is not in the turn's bundle), cites a record
+ * (Saturday's football) and carries the forecast's credit, so a pass shows
+ * the two-phase loop, grounding and HOME's checks on deep. It is in the
+ * owner's review set, so the run writes the deep review page.
+ */
+export const DEEP_SMOKE_PROBES: readonly ProbeSpec[] = Object.freeze([
+  {
+    id: 'realistic.weekend_look@deep#1',
+    gates: ['G7', 'G9', 'G21', 'G22', 'G10', 'E1', 'E9'],
+    kind: 'scenario',
+    scenario: 'realistic.weekend_look',
+    tier: 'deep',
+    repeat: 1,
+    turns: 1,
+    smoke: true,
+    expect:
+      'every expectation of the scenario holds; every call on Opus 5.5, counted first and in the US; at least one tool round, then the answer phase (the format under none, never under auto); a grow-only history; HOME’s checked answer with at least one citation',
+    stopOnFail: true,
+  },
+] satisfies ProbeSpec[]);
+
+/**
  * The named plans (live verification #2, 2026-10-17; ADR 0012 §51): which
  * probes from the list above a session runs, and its own session cap,
  * never above the US$10 ceiling (owner decision 4). `full` is run #1's
@@ -583,6 +617,18 @@ export const PLANS = Object.freeze({
     // is NZ$2 and cannot (ADR 0012 §54; tested).
     sessionCapUsdMicros: 2_000_000n,
   }),
+  // Package 5D's deep smoke run (ADR 0012 §59): one deep scenario turn. Its
+  // maximum is the US$1.50 turn ceiling (the deep attempt's reservation:
+  // five calls at US$0.356224 is US$1.781120, held to the ceiling). A
+  // US$1.67 budget is NZ$3 in HOME's whole-NZ$ reservation cap
+  // (US$1.666667), which holds it; a budget below US$1.67 is NZ$2 and cannot
+  // (tested). The smallest practical cap, then.
+  'deep-smoke': Object.freeze({
+    kind: 'evaluation',
+    probes: Object.freeze(DEEP_SMOKE_PROBES.map((p) => p.id)),
+    specs: DEEP_SMOKE_PROBES,
+    sessionCapUsdMicros: 1_670_000n,
+  }),
 } satisfies Record<string, PlanDef>);
 
 /**
@@ -593,18 +639,21 @@ export const PLANS = Object.freeze({
 export type PlanDef = Readonly<{
   kind?: 'verification' | 'evaluation';
   probes: readonly string[];
+  /** An evaluation plan's own probes (scenario probes are not in the list above). */
+  specs?: readonly ProbeSpec[];
   sessionCapUsdMicros: bigint;
 }>;
 
 export type PlanName = keyof typeof PLANS;
 
-/** The plan the runner runs now. */
-export const SESSION_PLAN: PlanName = 'two-phase-acceptance';
+/** The plan the runner runs now: Package 5D's deep smoke run, for the owner's approval. */
+export const SESSION_PLAN: PlanName = 'deep-smoke';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {
-  const ids = new Set<string>(PLANS[name].probes);
-  const probes = PROBES.filter((p) => ids.has(p.id));
+  const def: PlanDef = PLANS[name];
+  const ids = new Set<string>(def.probes);
+  const probes = (def.specs ?? PROBES).filter((p) => ids.has(p.id));
   if (probes.length !== ids.size) throw new Error(`plan ${name} names a probe that does not exist`);
   return probes;
 }
