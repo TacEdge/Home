@@ -1,3 +1,4 @@
+import 'server-only';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
@@ -15,8 +16,9 @@ import { z } from 'zod';
 // The automated check never fills a human rating, and a human rating never
 // changes the automated result. Nothing here judges usefulness itself.
 //
-// No imports but zod and node:crypto, so the review command
-// (scripts/kev-live/quality-review.mts) runs under plain Node.
+// No imports but zod and node:crypto (and server-only, S13), so the review
+// command (scripts/kev-live/quality-review.mts) runs under plain Node with
+// the `react-server` condition.
 
 export type Evidence = Readonly<{
   /** What HOME's code guarantees in every run (layers 1–2), with the contract's rows. */

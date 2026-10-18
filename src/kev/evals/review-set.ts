@@ -1,3 +1,5 @@
+import 'server-only';
+
 // The owner's review set (M8 Package 5C; ADR 0012 §58): twenty scenarios
 // from the catalogue, chosen for breadth rather than variations, for a
 // quick read of whether Kev's answers would help the family. A fixed list

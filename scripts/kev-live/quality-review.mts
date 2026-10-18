@@ -9,13 +9,28 @@
 // and scenario keys only: no answer, question or feedback text is printed.
 // Local files only: no database, key or network.
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import {
-  aggregateReview,
-  qualityReviewMarkdown,
-  transcriptsDigest,
-  type Reviewable,
-} from '../../src/kev/evals/quality.ts';
+import { fileURLToPath } from 'node:url';
+import type { Reviewable } from '../../src/kev/evals/quality.ts';
+
+// src/kev is server-only (S13): its modules load only under the
+// `react-server` condition, so the command re-runs itself with it.
+if (!process.execArgv.includes('--conditions=react-server')) {
+  const r = spawnSync(
+    process.execPath,
+    [
+      '--conditions=react-server',
+      ...process.execArgv,
+      fileURLToPath(import.meta.url),
+      ...process.argv.slice(2),
+    ],
+    { stdio: 'inherit' },
+  );
+  process.exit(r.status ?? 1);
+}
+const { aggregateReview, qualityReviewMarkdown, transcriptsDigest } =
+  await import('../../src/kev/evals/quality.ts');
 
 const [transcriptsPath, sheetPath] = process.argv.slice(2);
 if (!transcriptsPath || !sheetPath) {
