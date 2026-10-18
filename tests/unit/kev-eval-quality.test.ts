@@ -540,11 +540,12 @@ describe('a live scenario run whose transcript is withheld', () => {
 });
 
 describe('no change to spending controls (Package 5C)', () => {
-  it('keeps the ceilings, the approved session plan and §12.3’s targets', () => {
+  it('keeps the ceilings, the session plan for approval and §12.3’s targets', () => {
     expect(SESSION_CEILING_USD_MICROS).toBe(10_000_000n);
     expect(EVALUATION_RUN_CEILING_USD_MICROS).toBe(175_000_000n);
+    // Package 5D's deep smoke plan (tests/unit/kev-deep-smoke.test.ts pins it too).
     expect(buildPlan().hash).toBe(
-      'd08a37132c8905fc163af05e25bd6e314b4b1e33ebcfba06d442401f91087aa6',
+      '47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775',
     );
     expect(TARGETS.factual).toBe(0.95);
     expect(TARGETS.firstPass).toBe(0.9);

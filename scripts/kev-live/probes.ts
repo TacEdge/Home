@@ -365,24 +365,54 @@ async function scenarioProbe(
     firstPass: last && last.answers.length > 0 ? last.answers[0] === 'pass' : null,
     escalated: last?.escalated ?? null,
   };
-  return {
-    ...scenarioOutcome(run.verdict, withheld),
-    checks,
-    stop: null,
-    evaluation: run.record,
-  };
+  // A smoke run's own checks on the answer (Package 5D): accepted by HOME's
+  // checker, and grounded in at least one citation.
+  let smoke: string[] = [];
+  if (p.smoke) {
+    const cites = run.turns.at(-1)?.stored?.cites.length ?? 0;
+    checks.cites = cites;
+    smoke = smokeAnswerReasons(last?.result ?? null, cites);
+  }
+  const outcome = scenarioOutcome(run.verdict, withheld, smoke);
+  return { ...outcome, checks, stop: null, evaluation: run.record };
 }
 
-/** A scenario probe's outcome: the checker's verdict, and a fail too when its transcript was withheld. */
+/**
+ * A smoke run's answer (Package 5D): HOME's checker accepted it, first time
+ * or after its one regeneration (not salvaged, not the fallback), and it
+ * cites at least one record.
+ */
+export function smokeAnswerReasons(result: string | null, cites: number): string[] {
+  const reasons: string[] = [];
+  if (result !== 'first_pass' && result !== 'after_regeneration')
+    reasons.push(`answer_${result ?? 'none'}`);
+  if (cites < 1) reasons.push('no_citation');
+  return reasons;
+}
+
+/** A smoke run's calls (Package 5D): every one on the tier's own model. */
+export function smokeModelReasons(evidence: readonly ProbeEvidence[], tier: KevTier): string[] {
+  const want = TIERS[tier].model.id;
+  const models = evidence.flatMap((e) => (e.kind === 'message' ? [e.model] : []));
+  if (models.length === 0) return ['no_model_call'];
+  return models.every((m) => m === want) ? [] : [`not_${tier}_model`];
+}
+
+/**
+ * A scenario probe's outcome: the checker's verdict, and a fail too when its
+ * transcript was withheld or a smoke run's own checks failed (`extra`).
+ */
 export function scenarioOutcome(
   verdict: Verdict,
   transcriptWithheld: boolean,
+  extra: readonly string[] = [],
 ): { outcome: 'pass' | 'fail'; reasons: string[] } {
   return {
-    outcome: verdict.pass && !transcriptWithheld ? 'pass' : 'fail',
+    outcome: verdict.pass && !transcriptWithheld && extra.length === 0 ? 'pass' : 'fail',
     reasons: [
       ...verdict.failed.map((f) => `scenario_${f}`),
       ...(transcriptWithheld ? ['transcript_withheld'] : []),
+      ...extra,
     ],
   };
 }
@@ -508,7 +538,16 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       attempted.checks.maxCountDelta = ev.maxCountDelta;
       if (!ev.countedFirst) attempted.reasons.push('call_not_counted_first');
       if (!ev.usInference) attempted.reasons.push('not_us_inference');
-      if (p.kind === 'turn') {
+      // The two-phase loop's evidence (ADR 0012 §54): the turn probe, and a
+      // smoke scenario run, which is also held to its tier's model (5D).
+      if (p.kind === 'turn' || (p.kind === 'scenario' && p.smoke)) {
+        if (p.kind === 'scenario') {
+          const wrong = smokeModelReasons(evidence, p.tier);
+          attempted.checks.models = [
+            ...new Set(evidence.flatMap((e) => (e.kind === 'message' ? [e.model] : []))),
+          ].join(' ');
+          attempted.reasons.push(...wrong);
+        }
         const msgs = evidence.filter((e) => e.kind === 'message');
         attempted.checks.growOnly = msgs.every((e) => e.kind !== 'message' || e.growOnly !== false);
         attempted.checks.thinkingBlocks = msgs.reduce(

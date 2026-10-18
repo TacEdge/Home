@@ -835,6 +835,21 @@ Every other gate is unchanged by run #1.
 
 **Live verification #2 update (2026-10-17; run 39007719396 on ba77d7f; ADR 0012 §52).** The session ran. G1: PASS (again). G19: the live evidence passes on the fast tier (both calls 200, the cache written then read), for the owner to record. G7 (Sonnet 5.5, Opus 5.5 and Haiku 5.5), G9 and G21: **NOT VERIFIED**; the first Messages API call of each was refused with HTTP 400 after its count returned 200, and the cause is not yet established (the provider's explanation was discarded; diagnostics now keep its category, request id and, in the runner only, the recognised parameter paths). G22: its count half returned 200 on Kev's real request shape, but a successful count does not prove the strict schemas compile (the provider counts without compiling), so G22 stays **NOT VERIFIED**. G10: HOME's conservative charges recorded (US$0.78, the four refused calls each at the per-call maximum); Anthropic's bill NOT RECONCILED.
 
+**Package 5D deep smoke plan (2026-10-18; ADR 0012 §59; prepared and dry-run only, not run; no provider call).** The runner's session plan is now `deep-smoke` (hash `47710b79…`). It is one live Opus 5.5 turn on the evaluation world: the catalogue's `realistic.weekend_look`, asked by the synthetic Sam, on the deep tier from the start.
+- **Evidence it would record for deep:**
+  - G7 (revised): a tool round, then the answer phase under `none`, never the format under `auto`;
+  - G9: the grow-only history;
+  - G21: `thinkingBlocks`;
+  - G22: a count before every call, and `maxCountDelta`;
+  - G10: `inference_geo`;
+  - E1 and E9 for that one run.
+- **Smoke checks, on top of the scenario's own:**
+  - every call on Opus;
+  - an answer HOME's checker accepted (first time or after its one regeneration);
+  - at least one citation.
+- **Cost:** maximum exposure US$1.50; proposed budget and session cap US$1.67.
+- **Status:** **No gate changes status.** G7, G9, G21 and G22 stay **NOT VERIFIED on deep** until the run is approved, dispatched and its report read. G9 also still needs the organisation's creation date.
+
 **Package 5A evidence review (2026-10-18; ADR 0012 §56; no provider call).** Live verification #4's `report.json` (artifact `kev-live-report`, id 12125185954, run 39096549295) cannot be read from the build session, so nothing in the table below changes and nothing is inferred. G9 stays **NOT VERIFIED**: its grow-only history holds (the job's success), but the organisation's creation date is unrecorded. G21 stays **NOT VERIFIED** (`thinkingBlocks` unread). G22's count-first part is verified, and the complete gate stays **NOT VERIFIED** (`maxCountDelta` unread). **The owner's action, before the artifact expires on 2026-11-17:** read `thinkingBlocks` and `maxCountDelta` from the `g9-g21-turn` probe's `checks` in `report.json`, and record the organisation's creation date from the Console.
 
 **Live verification #4 update (2026-10-18; run 39096549295 on 7d8793c; ADR 0012 §55; owner-supplied evidence from `report.json`).** One orchestrated fast turn (Sonnet 5.5): five successful calls (two tool rounds, the read phase's end, the answer phase, one regeneration), one validated citation; HOME recorded 88,801 µ$ (list price equal; no conservative charge; nothing left open). Scope: **fast tier only, n = 1.**

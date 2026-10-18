@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { allDayEvent, googleFeed, nzEvent, vevent } from '../fixtures/calendars/google';
+import { FAMILY_PEOPLE } from '../fixtures/family';
 import { expectAccessible, expectNoHorizontalScroll } from './a11y';
 import { addressFor, failFeed, writeFeed } from './calendar-feeds';
 import { fixtureAdultContext, signInAsFixtureAdult } from './fixture-adults';
@@ -151,8 +152,32 @@ const forbidden = [
 ];
 const PROVIDER_WORDS = /\b(synced|sync|google|ical|ics|feed|provider|uid|read-only)\b/i;
 
+/**
+ * Alex's private rows for Forward's two layouts, so both are proven on any
+ * date (a week's day shows two rows, then folds the rest under "+ N"): three
+ * on one day, the last always folded; one alone on a day nothing else of
+ * this spec's or the fixture's birthdays lands on, never folded.
+ */
+const CROWDED = ['Alex’s early call', 'Alex’s midday walk', 'Alex’s late errand'] as const;
+const QUIET = 'Alex’s quiet check-in';
+const ALEX_PRIVATE = ['Alex’s private appointment', ...CROWDED, QUIET] as const;
+const BIRTHDAYS = new Set(
+  Object.values(FAMILY_PEOPLE).flatMap((p) =>
+    'dateOfBirth' in p && p.dateOfBirth ? [p.dateOfBirth.slice(5)] : [],
+  ),
+);
+/** Day 4 or 6 (the household feed uses 0, 3, 5 and 7; the crowded day is 2), whichever is no birthday. */
+async function quietDay(): Promise<Day> {
+  for (const offset of [4, 6]) {
+    const d = await day(offset);
+    if (!BIRTHDAYS.has(d.iso.slice(5))) return d;
+  }
+  throw new Error('no quiet day');
+}
+
 test.beforeAll(async () => {
   writeFeed(TOKEN, await feedOf('initial'));
+  const [crowded, quiet] = await Promise.all([day(2), quietDay()]);
   writeFeed(
     ALEX_TOKEN,
     googleFeed([
@@ -161,6 +186,20 @@ test.beforeAll(async () => {
         start: `${(await day(1)).ymd}T120000`,
         end: `${(await day(1)).ymd}T130000`,
         summary: 'Alex’s private appointment',
+      }),
+      ...CROWDED.map((summary, i) =>
+        nzEvent({
+          uid: `alex-crowded-${i}-e2e-p6@example.test`,
+          start: `${crowded.ymd}T${['08', '12', '18'][i]}0000`,
+          end: `${crowded.ymd}T${['08', '12', '18'][i]}3000`,
+          summary,
+        }),
+      ),
+      nzEvent({
+        uid: 'alex-quiet-e2e-p6@example.test',
+        start: `${quiet.ymd}T100000`,
+        end: `${quiet.ymd}T110000`,
+        summary: QUIET,
       }),
     ]),
   );
@@ -402,7 +441,24 @@ test('privacy: the other adult’s private synced event is nowhere, not even by 
   const privateId = await eventIdNamed('Alex’s private appointment', 'Alex only');
   expect(privateId).toBeTruthy();
   await alex.page.goto('/forward');
-  await expect(alex.page.getByRole('link', { name: /Alex’s private appointment/ })).toBeVisible();
+  // Forward's two layouts, both on every run, before any fold is opened: a
+  // row alone on its day is on the surface; the third row of a full day is
+  // listed but folded under the day's "+ N".
+  const link = (name: string) => alex.page.getByRole('link', { name: new RegExp(name) });
+  await expect(link(QUIET)).toBeVisible();
+  // A folded row is outside the accessibility tree until its "+ N" opens.
+  const crowdedIso = (await day(2)).iso;
+  const folded = alex.page
+    .locator(`li[data-unit="${crowdedIso}"]`)
+    .getByRole('link', { name: CROWDED[2], includeHidden: true });
+  await expect(folded).toBeAttached();
+  await expect(folded).toBeHidden();
+  const crowdedDay = await unitFor(alex.page, crowdedIso);
+  await expect(crowdedDay.getByRole('link', { name: new RegExp(CROWDED[2]) })).toBeVisible();
+  // Alex's appointment, tomorrow, with that day's "+ N" opened: on some dates
+  // tomorrow is already full (Nana Jo's birthday, 20 October, takes both rows).
+  const tomorrow = await unitFor(alex.page, (await day(1)).iso);
+  await expect(tomorrow.getByRole('link', { name: /Alex’s private appointment/ })).toBeVisible();
 
   // The household event, as the other adult: the calendar's name and
   // freshness, HOME's own people controls, nothing of the connection.
@@ -415,9 +471,9 @@ test('privacy: the other adult’s private synced event is nowhere, not even by 
   await alex.context.close();
 
   const sam = await fixtureAdultContext(browser, 'sam', { width: 375, height: 812 });
-  for (const path of ['/today', '/forward']) {
+  for (const path of ['/today', '/forward', '/forward?h=month']) {
     const body = await (await sam.page.request.get(path)).text();
-    expect(body).not.toContain('Alex’s private appointment');
+    for (const title of ALEX_PRIVATE) expect(body, `${path}: ${title}`).not.toContain(title);
     expect(body).not.toContain('Alex only');
   }
   for (const path of [`/events/${privateId}`, `/events/${privateId}/people`]) {

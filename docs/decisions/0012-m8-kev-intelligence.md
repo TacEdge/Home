@@ -770,6 +770,51 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **What it cannot show:** 33 scenarios misbehave on purpose, 9 decline without reading, and 26 show HOME's fixed text, so none of them says anything about a model's usefulness.
     - **Deviation.** The plan's "phone-width screenshots (scripted)" of the Kev screen are not taken. The review page renders each answer in the Kev screen's layout. The screen at phone width is checked by Package 4's Playwright suite, and §17.1 #15's screenshots belong with the live transcripts (5E, Package 6).
     - **Unchanged:** the ceilings (US$10 session, US$175 evaluation run), the campaign and ledger, the session plan's hash (`d08a3713…`), §12.3's targets, and every safeguard. Tests pin them.
+59. **Package 5D: the deep smoke run, prepared** (2026-10-18; the owner's approval to begin 5D preparation, after PR #99; dry run and keyless checks only; no provider call, no dispatch, no spending authorised; Preview Kev stays off; `HOME_REAL_DATA` stays closed).
+    - **The scenario.** `realistic.weekend_look`, "What does our weekend look like?": the owner's own example, asked by the synthetic Sam on the evaluation world. It is multi-part (the weekend's events and the forecast).
+      - It needs a read: the weekend is not in the turn's bundle, and the scenario expects `get_agenda`.
+      - It must cite Saturday's football and carry the forecast's credit.
+      - It is in the owner's review set, so the run writes a deep review page.
+      - No scenario is added.
+    - **The plan.** `deep-smoke` is a named `evaluation` plan with one scenario probe. It is now the session plan.
+      - **Tier:** deep (Opus 5.5) from the start (`startTier: 'deep'`), so no fast routing is involved, and a deep turn never escalates.
+      - **Smoke checks**, on top of the scenario's own expectations (the scripted evals' checker):
+        - every call on the tier's model (`not_deep_model`);
+        - at least one tool round, then the answer phase: the format under `none`, never under `auto` (ADR 0012 §54);
+        - a grow-only history;
+        - an answer HOME's checker accepted, first time or after its one regeneration (never salvaged or the fallback);
+        - at least one citation.
+      - **Also on every call:** each call counted first (G22) and in the US (G10).
+      - **Recorded:** `thinkingBlocks` and `maxCountDelta`.
+      - **Gates:** G7, G9, G21, G22, G10, E1 and E9.
+      - **Stopping:** a failure stops the session. Nothing retries, and a second session needs its own approval.
+    - **Exposure, exact.**
+      - **Per call:** the deep per-call maximum is US$0.356224. That is 32,000 input tokens at Opus's 5-minute cache-write price (US$5/MTok), the dearest input rate HOME's ephemeral caching can incur, plus 8,192 output tokens at US$20/MTok, × 1.1 for US inference.
+      - **Per attempt:** five calls, regeneration and retries included, would be US$1.781120. The attempt is held to the US$1.50 turn ceiling, and an unknown-usage call is charged its per-call maximum inside that reservation.
+      - **Counting and escalation:** the preflight count is free and makes no call. A deep turn has no escalation.
+      - **Total:** the plan's maximum and peak hold are **US$1.50**.
+    - **Budget.** The proposed session cap and budget are **US$1.67**, the smallest that works.
+      - It is NZ$3 in HOME's whole-NZ$ reservation cap (US$1.666667), which holds the US$1.50 hold. US$1.66 would be NZ$2 (US$1.111111), which cannot.
+      - It is under the US$175 run ceiling and the campaign remainder (US$198.827241).
+      - It is apart from the household's NZ$100 cap: the runner's own database and cap.
+    - **Hash.** `PLAN_VERSION` is 6. The plan hash is `47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775`. Every earlier hash (`d08a3713…` included) no longer matches, and the runner refuses it.
+    - **Keyless checks** (the launcher, the committed ledger):
+      - US$1.67 with the hash passes;
+      - US$1.66 is refused at the cap (17);
+      - US$2 is refused at the plan's cap (14);
+      - an old hash is refused (15);
+      - a key in the keyless check (13), a database that is not the job's own (12), `HOME_REAL_DATA` (11) and a deployed process (10) are each refused.
+    - **Outputs** (Package 5C's, unchanged):
+      - `report.json` and `report.md`: per-call usage, HOME's cost, latency and `request-id`; the evaluation summary; gate suggestions; no question or answer;
+      - `transcripts.json`;
+      - `review-deep.json` and `review-deep.html`, the review page with its downloadable sheet.
+    - **Verified against a local stub** (`tests/integration/kev-deep-smoke.test.ts`), the whole path with no provider call:
+      - the real probe gateway, `kev.handle()` on deep, the bookkeeping under the NZ$3 cap, the validator and the checker;
+      - Opus on every request, each counted first, a read round, the answer phase, a first-pass answer citing the football, reconciled;
+      - the transcript and the deep review page written; no question or record text in the report;
+      - an answer without a read fails with `no_tool_round`;
+      - a budget below US$1.50 runs nothing.
+    - **No gate changes status.** Deep evidence for G7, G9, G21 and G22 needs the approved run and its report read. Package 5's full campaign and Package 6 are not started.
 
 ## Consequences
 
