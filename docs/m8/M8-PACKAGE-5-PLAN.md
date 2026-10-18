@@ -1,6 +1,6 @@
 # M8 Package 5 — Evaluation and tuning: the plan
 
-*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. No implementation has started: no code, no provider call, no dispatch. 5A begins only after this plan's PR is approved. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
+*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96), and **5A is built** (§12; ADR 0012 §56). No provider call and no dispatch has been made. 5B, 5C, 5D and 5E have not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
 
 ## 1. Where M8 stands
 
@@ -8,7 +8,7 @@
 |---|---|
 | 0–4 | Merged (PRs #81–#84, #86, #87). Package 4's Preview gates (G3, G4, G16 on Neon, G17) are NOT VERIFIED. |
 | Live verification | #1–#4 ran (`M8-LIVE-LEDGER.json`). #4 passed the two-phase turn on fast (ADR 0012 §55). |
-| **5 — Evaluation and tuning** | **This plan.** The deterministic and scripted layers exist. The live harness, the full scenario set and every §12.3 measurement do not. |
+| **5 — Evaluation and tuning** | **This plan.** 5A is built (§12): the answer check, the shared checker and summary, and the runner's evaluation plans and scenario probes. The live evaluation run (its fixture and pacing, 5B), the full scenario set and every live §12.3 measurement do not exist yet. |
 | 6 — Acceptance | Not started. |
 
 Kev stays off everywhere deployed. `HOME_REAL_DATA` stays closed.
@@ -255,3 +255,29 @@ Each package is one focused PR (5A may be two: diagnostics, then the harness). P
 | **Total** | | **about US$225** |
 
 **This exceeds the US$198.83 remaining.** At the 96-scenario minimum it is still about US$210. The estimates are ±50% on token counts, and caching may lower them. That is why the owner's decision 6 holds: 5D measures first, then the full campaign's budget comes back for a separate decision. If the measured figure still exceeds the remainder, the choice is a further allocation (§12.4 rule 6) or the owner's change to the programme. Thresholds are never quietly trimmed.
+
+## 12. 5A as built (2026-10-18; ADR 0012 §56)
+
+The detail is in ADR 0012 §56. In short:
+
+- **Evidence closure.** LV#4's `report.json` cannot be read from the build session. **G9** stays NOT VERIFIED: the grow-only history holds, but the organisation's creation date is unrecorded. **G21** stays NOT VERIFIED. **G22**'s count-first part is verified; the complete gate stays NOT VERIFIED. The owner's action, before the artifact expires on 2026-11-17: read `thinkingBlocks` and `maxCountDelta` from `report.json`, and record the organisation's creation date.
+- **The answer check.** Every Kev message stores `check`. Its result keeps first pass, after the regeneration, after escalation, salvage, the fixed fallback and no answer distinct. It also holds the escalation's trigger, the time to the checked outcome, and per attempt the answers checked, each failure's closed codes and whether one passed. The `kev_turn` line carries the same: `answerResult`, `firstPass`, `answersChecked`, `firstCodes`, `escalation` and `answerMs`. No rejected answer or text is kept.
+- **Measurement.** Calls, tool rounds, tool calls, tokens, cache and per-call time come from the stored message. Cost comes from `kev_usage`, by the turn's attempts. Nothing is duplicated.
+- **The harness, on the existing runner.**
+  - `judge.ts` (the checker) and `summary.ts` (records and §12.3's summary, every rate with *n*) are shared by the scripted evals and the runner. `scripts/kev-live/eval.ts` plays a scenario.
+  - The runner has `evaluation` plans of scenario probes, held to US$175 and the campaign remainder, priced by §12.4 rule 4. Their scenarios are bound into the hash.
+  - E12 and E13 are tested.
+  - `PLAN_VERSION` is 5. The session plan's hash is now `d08a3713…`; its probe is unchanged.
+- **Before any live evaluation (5B):**
+  - the runner must build the evaluation fixture (private records, injections, forecast, a calendar connection the runner's guard now refuses);
+  - it must pace turns within HOME's per-adult limits (6 a minute, 60 a day);
+  - the scenarios must be added;
+  - an evaluation plan must be named.
+
+  Until then a live evaluation plan stops before any database, key or provider call.
+- **From §9's 5A row, not built.**
+  - **Repeats in a plan:** built (`scenarioProbes`). Repeated *runs* wait for 5B.
+  - **Synthetic transcripts in the run artefact:** not built. They are needed only for the product review, so they move to 5C. The report holds codes and counts only.
+  - **E10:** unchanged. The workflow's approval, planned maximum and ledger check are as built for the verification runs, and an evaluation plan uses the same path.
+- **Thresholds.** None changed.
+

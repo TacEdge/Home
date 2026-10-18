@@ -281,6 +281,55 @@ export const callUsageSchema = z
   })
   .strict();
 
+/**
+ * How the turn's answer came through HOME's checks (M8 Package 5A; ADR 0012
+ * §56): `first_pass`, the first answer checked passed; `after_regeneration`,
+ * the first failed and its one regeneration passed; `after_escalation`, the
+ * deep attempt's answer passed after the turn moved to deep; `salvaged`, the
+ * validated facts were shown with HOME's lead (§8.5); `fallback`, HOME's
+ * fixed fallback; `no_answer`, the turn ended refused or in error.
+ */
+export const ANSWER_RESULTS = [
+  'first_pass',
+  'after_regeneration',
+  'after_escalation',
+  'salvaged',
+  'fallback',
+  'no_answer',
+] as const;
+export type AnswerResult = (typeof ANSWER_RESULTS)[number];
+
+/** Why a turn moved to deep (§4.2): the model's `escalate`, or its failed answers on fast. */
+export const ESCALATION_TRIGGERS = ['model', 'failed_answers'] as const;
+
+/**
+ * The answer check's record (ADR 0012 §56): per attempt, the answers
+ * checked, each failed answer's closed validator codes (in check order) and
+ * whether one passed; the turn's result, what moved it to deep, and the
+ * milliseconds from the turn's start to its checked outcome. Codes and
+ * counts only: never a rejected answer, its text or its selections.
+ */
+export const answerCheckSchema = z
+  .object({
+    result: z.enum(ANSWER_RESULTS),
+    escalation: z.enum(ESCALATION_TRIGGERS).optional(),
+    ms: z.number().int().nonnegative().max(600_000),
+    attempts: z
+      .array(
+        z
+          .object({
+            tier: z.enum(KEV_TIERS),
+            answers: z.number().int().min(0).max(2),
+            failures: z.array(z.array(z.enum(VALIDATOR_CODES)).max(VALIDATOR_CODES.length)).max(2),
+            passed: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(2),
+  })
+  .strict();
+export type AnswerCheck = z.output<typeof answerCheckSchema>;
+
 /** The person's words (contract §7.6). */
 export const userContentV2 = z
   .object({
@@ -320,6 +369,8 @@ export const kevContentV2 = z
     escalated: z.boolean(),
     violations: z.array(z.enum(VALIDATOR_CODES)).max(VALIDATOR_CODES.length).optional(),
     errorCode: z.enum(KEV_ERROR_CODES).optional(),
+    /** The answer check's record (ADR 0012 §56); absent on messages stored before it. */
+    check: answerCheckSchema.optional(),
   })
   .strict();
 export type KevContentV2 = z.output<typeof kevContentV2>;

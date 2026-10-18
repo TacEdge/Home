@@ -126,7 +126,7 @@ describe('the plan’s maxima are the gateway’s', () => {
         );
         continue;
       }
-      if (p.kind === 'turn') continue;
+      if (!('request' in p)) continue;
       const request = {
         tier: p.tier,
         system: systemFor(p.request),
@@ -278,7 +278,7 @@ describe('the dry run', () => {
     expect(plan.name).toBe('two-phase-acceptance');
     expect(text).toContain(`plan hash: ${plan.hash}`);
     expect(text).toContain(
-      'Kev live verification plan v4: two-phase-acceptance (session cap US$2.00)',
+      'Kev live verification plan v5: two-phase-acceptance (session cap US$2.00; ceiling US$10.00)',
     );
     expect(text).toContain('total maximum: US$1.50 (no retries: US$1.50)');
     expect(text).toContain('peak reservation hold: US$1.50');

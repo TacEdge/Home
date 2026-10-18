@@ -17,6 +17,10 @@ Owner decisions this follows (2026-10-16): the runner uses HOME's own gateway, s
 
 **The plan today: `two-phase-acceptance`** (2026-10-18; ADR 0012 §54; ran as live verification #4 the same day and passed, ADR 0012 §55; Package 5's live harness is planned in `docs/m8/M8-PACKAGE-5-PLAN.md`): the live acceptance of Kev's two-phase answer. One orchestrated turn through `kev.handle()` on the fast tier (`g9-g21-turn`, the fixture family's scenario instant): it passes only with at least one tool round, an answer phase (the answer format under `tool_choice: none`), no call that sends the format under `auto`, and HOME's checked answer (`outcome: answer`) with at least one citation; G9's append-only history, G21's thinking replay, G22's count before every call and G10's US inference are checked as before. It evidences G7 as revised. **Maximum US$1.50** (the turn ceiling: the fast attempt and any escalation together). **Session cap US$2.00.** The report's call table shows each call's phase (`auto`, `none+format`). The additional Opus probe is deferred.
 
+**Package 5A (2026-10-18; ADR 0012 §56).** `PLAN_VERSION` is 5, and the plan's kind is in the canonical plan, so this plan's hash is now `d08a37132c8905fc163af05e25bd6e314b4b1e33ebcfba06d442401f91087aa6`. Run #4's `58f666f8…` is refused; its probe and budget are unchanged.
+
+The runner also knows **evaluation** plans: scenario probes held to the US$175 run ceiling (exit 14 above it) and to the campaign remainder (exit 16). It checks them in the keyless preflight, but a live evaluation plan **stops with exit 18 (`fixtures`)** before any database, key use or provider call, until Package 5B gives the runner the evaluation fixture and pacing within HOME's per-adult limits. No evaluation plan is named yet.
+
 **Run #3's plan: `tool-diagnostic`** (2026-10-18; ADR 0012 §53, kept in code for its tests and its record): why Kev's tool-carrying Messages API calls were refused with HTTP 400 under `tool_choice: auto` in run #2. One Sonnet 5.5 call per probe, with Kev's system prompt and `tool_choice: auto`, each probe run only when the earlier results call for it:
 
 | Probe | Sends | Runs if | Stops the session |
@@ -45,11 +49,11 @@ Each refuses with its own exit code (`scripts/kev-live/guards.mts`), never echoi
 | 11 | `HOME_REAL_DATA` is set, to anything |
 | 12 | `DATABASE_URL` is not `localhost`/`127.0.0.1` with the database `home_live_verify`, or overrides its host; or its `current_database()` differs |
 | 13 | `KEV_EVAL_PROVIDER_KEY` is missing or malformed (the runner reads no other key variable: `HOME_KEV_PROVIDER_KEY` and `ANTHROPIC_API_KEY` are ignored); or it is present for `--check-plan` |
-| 14 | `KEV_LIVE_BUDGET_USD` is malformed, above **US$10**, above the plan's own session cap (**US$2.00** for `two-phase-acceptance`), or below the plan's maximum |
+| 14 | `KEV_LIVE_BUDGET_USD` is malformed, above **US$10** (**US$175** for an evaluation plan), above the plan's own session cap (**US$2.00** for `two-phase-acceptance`), or below the plan's maximum |
 | 15 | `KEV_LIVE_APPROVED_PLAN_HASH` is not exactly this plan's hash |
 | 16 | the ledger is missing or malformed, or its remainder is below the budget |
 | 17 | HOME's reservation cap for the run (the budget in whole NZ$), less what the database already counts, cannot hold the plan's peak hold; checked keylessly in `--check-plan` too |
-| 18 | the database holds a person who is not the fixture family's, an account not on a `.test` address, or any calendar connection |
+| 18 | the database holds a person who is not the fixture family's, an account not on a `.test` address, or any calendar connection; or, live, the plan is an evaluation plan (until Package 5B builds its fixture and pacing) |
 | 19 | (G16, isolation check) `PRODUCTION_DB_HOST` is missing, or the target is Production's host or endpoint |
 | 20 | (G16) the isolation check fails |
 

@@ -1,6 +1,6 @@
 import 'server-only';
 import type { Deps } from '@/domain/common/write';
-import type { KevContentV2 } from '@/domain/kev-bookkeeping/schema';
+import type { AnswerCheck, AnswerResult, KevContentV2 } from '@/domain/kev-bookkeeping/schema';
 import {
   getRoutingState,
   listConversationWindow,
@@ -230,6 +230,8 @@ type AttemptEnd =
   | { kind: 'cap' };
 
 type CallUsageV2 = KevContentV2['calls'][number];
+type AttemptCheck = AnswerCheck['attempts'][number];
+type EscalationTrigger = NonNullable<AnswerCheck['escalation']>;
 type TraceV2 = KevContentV2['trace'][number];
 
 /** A provider error's place in §9.9's table. */
@@ -381,6 +383,8 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     const turn = {
       calls: [] as CallUsageV2[],
       trace: [] as TraceV2[],
+      checks: [] as AttemptCheck[],
+      escalation: undefined as EscalationTrigger | undefined,
       settled: 0n,
       escalated: false,
       tier: (deps.startTier ?? initialTier()) as KevTier,
@@ -422,6 +426,7 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
       const monthNow = await getRoutingState(actor, db);
       if (mayEscalate({ tier: 'fast', escalationsSoFar: 0, remainingMs, month: monthNow })) {
         turn.escalated = true;
+        turn.escalation = end.kind === 'escalate' ? 'model' : 'failed_answers';
         escalated = true;
         turn.tier = 'deep';
         emit({ type: 'escalated', tier: 'deep' });
@@ -441,7 +446,7 @@ async function runTurn(req: KevRequest, deps: KevDeps, emit: (e: KevEvent) => vo
     }
 
     // 7–9. The outcome, recorded, then emitted.
-    await finish(end, { actor, db, turn, emit, turnLog, now: req.now });
+    await finish(end, { actor, db, turn, emit, turnLog, now: req.now, started });
   } catch (e) {
     // Anything unexpected (a database failure, say). Logged by stage and
     // class only, never content. What the adult is told depends on whether
@@ -473,6 +478,9 @@ type AttemptInput = {
   turn: {
     calls: CallUsageV2[];
     trace: TraceV2[];
+    /** Each attempt's answer checks (ADR 0012 §56): counts and closed codes only. */
+    checks: AttemptCheck[];
+    escalation: EscalationTrigger | undefined;
     settled: bigint;
     escalated: boolean;
     tier: KevTier;
@@ -507,6 +515,9 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
     db,
   );
   if (!reserved.ok) return { kind: 'cap' };
+  // This attempt's answer checks (ADR 0012 §56): never a rejected answer's text.
+  const checks: AttemptCheck = { tier, answers: 0, failures: [], passed: false };
+  turn.checks.push(checks);
   const ledger = new Ledger(env.HOME_TIMEZONE);
   const coverage: Coverage = { calendarsUnhealthy: false, noCalendars: false, gapsUnknown: false };
   let budget: TurnBudget | null = null;
@@ -663,6 +674,9 @@ async function runAttempt(a: AttemptInput): Promise<AttemptEnd> {
           question: req.input.text,
           ...(deps.sensitive ? { sensitive: deps.sensitive } : {}),
         });
+        checks.answers += 1;
+        if (checked.ok) checks.passed = true;
+        else checks.failures.push(codesOf(checked.violations));
         if (checked.ok)
           return {
             kind: 'answer',
@@ -854,6 +868,60 @@ async function settle(
   }
 }
 
+/**
+ * The turn's answer check (ADR 0012 §56), from how it ended: a salvage, the
+ * fixed fallback, no checked answer (refused or in error), or a passing
+ * answer, after an escalation, after the one regeneration, or first time.
+ */
+export function answerCheck(
+  endKind: AttemptEnd['kind'],
+  content: Pick<KevContentV2, 'outcome' | 'salvaged'>,
+  turn: Pick<AttemptInput['turn'], 'checks' | 'escalation' | 'escalated'>,
+  ms: number,
+): AnswerCheck {
+  const result: AnswerResult = content.salvaged
+    ? 'salvaged'
+    : content.outcome === 'fallback'
+      ? 'fallback'
+      : endKind !== 'answer'
+        ? 'no_answer'
+        : turn.escalated
+          ? 'after_escalation'
+          : (turn.checks[0]?.answers ?? 0) > 1
+            ? 'after_regeneration'
+            : 'first_pass';
+  return {
+    result,
+    ...(turn.escalated && turn.escalation ? { escalation: turn.escalation } : {}),
+    ms: Math.min(600_000, Math.max(0, Math.round(ms))),
+    attempts: turn.checks.slice(0, 2).map((c) => ({
+      tier: c.tier,
+      answers: c.answers,
+      failures: c.failures.map((f) => [...f]),
+      passed: c.passed,
+    })),
+  };
+}
+
+/**
+ * The check's fields on the `kev_turn` line: the result, whether the turn's
+ * first checked answer passed (null when none was checked), the answers
+ * checked, the first failure's codes, the escalation's trigger and the time
+ * to the checked outcome. Closed codes and counts only.
+ */
+export function checkLog(check: AnswerCheck): Record<string, unknown> {
+  const first = check.attempts.find((a) => a.answers > 0);
+  const firstCodes = check.attempts.flatMap((a) => a.failures)[0];
+  return {
+    answerResult: check.result,
+    firstPass: first ? first.failures.length === 0 : null,
+    answersChecked: check.attempts.reduce((n, a) => n + a.answers, 0),
+    ...(first && first.failures.length > 0 && firstCodes ? { firstCodes } : {}),
+    ...(check.escalation ? { escalation: check.escalation } : {}),
+    answerMs: check.ms,
+  };
+}
+
 async function finish(
   end: AttemptEnd,
   ctx: {
@@ -863,6 +931,8 @@ async function finish(
     emit: (e: KevEvent) => void;
     turnLog: Record<string, unknown>;
     now: Date;
+    /** The turn's start (ms since the epoch): the check's `ms` runs from it. */
+    started: number;
   },
 ): Promise<void> {
   const { actor, db, turn, emit, turnLog } = ctx;
@@ -998,6 +1068,11 @@ async function finish(
       };
       break;
   }
+  // The answer check's record (ADR 0012 §56): stored with Kev's message and
+  // logged, closed codes and counts only.
+  const check = answerCheck(end.kind, content, turn, Date.now() - ctx.started);
+  content = { ...content, check };
+  Object.assign(turnLog, checkLog(check));
   turnLog.outcome = content.outcome;
   if (errorCode) turnLog.errorCode = errorCode;
 

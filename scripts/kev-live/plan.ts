@@ -4,9 +4,11 @@ import { GEO_MULTIPLIER, INFERENCE_GEO, LIMITS, MODELS, TIERS } from '@/kev/conf
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
 import type { ProbeOptions, ProviderToolDefinition } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
+import { SCENARIOS } from '@/kev/evals/scenarios';
+import type { Scenario, ScenarioClass } from '@/kev/evals/types';
 import { toolDefinitions } from '@/kev/tools/registry';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
-import { SESSION_CEILING_USD_MICROS } from './guards.mts';
+import { EVALUATION_RUN_CEILING_USD_MICROS, SESSION_CEILING_USD_MICROS } from './guards.mts';
 
 // The live verification plan, as code (M8 live-verification plan §7, §11;
 // owner decisions 2 and 4, 2026-10-16): a fixed, versioned list of probes,
@@ -22,9 +24,11 @@ import { SESSION_CEILING_USD_MICROS } from './guards.mts';
  * Bumped with any change to the probes or how they run (2: named plans, live
  * verification #2; 3: tool selections, adaptive rules and per-probe request
  * digests, the tool-use diagnostic, ADR 0012 §53; 4: the turn probe's
- * two-phase checks and the two-phase acceptance plan, ADR 0012 §54).
+ * two-phase checks and the two-phase acceptance plan, ADR 0012 §54; 5: plan
+ * kinds, the scenario probe and the evaluation records, Package 5A, ADR 0012
+ * §56).
  */
-export const PLAN_VERSION = 4;
+export const PLAN_VERSION = 5;
 
 /** The fixture family's scenario instant (tests/integration/kev-fixture.ts's NOW): what the turn probe's tools read. */
 export const TURN_NOW = '2026-10-13T18:03:00.000Z';
@@ -97,7 +101,82 @@ export type ProbeSpec = Readonly<
       expect: string;
       stopOnFail: boolean;
     }
+  | {
+      id: string;
+      gates: readonly string[];
+      /**
+       * One run of a dataset scenario (src/kev/evals/scenarios.ts) through
+       * kev.handle(), as its asker, in a fresh conversation, checked by the
+       * scripted evals' own checker (src/kev/evals/judge.ts; Package 5A).
+       */
+      kind: 'scenario';
+      scenario: string;
+      tier: KevTier;
+      /** Which repeat of the scenario on this tier (1-based, §12.3's × 3 and × 5). */
+      repeat: number;
+      /** The scenario's turns: each priced at the turn's maximum (§12.4 rule 4). */
+      turns: number;
+      expect: string;
+      stopOnFail: boolean;
+    }
 >;
+
+/** The matrix rows a scenario class evidences (contract §15.6), and E9 for every run. */
+const CLASS_ROWS: Readonly<Record<ScenarioClass, readonly string[]>> = {
+  realistic: ['E1'],
+  injection: ['E3'],
+  privacy: ['E5'],
+  sensitive: ['E5'],
+  availability: ['E6'],
+  fabrication: ['E6'],
+  out_of_scope: ['E7'],
+  routing: ['E8'],
+};
+
+/**
+ * Scenario probes for an evaluation plan (Package 5A): each named scenario,
+ * on each tier it runs on, repeated. Escalation scenarios are fast's alone,
+ * as in the scripted evals.
+ */
+export function scenarioProbes(opts: {
+  scenarios: readonly string[];
+  tiers: readonly KevTier[];
+  repeats: number;
+}): ProbeSpec[] {
+  return opts.scenarios.flatMap((id) => {
+    const s = SCENARIOS.find((x) => x.id === id);
+    if (!s) throw new Error(`no scenario ${id}`);
+    return opts.tiers
+      .filter((t) => (s.tiers ?? ['fast', 'deep']).includes(t))
+      .flatMap((tier) =>
+        Array.from({ length: opts.repeats }, (_, i) => ({
+          id: `${s.id}@${tier}#${i + 1}`,
+          gates: [...CLASS_ROWS[s.class], 'E9'],
+          kind: 'scenario' as const,
+          scenario: s.id,
+          tier,
+          repeat: i + 1,
+          turns: s.turns.length,
+          expect: 'every expectation of the scenario holds (the scripted evals’ checker)',
+          stopOnFail: false,
+        })),
+      );
+  });
+}
+
+/**
+ * What a scenario sends and is checked against, for the plan hash: its
+ * asker, instant, questions and expectations. Not its script, which only
+ * the scripted provider reads.
+ */
+export function scenarioDigest(s: Scenario): string {
+  return sha256(
+    canonicalJson({
+      ...s,
+      turns: s.turns.map((t) => ({ question: t.question })),
+    }),
+  );
+}
 
 const SYNTHETIC_SYSTEM = 'You are a test assistant for a software check. Answer in one short line.';
 /** The synthetic tool result a tool-round probe returns for every tool call (no record of any household). */
@@ -492,7 +571,18 @@ export const PLANS = Object.freeze({
     // is NZ$2 and cannot (ADR 0012 §54; tested).
     sessionCapUsdMicros: 2_000_000n,
   }),
-} satisfies Record<string, { probes: readonly string[]; sessionCapUsdMicros: bigint }>);
+} satisfies Record<string, PlanDef>);
+
+/**
+ * A named plan: its probes and its cap. `verification` (the default) is
+ * held to the US$10 session ceiling; `evaluation` (Package 5's scenario
+ * runs, §12.4) to the US$175 run ceiling, and holds scenario probes only.
+ */
+export type PlanDef = Readonly<{
+  kind?: 'verification' | 'evaluation';
+  probes: readonly string[];
+  sessionCapUsdMicros: bigint;
+}>;
 
 export type PlanName = keyof typeof PLANS;
 
@@ -519,7 +609,23 @@ export function plannedCalls(p: ProbeSpec): number {
       return 2;
     case 'turn':
       return LIMITS.modelCallsPerAttempt;
+    case 'scenario':
+      // Each turn: a fast attempt and, where escalation is possible, a deep one.
+      return p.turns * LIMITS.modelCallsPerAttempt * (p.tier === 'fast' ? 2 : 1);
   }
+}
+
+/**
+ * A scenario turn's maximum (§12.4 rule 4): the attempt's reservation on
+ * its tier plus, where escalation is possible (a turn started on fast), the
+ * deep attempt's, never above the US$1.50 turn ceiling.
+ */
+export function scenarioTurnMaxUsdMicros(tier: KevTier): bigint {
+  const most =
+    tier === 'fast'
+      ? attemptReservation('fast') + attemptReservation('deep')
+      : attemptReservation('deep');
+  return most < LIMITS.turnCeilingUsdMicros ? most : LIMITS.turnCeilingUsdMicros;
 }
 
 /**
@@ -534,6 +640,7 @@ export function plannedCalls(p: ProbeSpec): number {
 export function probeMaxUsdMicros(p: ProbeSpec): bigint {
   if (p.kind === 'models') return 0n;
   if (p.kind === 'turn') return LIMITS.turnCeilingUsdMicros;
+  if (p.kind === 'scenario') return BigInt(p.turns) * scenarioTurnMaxUsdMicros(p.tier);
   const withRetry = BigInt(plannedCalls(p) * 2) * perCallMax(p.tier);
   const reservation = attemptReservation(p.tier);
   return withRetry < reservation ? withRetry : reservation;
@@ -543,6 +650,7 @@ export function probeMaxUsdMicros(p: ProbeSpec): bigint {
 export function probeMaxNoRetryUsdMicros(p: ProbeSpec): bigint {
   if (p.kind === 'models') return 0n;
   if (p.kind === 'turn') return LIMITS.turnCeilingUsdMicros;
+  if (p.kind === 'scenario') return probeMaxUsdMicros(p);
   return BigInt(plannedCalls(p)) * perCallMax(p.tier);
 }
 
@@ -561,6 +669,8 @@ export function ruleHolds(
 export function probeHoldUsdMicros(p: ProbeSpec): bigint {
   if (p.kind === 'models') return 0n;
   if (p.kind === 'turn') return LIMITS.turnCeilingUsdMicros;
+  // One turn at a time: its attempts, settled before the next turn reserves.
+  if (p.kind === 'scenario') return scenarioTurnMaxUsdMicros(p.tier);
   return attemptReservation(p.tier);
 }
 
@@ -577,7 +687,11 @@ export function reachablePaths<P extends ProbeSpec>(probes: readonly P[]): P[][]
     if (!p) return void paths.push(ran);
     if ('runIf' in p && p.runIf && !ruleHolds(p.runIf, (id) => outcomes.get(id)))
       return walk(i + 1, ran, outcomes);
-    for (const outcome of ['pass', 'fail'] as const) {
+    // A scenario probe has no run rule, never stops the run and no rule names
+    // it, so its outcome never changes the sequence: one branch, not two
+    // (an evaluation's hundred-odd probes would otherwise be 2^n paths).
+    const branches = p.kind === 'scenario' ? (['pass'] as const) : (['pass', 'fail'] as const);
+    for (const outcome of branches) {
       const next = [...ran, p];
       const stops =
         outcome === 'pass' ? 'stopOnPass' in p && p.stopOnPass === true : p.stopOnFail === true;
@@ -610,11 +724,13 @@ export function canonicalJson(value: unknown): string {
 export type Plan = Readonly<{
   canonical: Record<string, unknown>;
   hash: string;
-  name: PlanName;
+  name: string;
+  kind: 'verification' | 'evaluation';
   probes: readonly (ProbeSpec & {
     maxUsdMicros: bigint;
     maxNoRetryUsdMicros: bigint;
     requestDigest?: string;
+    scenarioDigest?: string;
   })[];
   /** The most any sequence the rules can run may cost: the run's maximum exposure. */
   totalMaxUsdMicros: bigint;
@@ -626,24 +742,45 @@ export type Plan = Readonly<{
    * earlier probes settled at their maxima, plus the next probe's hold.
    */
   peakHoldUsdMicros: bigint;
-  /** This plan's session cap: the budget may not exceed it (never above US$10). */
+  /** This plan's session cap: the budget may not exceed it (never above its kind's ceiling). */
   sessionCapUsdMicros: bigint;
+  /** The ceiling for its kind: US$10 for verification, US$175 for an evaluation run. */
+  ceilingUsdMicros: bigint;
 }>;
 
 /** The plan: its probes with their maxima, the total, and the hash the owner approves. */
 export function buildPlan(
-  name: PlanName = SESSION_PLAN,
-  probes: readonly ProbeSpec[] = planProbes(name),
+  name: string = SESSION_PLAN,
+  probes: readonly ProbeSpec[] = planProbes(name as PlanName),
+  def: PlanDef = PLANS[name as PlanName],
 ): Plan {
-  const { sessionCapUsdMicros } = PLANS[name];
-  if (sessionCapUsdMicros > SESSION_CEILING_USD_MICROS)
+  const { sessionCapUsdMicros } = def;
+  const kind = def.kind ?? 'verification';
+  const ceilingUsdMicros =
+    kind === 'evaluation' ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS;
+  if (kind === 'verification' && sessionCapUsdMicros > SESSION_CEILING_USD_MICROS)
     throw new Error('a plan’s session cap is never above the US$10 ceiling');
+  if (kind === 'evaluation' && sessionCapUsdMicros > EVALUATION_RUN_CEILING_USD_MICROS)
+    throw new Error('an evaluation run’s cap is never above the US$175 run ceiling');
+  // An evaluation runs scenarios only, so its maximum is §12.4 rule 4's; a
+  // verification plan runs none.
+  if (probes.some((p) => (p.kind === 'scenario') !== (kind === 'evaluation')))
+    throw new Error('an evaluation plan holds scenario probes only, and a verification plan none');
+  for (const p of probes)
+    if (
+      p.kind === 'scenario' &&
+      SCENARIOS.find((s) => s.id === p.scenario)?.turns.length !== p.turns
+    )
+      throw new Error(`scenario probe ${p.id} does not match its scenario’s turns`);
   const priced = probes.map((p) =>
     Object.freeze({
       ...p,
       maxUsdMicros: probeMaxUsdMicros(p),
       maxNoRetryUsdMicros: probeMaxNoRetryUsdMicros(p),
       ...('request' in p ? { requestDigest: requestDigest(p.request, p.probe) } : {}),
+      ...(p.kind === 'scenario'
+        ? { scenarioDigest: scenarioDigest(SCENARIOS.find((s) => s.id === p.scenario)!) }
+        : {}),
     }),
   );
   const paths = reachablePaths(priced);
@@ -666,7 +803,8 @@ export function buildPlan(
     format: 'home-kev-live-plan',
     version: PLAN_VERSION,
     plan: name,
-    sessionCeilingUsdMicros: SESSION_CEILING_USD_MICROS,
+    kind,
+    sessionCeilingUsdMicros: ceilingUsdMicros,
     sessionCapUsdMicros,
     inferenceGeo: INFERENCE_GEO,
     geoMultiplier: GEO_MULTIPLIER,
@@ -694,12 +832,14 @@ export function buildPlan(
     canonical,
     hash: sha256(canonicalJson(canonical)),
     name,
+    kind,
     probes: Object.freeze(priced),
     totalMaxUsdMicros,
     totalNoRetryUsdMicros,
     listedMaxUsdMicros,
     peakHoldUsdMicros,
     sessionCapUsdMicros,
+    ceilingUsdMicros,
   });
 }
 
