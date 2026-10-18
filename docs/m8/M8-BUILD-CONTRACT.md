@@ -837,14 +837,16 @@ Every other gate is unchanged by run #1.
 
 **Live verification #4 update (2026-10-18; run 39096549295 on 7d8793c; ADR 0012 §55; owner-supplied evidence from `report.json`).** One orchestrated fast turn (Sonnet 5.5): five successful calls (two tool rounds, the read phase's end, the answer phase, one regeneration), one validated citation; HOME recorded 88,801 µ$ (list price equal; no conservative charge; nothing left open). Scope: **fast tier only, n = 1.**
 
-| Gate | Result (fast tier) | Status |
-|---|---|---|
-| G7 (revised) | The structured answer after two tool rounds, in the answer phase under `none`, accepted by HOME's validator after one regeneration | **PASS (fast)**; deep NOT VERIFIED |
-| G9 | The request grew append-only across five calls with two tool rounds and a regeneration (G9's own shape) | **Live evidence passes (fast)**; the owner records it with the organisation's creation date; deep NOT VERIFIED |
-| G10 | `inference_geo` `us` on every call | **PASS** for the calls made |
-| G21 | Thinking replay is covered by the grow-only check only if thinking blocks were present (`thinkingBlocks` in `report.json`) | **NOT VERIFIED** until the owner reads it |
-| G22 | Counted before all five calls on Kev's real request shape; the count-to-`message_start` comparison is in the report | Count-first **passes (fast)**; the complete gate is recorded when the owner reads the comparison |
-| G3, G4, G16 (Neon), G17 | Not exercised | **NOT VERIFIED** |
+Evidence sources: the job's success (GitHub API; first-party) proves the turn probe passed every one of its checks: counted first, US inference, grow-only history, at least one tool round, an answer phase, never the format under `auto`, an `answer` outcome with at least one citation. The call breakdown, `thinkingBlocks` and the count comparison are in `report.json` only (owner-supplied or unread).
+
+| Gate | Contract requirement | Evidence | Status |
+|---|---|---|---|
+| G7 (revised) | The structured answer after a tool round, in the answer phase under `none`; never the format with `auto` | Job success (all three checks); one validated citation | **PASS (fast)**; deep NOT VERIFIED |
+| G9 | Record the organisation's creation date; one synthetic attempt with two tool rounds and a regeneration; `system`, `tools` and `messages` compared as byte prefixes | Byte-prefix growth held on every call (job success). Two rounds and a regeneration: owner-supplied. **The organisation's creation date: not recorded** | **NOT VERIFIED** until the creation date is recorded (and the call breakdown confirmed from `report.json`) |
+| G10 | `inference_geo` reported and `us` | Every call (job success) | **PASS** for the calls made |
+| G21 | Thinking blocks, empty ones included, replay verbatim (as G9) | Replay of whatever was sent held (grow-only), but **whether thinking blocks were present (`thinkingBlocks`) is unread** | **NOT VERIFIED** |
+| G22 | A count before every authorised call; one synthetic count compared with the call's `message_start` input | Count before all five calls (job success). **The comparison (`maxCountDelta`) is unread** | Count-first verified; **the complete gate NOT VERIFIED** until the comparison is read |
+| G3, G4, G16 (Neon), G17 | Preview | Not exercised | **NOT VERIFIED** |
 
 **Live verification #3 and the two-phase answer (2026-10-18; run 39090124303 on 6fbb27a; ADR 0012 §54).** C and D accepted (strict tools under `auto`, no format; valid `tool_use`; counts 200); E refused (HTTP 400, grammar compilation signals) and the session stopped. HOME recorded US$0.160675 (the owner's figure from the report); Anthropic's bill NOT RECONCILED. Decision: two phases inside the format path. G7 is revised (row above). The runner's plan is now `two-phase-acceptance`: one orchestrated fast turn, maximum US$1.50, session cap US$2. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED until that turn runs; nothing is PASS.
 
@@ -1518,6 +1520,7 @@ Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 c
 
 ### 12.4 Running live evals
 
+- *File names amended by owner decision (2026-10-18; `M8-PACKAGE-5-PLAN.md` §10), behaviour unchanged:* the harness extends the existing runner, so the workflow is `.github/workflows/kev-live-verify.yml`, the entry point `scripts/kev-live/run.mts`, and the campaign ledger the single machine-checked `docs/m8/M8-LIVE-LEDGER.json` (one entry per run, holding what rule 7 lists). Every rule below applies to them unchanged.
 - **Workflow:** `.github/workflows/kev-evals.yml`, `workflow_dispatch` only, environment `kev-evals` requiring the owner's approval, secret `KEV_EVAL_PROVIDER_KEY` (an eval-only key, never Preview's or Production's). It seeds its own test database with the fixture family and runs `src/kev/evals/run.mts` with a tier and a scenario filter.
 - **The evaluation allocation (owner decision O7, 2026-10-13; ADR 0012 §41, with the same rules).** A one-time **US$200** for M8 Package 5's live-model evaluations, on these rules:
   1. **Campaign ceiling:** at most **US$200** for the initial evaluation campaign: every Package 5 live run together, including the targeted per-PR runs during Package 5 (§12.3).
