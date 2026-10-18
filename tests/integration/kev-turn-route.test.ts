@@ -347,10 +347,16 @@ describe('G4 / U10 / U15 (local half): a client disconnect does not stop the tur
     await settle();
     const rows = await messagesOf(admin, f.kev.sam.userId);
     expect(rows.map((r) => r.role)).toEqual(['user', 'kev']);
+    // This turn's own attempt, from its stored message: reservations are
+    // never deleted, so the latest of Sam's by time can be another suite's
+    // (one whose test clock runs later than this one's).
+    const calls = (rows[1]!.content as { calls?: { attemptId: string }[] }).calls ?? [];
+    const attempts = [...new Set(calls.map((c) => c.attemptId))];
+    expect(attempts).toHaveLength(1);
     const r = await admin.db.execute<{ status: string; n: number }>(sql`
       select r.status, (select count(*)::int from kev_usage u where u.attempt_id = r.attempt_id) as n
-        from kev_budget_reservation r where r.user_id = ${f.kev.sam.userId}
-       order by r.created_at desc limit 1`);
+        from kev_budget_reservation r
+       where r.user_id = ${f.kev.sam.userId} and r.attempt_id = ${attempts[0]}`);
     // The read, the read phase's end and the answer phase (ADR 0012 §54).
     expect(r.rows[0]).toEqual({ status: 'settled', n: 3 });
     expect(await getTurnInFlight(ui(f.kev.sam), { db: clocked })).toBe(false);
