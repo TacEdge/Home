@@ -38,6 +38,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "The tool-use diagnostic (ADR 0012 §53): one model attempt per probe run, each held and released in turn under the US$2.50 session cap.",
       "outcome": "As the owner's brief records it: dx-c-one-tool (one strict tool, tool_choice auto, no answer format) and dx-d-all-tools (Kev's strict read tools, auto, no format) accepted, with valid tool_use and successful preflight counts; dx-e-tools-format (the strict tools with the answer format, auto) refused with HTTP 400, the diagnostic signals indicating grammar compilation; the full provider message is not available. The session stopped at E; the F rows did not run. Decision: the two-phase answer (ADR 0012 §54)."
+    },
+    {
+      "date": "2026-10-18",
+      "workflowRun": "Kev live verification #4 (run 39096549295, commit 7d8793c)",
+      "planHash": "58f666f80764cba32ae665e2eb4ca15568f0fe0f68e8d0f244ef0ff95ca35b7e",
+      "plannedMaxUsdMicros": "1500000",
+      "recordedUsdMicros": "88801",
+      "recordedBasis": "Owner-supplied evidence (the owner's reading of report.json, artifact 12125185954, in the brief of 2026-10-18): HOME recorded 88,801 µ$; conservative charges 0; unreconciled reservations 0. Not re-read in the PR that records it: GitHub serves workflow artifacts from a storage host the build environment cannot reach.",
+      "providerListPrice": "88,801 µ$ (owner-supplied, the report's at-list-prices figure): equal to HOME's recorded figure, as expected with no conservative charge.",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "One fast attempt (the orchestrated turn), settled; 0 open, 0 unreconciled (owner-supplied).",
+      "outcome": "The two-phase acceptance plan (ADR 0012 §54) passed: one orchestrated fast turn (Sonnet 5.5) through kev.handle(), five successful model calls (two tool rounds, the read phase's end, the answer phase and one regeneration), every call counted first and in the US, HOME's checked answer with one validated citation. The job's plan step took 24 s end to end (runner start, database checks and the turn; per-call times are in report.json)."
     }
   ]
 }
