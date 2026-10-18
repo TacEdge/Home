@@ -550,8 +550,23 @@ describe('the scenario probe and evaluation plans (§12.4)', () => {
     probes,
     sessionCapUsdMicros: cap,
   });
+  // Split between the two adults: HOME allows each sixty turns a day.
+  const singleAlex = SCENARIOS.find((s) => s.turns.length === 1 && !s.tiers && s.asker === 'alex')!;
   const evalPlan = (repeats: number, cap = EVALUATION_RUN_CEILING_USD_MICROS) => {
-    const probes = scenarioProbes({ scenarios: [single.id], tiers: ['fast'], repeats });
+    const probes = [
+      ...scenarioProbes({
+        scenarios: [single.id],
+        tiers: ['fast'],
+        repeats: Math.ceil(repeats / 2),
+      }),
+      ...(repeats > 1
+        ? scenarioProbes({
+            scenarios: [singleAlex.id],
+            tiers: ['fast'],
+            repeats: Math.floor(repeats / 2),
+          })
+        : []),
+    ];
     return buildPlan(
       'evaluation-test',
       probes,
@@ -570,7 +585,11 @@ describe('the scenario probe and evaluation plans (§12.4)', () => {
     expect(plan.ceilingUsdMicros).toBe(175_000_000n);
     expect(plan.totalMaxUsdMicros).toBe(4_500_000n);
     expect(plan.peakHoldUsdMicros).toBe(4_500_000n);
-    expect(plan.probes.map((p) => p.id)).toEqual([1, 2, 3].map((i) => `${single.id}@fast#${i}`));
+    expect(plan.probes.map((p) => p.id)).toEqual([
+      `${single.id}@fast#1`,
+      `${single.id}@fast#2`,
+      `${singleAlex.id}@fast#1`,
+    ]);
     // Escalation scenarios are fast's alone.
     const fastOnly = SCENARIOS.find((s) => s.tiers?.length === 1)!;
     expect(
@@ -680,12 +699,15 @@ describe('the scenario probe and evaluation plans (§12.4)', () => {
       expect(over).toMatchObject({ exitCode: EXIT.ledger });
     });
 
-    it('live, an evaluation plan stops before any database, key use or provider call until Package 5B', async () => {
-      const r = await check(evalPlan(2), '4', '0', 'live', {
-        DATABASE_URL: 'postgres://runner@localhost:5432/home_live_verify',
-        KEV_EVAL_PROVIDER_KEY: 'k'.repeat(40),
-      });
-      expect(r).toMatchObject({ exitCode: EXIT.fixtures, code: 'fixtures', gateway: false });
+    it('live, an evaluation needs the owner’s connection to the runner’s own database too: refused before any connection, key use or provider call', async () => {
+      for (const admin of [undefined, 'postgres://home@db.example.test:5432/home_live_verify'])
+        expect(
+          await check(evalPlan(2), '4', '0', 'live', {
+            DATABASE_URL: 'postgres://runner@localhost:5432/home_live_verify',
+            KEV_EVAL_PROVIDER_KEY: 'k'.repeat(40),
+            ...(admin ? { ADMIN_DATABASE_URL: admin } : {}),
+          }),
+        ).toMatchObject({ exitCode: EXIT.database, code: 'database', gateway: false });
     });
   });
 });

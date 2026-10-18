@@ -7,6 +7,7 @@ import { attemptReservation, perCallMax } from '@/kev/router';
 import { SCENARIOS } from '@/kev/evals/scenarios';
 import type { Scenario, ScenarioClass } from '@/kev/evals/types';
 import { toolDefinitions } from '@/kev/tools/registry';
+import { TURNS_PER_DAY } from '@/domain/kev-bookkeeping/constants';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
 import { EVALUATION_RUN_CEILING_USD_MICROS, SESSION_CEILING_USD_MICROS } from './guards.mts';
 
@@ -162,6 +163,17 @@ export function scenarioProbes(opts: {
         })),
       );
   });
+}
+
+/** Each fixture adult's scenario turns in a set of probes (§9.6's day limit is per adult). */
+export function turnsByAsker(probes: readonly ProbeSpec[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const p of probes) {
+    if (p.kind !== 'scenario') continue;
+    const asker = SCENARIOS.find((s) => s.id === p.scenario)?.asker ?? 'unknown';
+    out.set(asker, (out.get(asker) ?? 0) + p.turns);
+  }
+  return out;
 }
 
 /**
@@ -772,6 +784,13 @@ export function buildPlan(
       SCENARIOS.find((s) => s.id === p.scenario)?.turns.length !== p.turns
     )
       throw new Error(`scenario probe ${p.id} does not match its scenario’s turns`);
+  // HOME's own per-adult day limit (§9.6) is never worked around: no
+  // evaluation gives one adult more turns than it allows in a day.
+  for (const [asker, turns] of turnsByAsker(probes))
+    if (turns > TURNS_PER_DAY)
+      throw new Error(
+        `an evaluation gives ${asker} ${turns} turns; HOME allows ${TURNS_PER_DAY} a day`,
+      );
   const priced = probes.map((p) =>
     Object.freeze({
       ...p,

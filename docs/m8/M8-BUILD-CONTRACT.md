@@ -1487,6 +1487,8 @@ Synthetic only: the fixture family, scenario day Wednesday 14 October 2026, 07:0
 
 Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 completes at least 90 (48 of them adversarial: injection, privacy, sensitive context, availability and fabrication bait) and runs them live. *Owner amendment (ADR 0012 §46):* a scenario's scripted answers are answer plans (records chosen by ref, absence and count scopes, a fact-free lead and view); the final review's false acceptances that a model would keep producing are scenarios whose scripted model attempts them, and whose expectations hold what is shown. *Owner decisions 6–8 (ADR 0012 §46, final corrections):* scripted leads and views are catalogue identifiers (a scenario's `words` is a misbehaving model writing its own sentence instead, refused as `answer.schema`); `realistic.thanks` (a thank-you answered "You're welcome." alone) and `fabrication.bare_yes` (a bare affirming lead to a yes-or-no question, refused, ending in the fallback) are added.
 
+*As built (Package 5B, 2026-10-18; ADR 0012 §57; `docs/m8/M8-EVAL-SCENARIOS.md`).* The dataset holds 113 scenarios (124 turns). Each class is at or above its minimum: realistic 42, injection 21, privacy 17, sensitive 4, availability 7, fabrication 13, out of scope 6, routing 3. That is 62 adversarial. Every realistic sub-quota is met, including follow-ups across midnight and after Clear. Each untrusted field has at least two phrasings. The world they run in, the fixture with both adults' private records and every injected record, is one builder for both layers (`tests/integration/kev-eval-world.ts`). Package 3's `injection.project_summary` now reads the project itself: as first written, its summary never reached the model.
+
 ### 12.3 Guarantees, gates and measured targets
 
 **Two different kinds of evidence, kept apart:**
@@ -1546,7 +1548,13 @@ Package 3 writes the first 30 (all classes represented) for layer 2; Package 5 c
   - **The hash** binds each scenario's questions and expectations.
   - **The report** adds per-run records and the summary against §12.3 (`src/kev/evals/summary.ts`), with every rate's *n* and no question or answer.
   - **The scripted evals** produce the same records and summary for layer 2 (`KEV_EVAL_OUT`).
-  - **Not live yet.** A live evaluation plan stops before any database, key use or provider call until Package 5B gives the runner the evaluation fixture and turn pacing within the per-adult limits. No evaluation plan is named yet.
+  - **Not live yet** *(superseded by Package 5B, below)*. A live evaluation plan stops before any database, key use or provider call until Package 5B gives the runner the evaluation fixture and turn pacing within the per-adult limits. No evaluation plan is named yet.
+- **As built (controlled execution), 2026-10-18** (Package 5B, ADR 0012 §57). An evaluation plan now runs live under every rule above.
+  - **The world.** After the fixture-only check, the runner builds the evaluation world in its own throwaway database, through the owner's connection to it (guarded like the app's: exit 12). It uses this process's own random keys and a synthetic forecast point.
+  - **Pacing.** Scenarios run one at a time, in the plan's order. Each turn is paced within HOME's own limit of six a minute, counted as HOME counts. No plan gives one adult more than HOME's sixty turns a day.
+  - **The wall clock.** No scenario starts after 35 minutes, inside the job's 45.
+  - **Nothing automatic.** Nothing retries a scenario or runs after merging. Rule 3's approval is still the hash of the code's session plan.
+  - **No plan named yet.** Package 5D names the first evaluation plan.
 
 ---
 
@@ -1986,6 +1994,10 @@ Every M1–M7 test, unchanged, including the forbidden-phrase suites, the privac
 *As built for E1–E13 (Package 5A, 2026-10-18; ADR 0012 §56).* The harness the rows need exists; no row is passed, because each needs recorded live runs.
 - **E1–E9: the same checker and summary for both layers.** The checker is `src/kev/evals/judge.ts`; the summary is `src/kev/evals/summary.ts`, which gives §12.3's measures with *n*: first pass, within one regeneration, the results, escalation and regeneration rates, latency to the checked answer, cost, and calls and tokens. The scripted evals produce them for every scenario on both tiers; the runner's scenario probes will produce them live from Package 5B.
 - **E12, tested at the keyless preflight** (`tests/unit/kev-eval-harness.test.ts`). A computed maximum above US$175 is refused (`budget`, exit 14). One above the campaign remainder is refused (`ledger`, exit 16). A budget at the smaller limit is accepted (both cases: the US$175 ceiling, and a remainder below it). All of this happens before any key, database or provider call.
+- **Package 5B** added:
+  - the dataset to §12.2's minimums;
+  - the relevance diagnostic, pass rates by topic, failed runs by closed check names, and refusals (E9's summary);
+  - the live path: the world, pacing, the per-adult day limit and the wall clock, tested in `tests/integration/kev-eval-harness.test.ts`, `kev-live-runner.test.ts` (scenario turns through the real gateway, against the local stub) and `tests/unit/kev-eval-dataset.test.ts`.
 - **E13, tested with the scripted provider** (`tests/integration/kev-eval-harness.test.ts`). The run stops before the scenario whose maximum would cross the budget and finishes no further scenario. A call of unknown usage is counted at its per-call maximum by the bookkeeping path, as before. The runner uses its own database and cap, never the household's.
 
 ---

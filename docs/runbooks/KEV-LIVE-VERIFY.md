@@ -21,6 +21,28 @@ Owner decisions this follows (2026-10-16): the runner uses HOME's own gateway, s
 
 The runner also knows **evaluation** plans: scenario probes held to the US$175 run ceiling (exit 14 above it) and to the campaign remainder (exit 16). It checks them in the keyless preflight, but a live evaluation plan **stops with exit 18 (`fixtures`)** before any database, key use or provider call, until Package 5B gives the runner the evaluation fixture and pacing within HOME's per-adult limits. No evaluation plan is named yet.
 
+**Package 5B (2026-10-18; ADR 0012 §57): evaluation plans run live.** The session plan and its hash are unchanged (`d08a3713…`). When the session plan is an evaluation plan (none is named yet; Package 5D names the first), `--live` does the following:
+1. **Checks the database.** It checks the database is the fixture family's only (exit 18), as before.
+2. **Checks the owner connection.** It refuses unless `ADMIN_DATABASE_URL`, the job's owner connection, is the same throwaway `home_live_verify` on localhost (exit 12). The workflow already sets it.
+3. **Builds the world.** It builds the evaluation world in that database: the fixture, both adults' private records and every injected record. It uses this process's own random keys and a synthetic forecast point, never a deployment's.
+4. **Runs the scenarios** one at a time, each in a fresh conversation, under these limits:
+   - **Pacing:** each turn waits while the adult already has six turns in the last minute (HOME's own limit and count; it gives up after two minutes rather than let HOME refuse a turn).
+   - **Day limit:** no plan gives one adult more than sixty turns, so a fast pass of the whole dataset is two runs.
+   - **Wall clock:** after 35 minutes no new scenario starts; the run stops as `time`, its report written.
+   - **No retries:** nothing retries a scenario.
+
+The report adds the evaluation records and summary:
+- pass rates by class and topic;
+- failed runs by check name;
+- §12.3's measures with *n*;
+- relevance and refusals;
+- tuning pointers;
+- the workflow run and commit.
+
+It never holds a question, an answer or a transcript.
+
+**The campaign ledger is unchanged.** `docs/m8/M8-LIVE-LEDGER.json` takes one entry per run with the owner's recorded spend. A budget above the remainder is refused (exit 16), and an evaluation's budget is at most US$175 (exit 14).
+
 **Run #3's plan: `tool-diagnostic`** (2026-10-18; ADR 0012 §53, kept in code for its tests and its record): why Kev's tool-carrying Messages API calls were refused with HTTP 400 under `tool_choice: auto` in run #2. One Sonnet 5.5 call per probe, with Kev's system prompt and `tool_choice: auto`, each probe run only when the earlier results call for it:
 
 | Probe | Sends | Runs if | Stops the session |

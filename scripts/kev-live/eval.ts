@@ -1,11 +1,12 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '@/db/create';
+import { TURNS_PER_MINUTE } from '@/domain/kev-bookkeeping/constants';
 import { clearConversation } from '@/domain/kev-bookkeeping/service';
 import { kevContentV2, type KevContentV2 } from '@/domain/kev-bookkeeping/schema';
-import { judge, type Markers, type Verdict } from '@/kev/evals/judge';
+import { judge, relevanceOf, type Markers, type Verdict } from '@/kev/evals/judge';
 import type { FixtureIds } from '@/kev/evals/scripted';
 import { attemptIdsOf, turnRecord, type EvalRecord, type TurnRecord } from '@/kev/evals/summary';
-import type { Scenario, TurnSpec } from '@/kev/evals/types';
+import { topicsOf, type Scenario, type TurnSpec } from '@/kev/evals/types';
 import { handle, type KevDeps, type KevEvent } from '@/kev/orchestrator';
 import type { KevProvider } from '@/kev/providers/types';
 import type { UserActor } from '@/trust/actor';
@@ -24,7 +25,8 @@ export type ScenarioContext = Readonly<{
   /** The fixture adults, as Kev acts (`via: 'kev'`). */
   adults: Readonly<Record<'sam' | 'alex', UserActor>>;
   ids: FixtureIds;
-  markers: Markers;
+  /** What the asker must never be shown: fixed, or by asker (the other adult's markers). */
+  markers: Markers | ((asker: 'sam' | 'alex') => Markers);
   /** The database Kev's turns run on. */
   db: KevDeps['db'];
   /** A connection that reads Kev's stored messages and `kev_usage` (the owner's, in the runner's own database). */
@@ -33,9 +35,15 @@ export type ScenarioContext = Readonly<{
   providerFor: (turn: TurnSpec, index: number) => KevProvider;
   /** Further test seams for every turn (the sensitive strings the validator refuses). */
   deps?: Omit<KevDeps, 'db' | 'provider' | 'startTier'>;
-  /** Called before the scenario and before each turn (the scripted evals move their test clock). */
+  /** Called before the scenario and before each turn (the scripted evals move their test clock; the runner paces). */
   beforeScenario?: () => Promise<void>;
-  beforeTurn?: () => Promise<void>;
+  beforeTurn?: (actor: UserActor) => Promise<void>;
+  /**
+   * Applies the scenario's starting state (src/kev/evals/types.ts
+   * SCENARIO_STATES) and returns what restores the default, run however
+   * the scenario ends. Without it, a scenario that names a state is refused.
+   */
+  prepare?: (s: Scenario) => Promise<() => Promise<void>>;
 }>;
 
 export type PlayedTurn = Readonly<{
@@ -88,36 +96,40 @@ export async function runScenario(
   ctx: ScenarioContext,
 ): Promise<ScenarioRun> {
   const actor = ctx.adults[s.asker];
+  if (s.state && !ctx.prepare)
+    throw new Error(`scenario ${s.id} needs a state the driver cannot set`);
   await ctx.beforeScenario?.();
-  // A fresh conversation: no earlier scenario's turns in this one's window.
-  await clearConversation(actor, { db: ctx.db });
+  const restore = ctx.prepare ? await ctx.prepare(s) : async () => {};
   const turns: PlayedTurn[] = [];
-  for (const [i, t] of s.turns.entries()) {
-    await ctx.beforeTurn?.();
-    const events: KevEvent[] = [];
-    for await (const e of handle(
-      { actor, channel: 'web', input: { text: t.question }, now: new Date(s.now) },
-      {
-        db: ctx.db,
-        provider: ctx.providerFor(t, i),
-        ...(tier === 'deep' ? { startTier: 'deep' as const } : {}),
-        ...ctx.deps,
-      },
-    ))
-      events.push(e);
-    const done = events.at(-1);
-    if (!done || done.type !== 'done') throw new Error('a turn always ends with done');
-    const { stored, record } = await storedTurn(ctx.reader, done);
-    turns.push(Object.freeze({ events, done, stored, record }));
+  try {
+    // A fresh conversation: no earlier scenario's turns in this one's window.
+    await clearConversation(actor, { db: ctx.db });
+    for (const [i, t] of s.turns.entries()) {
+      // A follow-up after Clear: the earlier turns are out of the window.
+      if (t.clearBefore) await clearConversation(actor, { db: ctx.db });
+      await ctx.beforeTurn?.(actor);
+      const events: KevEvent[] = [];
+      for await (const e of handle(
+        { actor, channel: 'web', input: { text: t.question }, now: new Date(t.now ?? s.now) },
+        {
+          db: ctx.db,
+          provider: ctx.providerFor(t, i),
+          ...(tier === 'deep' ? { startTier: 'deep' as const } : {}),
+          ...ctx.deps,
+        },
+      ))
+        events.push(e);
+      const done = events.at(-1);
+      if (!done || done.type !== 'done') throw new Error('a turn always ends with done');
+      const { stored, record } = await storedTurn(ctx.reader, done);
+      turns.push(Object.freeze({ events, done, stored, record }));
+    }
+  } finally {
+    await restore();
   }
   const last = turns.at(-1)!;
-  const verdict = judge(
-    s,
-    tier,
-    { events: last.events, stored: last.stored },
-    ctx.ids,
-    ctx.markers,
-  );
+  const markers = typeof ctx.markers === 'function' ? ctx.markers(s.asker) : ctx.markers;
+  const verdict = judge(s, tier, { events: last.events, stored: last.stored }, ctx.ids, markers);
   const record: EvalRecord = Object.freeze({
     scenario: s.id,
     class: s.class,
@@ -125,9 +137,41 @@ export async function runScenario(
     repeat,
     followUp: s.turns.length > 1,
     expectEscalated: s.expect.escalated ?? null,
+    topics: topicsOf(s),
     pass: verdict.pass,
     failed: verdict.failed,
+    relevance: relevanceOf(s, last.stored?.cites ?? [], ctx.ids),
     turns: Object.freeze(turns.map((t) => t.record)),
   });
   return Object.freeze({ record, verdict, turns: Object.freeze(turns) });
+}
+
+/**
+ * Paces a live evaluation within HOME's own per-adult limit (§9.6: six turns
+ * a minute), never around it: before each turn, waits while the adult
+ * already has `TURNS_PER_MINUTE` turns in the last minute, counted exactly
+ * as HOME counts them (their `message.add` audit rows with role `user`, by
+ * the database's clock). The day's limit (sixty) is held by the plan: an
+ * evaluation gives no adult more turns than that (plan.ts). Waits at most
+ * `maxWaits` times, then refuses rather than let HOME refuse the turn.
+ */
+export async function paceTurn(
+  reader: Db,
+  userId: string,
+  opts: { sleep?: (ms: number) => Promise<void>; stepMs?: number; maxWaits?: number } = {},
+): Promise<number> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const stepMs = opts.stepMs ?? 5_000;
+  const maxWaits = opts.maxWaits ?? 24;
+  for (let waits = 0; ; waits++) {
+    const [row] = (
+      await reader.execute<{ n: number }>(sql`
+        select count(*)::int as n from audit_log
+         where at >= now() - interval '1 minute' and actor_user_id = ${userId}
+           and event = 'message.add' and meta ->> 'role' = 'user'`)
+    ).rows;
+    if (Number(row?.n ?? 0) < TURNS_PER_MINUTE) return waits;
+    if (waits >= maxWaits) throw new Error('pacing: the per-minute limit did not clear');
+    await sleep(stepMs);
+  }
 }

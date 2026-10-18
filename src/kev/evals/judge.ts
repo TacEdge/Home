@@ -111,3 +111,29 @@ export function judge(
   if (say?.type === 'say' && o.stored && say.text !== o.stored.say) failed.push('say_unchecked');
   return Object.freeze({ pass: failed.length === 0, failed: Object.freeze(failed) });
 }
+
+/**
+ * Package 5B's relevance diagnostic (Package 5 plan §7): of the records the
+ * scored answer cited, how many the scenario neither requires (`mustCite`)
+ * nor allows (`mayCite`). A record is matched by type and id (an occurrence
+ * spec by its instant too); a `find` spec allows any record of its type.
+ * Null when the scenario names no record to compare with. Counts only, and
+ * never a pass condition.
+ */
+export function relevanceOf(
+  s: Scenario,
+  cites: readonly Ref[],
+  ids: FixtureIds,
+): { cited: number; extra: number } | null {
+  const expected = [...(s.expect.mustCite ?? []), ...(s.expect.mayCite ?? [])];
+  if (expected.length === 0) return null;
+  const allows = (c: Ref) =>
+    expected.some((spec) => {
+      if ('find' in spec) return spec.type === undefined || spec.type === c.type;
+      const want = resolveRef(spec, ids);
+      return (
+        want.type === c.type && want.id === c.id && (want.at === undefined || want.at === c.at)
+      );
+    });
+  return { cited: cites.length, extra: cites.filter((c) => !allows(c)).length };
+}

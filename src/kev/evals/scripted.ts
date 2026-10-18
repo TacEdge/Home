@@ -62,7 +62,7 @@ export function resolveRef(spec: RefSpec, ids: FixtureIds, req?: ProviderRequest
     const type =
       spec.fixture === 'note'
         ? 'note'
-        : ['fence', 'garage'].includes(spec.fixture)
+        : ['fence', 'garage', 'shed', 'garden'].includes(spec.fixture)
           ? 'project'
           : ['paint', 'light'].includes(spec.fixture)
             ? 'task'

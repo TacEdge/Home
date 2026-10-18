@@ -19,7 +19,8 @@ import {
   isolationReport,
   type Queryable,
 } from '../../scripts/kev-live/isolation-check.mts';
-import { buildPlan } from '../../scripts/kev-live/plan';
+import { paceTurn } from '../../scripts/kev-live/eval';
+import { buildPlan, scenarioProbes } from '../../scripts/kev-live/plan';
 import { evidenceChecks, executePlan } from '../../scripts/kev-live/probes';
 import { reconcile } from '../../scripts/kev-live/reconcile';
 import { buildReport } from '../../scripts/kev-live/report';
@@ -36,7 +37,9 @@ import {
 } from '../unit/kev-stub';
 import { WEATHER_VARIABLES, WELLINGTON, weatherEnv } from '../fixtures/weather';
 import { adminDb, testDb } from './db';
+import { markersFor } from './kev-eval-world';
 import { buildKevFixture, clearKevFixture, type KevFixture } from './kev-fixture';
+import type { FixtureIds } from '@/kev/evals/scripted';
 
 // The live verification runner's live path, end to end against a local
 // stub of the provider (never the provider): the approved plan's probes run
@@ -228,6 +231,86 @@ const expectNothingLeftOpen = (rec: Awaited<ReturnType<typeof reconcile>>, befor
 };
 
 describe('the plan, live path, against a local stub', () => {
+  it('an evaluation (Package 5B): scenario turns through the real gateway, each call counted first and in the US, each turn paced by HOME’s own count, recorded, reconciled; the report has no question', async () => {
+    const probes = scenarioProbes({
+      scenarios: ['realistic.today', 'realistic.today_alex', 'realistic.sunday'],
+      tiers: ['fast'],
+      repeats: 1,
+    });
+    const plan = buildPlan('evaluation-stub', probes, {
+      kind: 'evaluation',
+      probes: probes.map((p) => p.id),
+      sessionCapUsdMicros: 10_000_000n,
+    });
+    const ids = Object.fromEntries(
+      Object.entries(f.id).filter(([k]) => k !== 'calendar'),
+    ) as FixtureIds;
+    const before = await leftOpen();
+    // A fresh synthetic adult for both askers: the shared test database holds
+    // other suites' turns for the fixture adults at their test clocks' far
+    // future instants, which HOME's own limits (and so the pacing) count.
+    const id = `live-eval-${randomUUID()}`;
+    await admin.db
+      .insert(user)
+      .values({ id, name: 'Synthetic evaluation adult', email: `${id}@example.test` });
+    const adult: UserActor = {
+      kind: 'user',
+      userId: id,
+      email: `${id}@example.test`,
+      via: 'kev',
+      channel: 'web',
+    };
+    let paced = 0;
+    const run = await executePlan(plan, {
+      gateway: gateway(),
+      actor: runner,
+      deps: { db },
+      budgetMicros: plan.sessionCapUsdMicros,
+      evaluation: {
+        adults: { sam: adult, alex: adult },
+        ids,
+        markers: markersFor,
+        db,
+        reader: admin.db,
+        beforeTurn: async (a) => {
+          paced += 1;
+          await paceTurn(admin.db, a.userId);
+        },
+      },
+    });
+    expect(run.stopped).toBeNull();
+    expect(paced).toBe(3);
+    for (const r of run.results) {
+      // The stub's answers are not the scenario's: what is proven here is the path.
+      expect(r.evaluation, r.id).toBeDefined();
+      expect(r.checks, r.id).toMatchObject({ countedFirst: true, usInference: true });
+      expect(r.attemptIds.length, r.id).toBeGreaterThan(0);
+      expect(r.evaluation!.turns[0]!.costUsdMicros, r.id).not.toBeNull();
+    }
+    const rec = await reconcile(
+      db,
+      run.results.flatMap((r) => r.attemptIds),
+    );
+    expect(rec.mismatched).toBe(0);
+    expectNothingLeftOpen(rec, before);
+    const report = buildReport({
+      plan,
+      budgetMicros: plan.sessionCapUsdMicros,
+      capNzd: 18,
+      run,
+      reconciliation: rec,
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+      identity: { workflowRun: '123', commit: 'abc' },
+    });
+    expect(report.json).toContain('"evaluation"');
+    expect(report.json).toContain('"workflowRun": "123"');
+    const { SCENARIOS } = await import('@/kev/evals/scenarios');
+    for (const id of ['realistic.today', 'realistic.today_alex', 'realistic.sunday'])
+      expect(report.json).not.toContain(SCENARIOS.find((x) => x.id === id)!.turns[0]!.question);
+    expect(report.json).not.toContain(KEY);
+  }, 60_000);
+
   it('live verification #2’s plan: the six probes pass through the real gateway; every model call counted first, in the US, its count compared with the reported input; reconciled', async () => {
     const plan = buildPlan('verification-2');
     expect(plan.name).toBe('verification-2');

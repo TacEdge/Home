@@ -684,6 +684,48 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     - **Not live yet (Package 5B).** An evaluation plan passes the keyless preflight (E12) but stops before any database, key use or provider call when run live (exit 18, `fixtures`). Two things are missing. First, the runner's database holds only the M2 fixture family: not the evaluation fixture's private records, injections, forecast or calendar connection, and the runner refuses any calendar connection. Second, HOME's per-adult limits (6 turns a minute, 60 a day) are not paced for a run of a hundred-odd turns. Package 5B decides how the runner builds that fixture and paces its turns, adds the scenarios and any evaluation plan, and asks the owner. No evaluation plan is named in `PLANS`; the session plan is unchanged. Synthetic transcripts for product review stay in Package 5C.
     - **Overhead.** No database query or round trip is added to a turn: the check is written with Kev's message, in the same insert. Building the check and its log fields costs about 0.7 µs a turn. The stored record is about 100 bytes typically and 779 bytes at most (two attempts, four failures, every code). The log line grows by up to about 270 bytes.
 
+57. **Package 5B: evaluation scenarios and controlled execution** (2026-10-18; the owner's brief to begin 5B, after PR #97; no provider call, no dispatch, no spending authorised; no credential configured; Preview Kev stays off; `HOME_REAL_DATA` stays closed; the Production weather location stays unset).
+    - **Scope, by package.**
+      - **5A delivered** (§56, not rebuilt): the answer check, the shared checker and summary, scenario probes, evaluation plans held to US$175, E12 and E13.
+      - **5B owns:** the scenarios and the world they need; the relevance diagnostic (Package 5 plan §7); the live path for evaluation plans (the world built in the runner's own database, pacing within HOME's own limits, a wall clock); the report's coverage, failures and pointers.
+      - **Later Package 5 work:**
+        - 5C: the rubric, transcripts for review, screenshots;
+        - 5D: the named smoke plans and their runs, each approved separately;
+        - 5E: the full campaign, after its budget decision.
+      - **Package 6:** acceptance. Package 5 is not marked accepted.
+    - **The dataset** (`docs/m8/M8-EVAL-SCENARIOS.md`, built from the code and checked against it): 66 scenarios added, 113 in all, 124 turns.
+      - Every §12.2 class minimum and every realistic sub-quota is met. Of the 8 follow-ups, one runs across midnight and one comes after Clear.
+      - There are 62 adversarial scenarios (48 required).
+      - Each untrusted field has at least two phrasings, including the fields not covered before: a synced calendar title, a person's name and a context record.
+      - The owner's examples are placed, asked by the synthetic adults. The brief's "Mike or Courtney" are real names, which never enter the dataset (CLAUDE.md rule 9).
+      - Each scenario names the brief's topics it covers. Failure and recovery remain layer 2's orchestrator suite (§12.3), since a live run cannot induce them.
+      - The plan's 57 proposed additions became 66; the differences are in the catalogue's table.
+      - No exact sentence is required where several truthful answers exist: the checks name records, the code's limits and forbidden claims. `acceptable` describes a good answer for the owner's review only.
+    - **The world** (`tests/integration/kev-eval-world.ts`), one builder for both layers: the Kev fixture, both adults' private records and every injected record, written through the domain services. It includes a synced household calendar whose titles carry instructions, built from a fixed feed by the fake calendar provider with no network.
+      - **Starting states:** `old_forecast` (fetched at 23:00 the night before) and `no_location` (no home location), applied per scenario and restored however it ends.
+      - **Turn options:** a turn's own instant (across midnight) and Clear before a turn.
+    - **A finding, corrected.** Package 3's `injection.project_summary` read the project list, which carries no summaries, so its injected text never reached the model. It now reads the project itself.
+      - A new check in every scripted run ensures each injected text reaches the model in some run, and only inside `untrusted_text`, in every turn and every request. All of them now do.
+    - **A finding, for the owner, unchanged.** `No worries.` is accepted as the lead of an answer to "When's the best time to do the fence?". It is not a false claim (the facts are the gap engine's, with its limit sentence), but it can read as assent. The validator withholds affirming leads only for yes-or-no and availability questions as classified today. Any change is validator tuning under the eval rule, not 5B's.
+    - **Execution.**
+      - **The world.** An evaluation plan runs live as other plans do (the keyless preflight, the owner's approval of the hash, the eval key, the runner's own database), with one addition. After the existing fixture-only check, the runner builds the world in that database. It uses the owner's connection to it, which is guarded like the app's: localhost, `home_live_verify` (exit 12). It also uses this process's own fresh random keys and a public synthetic forecast point, never a deployment's.
+      - **Order and concurrency.** Scenarios run one at a time, in the plan's fixed order, each in a fresh conversation.
+      - **Pacing.** Each turn is paced within HOME's own limit of six a minute, by HOME's own count (`paceTurn`). HOME's sixty-a-day limit is held by the plan: no evaluation gives one adult more turns (`turnsByAsker`).
+      - **Wall clock.** No scenario starts after 35 minutes, so the run stops cleanly, its report written, inside the job's 45-minute limit.
+      - **Retries.** Nothing retries a scenario, and nothing runs after merging: the workflow stays dispatch-only, and the plan the runner runs is the code's `SESSION_PLAN`, approved by its hash.
+      - **No plan named.** 5D names the first evaluation plan and sets it as the session plan, for the owner's approval.
+    - **Cost controls, unchanged and reused.** The US$200 campaign and US$175 per run are held by the preflight and the ledger. Each attempt is reserved through the bookkeeping path before its calls, and the run stops before a scenario whose maximum would cross the budget. The household's cap and data are never touched.
+      - A full fast pass is 124 turns, Sam's 83 among them, so it needs two runs.
+      - §12.3's full suite is about 854 turns: about 16 runs at their maxima, far below them in expected spend.
+    - **Reporting.** The summary now adds:
+      - pass rates by topic;
+      - every failed run by its closed check names (the first ten in the Markdown);
+      - the relevance diagnostic and the model's refusal count;
+      - code-derived pointers for tuning, each a hypothesis to measure;
+      - the run's identity (workflow run, commit).
+      It keeps three kinds of evidence apart: deterministic guarantees (proven in CI), model measurements (finite samples with their *n*, bounds rather than proofs), and usefulness and tone (the owner's judgement, never a number). No transcript, question or answer text is in the report; transcripts are 5C's.
+    - **The session plan's hash is unchanged** (`d08a3713…`).
+
 ## Consequences
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.

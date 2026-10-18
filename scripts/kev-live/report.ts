@@ -164,6 +164,8 @@ export function buildReport(input: {
   reconciliation: Reconciliation | null;
   startedAt: Date;
   finishedAt: Date;
+  /** The run's identity for reproducibility: the workflow run and the commit, when known. */
+  identity?: Readonly<{ workflowRun: string | null; commit: string | null }>;
 }): Report {
   const { plan, run, reconciliation: rec } = input;
   const probes = run.results.map((r) => ({
@@ -204,6 +206,7 @@ export function buildReport(input: {
     version: 1,
     startedAt: input.startedAt.toISOString(),
     finishedAt: input.finishedAt.toISOString(),
+    run: input.identity ?? { workflowRun: null, commit: null },
     plan: {
       version: plan.canonical.version,
       hash: plan.hash,
@@ -229,6 +232,9 @@ export function buildReport(input: {
     `- Budget US$${usd(input.budgetMicros)}; HOME's reservation cap NZ$${input.capNzd}; plan maximum US$${usd(plan.totalMaxUsdMicros)}`,
   );
   md.push(`- ${input.startedAt.toISOString()} to ${input.finishedAt.toISOString()}`);
+  md.push(
+    `- Workflow run ${input.identity?.workflowRun ?? '—'}, commit ${input.identity?.commit ?? '—'}`,
+  );
   md.push(
     `- Stopped early: ${run.stopped ?? 'no'}; all probes passed and reconciled: ${passed ? 'yes' : 'no'}`,
   );
