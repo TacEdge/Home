@@ -67,6 +67,67 @@ function callRows(r: ProbeResult) {
   );
 }
 
+/**
+ * The tool-use diagnostic's matrix (ADR 0012 §53): per probe that carries a
+ * request shape, what was sent (described, never the body) and how the
+ * provider answered: G22's count, whether the Messages call was made, the
+ * status, the refusal's category, recognised paths and signals, the request
+ * id and HOME's charge. Built from the plan and the gateway's evidence only.
+ */
+function diagnosticRows(plan: Plan, run: RunOutcome) {
+  return plan.probes.flatMap((p) => {
+    if (!('shape' in p) || !p.shape) return [];
+    const r = run.results.find((x) => x.id === p.id);
+    const counts = (r?.evidence ?? []).filter((e) => e.kind === 'count');
+    const messages = (r?.evidence ?? []).filter((e) => e.kind === 'message');
+    const last = messages.at(-1) ?? counts.at(-1);
+    const error = [...(r?.evidence ?? [])].reverse().find((e) => e.error)?.error ?? null;
+    return [
+      {
+        id: p.id,
+        shape: p.shape,
+        requestDigest: p.requestDigest ?? null,
+        model: last?.model ?? null,
+        toolChoice: p.request.toolChoice,
+        strictTools: p.request.tools !== 'none' && p.probe.strictTools !== false,
+        answerFormat: p.request.outputFormat === 'answer',
+        outcome: r?.outcome ?? 'not_run',
+        reasons: r?.reasons ?? [],
+        countPassed:
+          counts.length === 0
+            ? null
+            : counts.every((c) => c.kind === 'count' && c.counted !== null),
+        messageAttempted: messages.length > 0,
+        status: last?.status ?? null,
+        category: error?.type ?? null,
+        paths: error?.message?.paths ?? [],
+        signals: error?.message?.signals ?? [],
+        requestId: error?.requestId ?? last?.requestId ?? null,
+        usage: messages.some((e) => e.kind === 'message' && e.usage)
+          ? {
+              inputTokens: messages.reduce(
+                (a, e) => a + (e.kind === 'message' ? (e.usage?.inputTokens ?? 0) : 0),
+                0,
+              ),
+              outputTokens: messages.reduce(
+                (a, e) => a + (e.kind === 'message' ? (e.usage?.outputTokens ?? 0) : 0),
+                0,
+              ),
+            }
+          : null,
+        /** A call charged without reported usage: the conservative rule (ADR 0012, I2). */
+        conservative: messages.some(
+          (e) => e.kind === 'message' && e.costUsdMicros !== null && e.usage === null,
+        ),
+        chargedUsdMicros: messages.reduce(
+          (a, e) => a + (e.kind === 'message' && e.costUsdMicros !== null ? e.costUsdMicros : 0n),
+          0n,
+        ),
+      },
+    ];
+  });
+}
+
 /** Gate by gate: pass when every probe naming it passed, else what failed. */
 function gateSummary(results: readonly ProbeResult[]) {
   const gates = new Map<string, { probes: string[]; failed: string[]; notRun: string[] }>();
@@ -117,6 +178,7 @@ export function buildReport(input: {
     attempts: r.attemptIds.length,
     calls: callRows(r),
   }));
+  const diagnostic = diagnosticRows(plan, run);
   const gates = gateSummary(run.results);
   const passed =
     run.stopped === null && run.results.every((r) => r.outcome === 'pass') && (rec?.ok ?? false);
@@ -136,6 +198,7 @@ export function buildReport(input: {
     passed,
     gates,
     probes,
+    ...(diagnostic.length > 0 ? { diagnostic, stoppedBecause: run.stopped } : {}),
     reconciliation: rec,
     note: 'Synthetic data only. No prompt, answer, tool content, header or key is recorded here. No gate is PASS until the owner records it in the contract’s register.',
   };
@@ -179,6 +242,19 @@ export function buildReport(input: {
         `| ${p.id} | ${c.kind} | ${c.model} | ${v('status')} | ${v('requestId')} | ${v('counted')} | ${v('stop')} | ${v('inputTokens')} | ${v('outputTokens')} | ${v('cacheReadTokens')} | ${v('cacheWriteTokens')} | ${v('inferenceGeo')} | ${v('costUsdMicros')} |`,
       );
     }
+  if (diagnostic.length > 0) {
+    md.push('', '## Diagnostic matrix (ADR 0012 §53)', '');
+    md.push(
+      `Stopped: ${run.stopped ?? 'no'}. Each row one request shape; never a prompt, body or provider message.`,
+      '',
+      '| Probe | Shape | Model | tool_choice | Strict | Format | Outcome | G22 | Messages call | Status | Category | Paths | Signals | request-id | Usage in/out | HOME µ$ |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    );
+    for (const d of diagnostic)
+      md.push(
+        `| ${d.id} | ${d.shape} | ${d.model ?? '—'} | ${d.toolChoice} | ${d.strictTools ? 'yes' : 'no'} | ${d.answerFormat ? 'yes' : 'no'} | ${d.outcome}${d.reasons.length ? ` (${d.reasons.join(', ')})` : ''} | ${d.countPassed === null ? '—' : d.countPassed ? 'passed' : 'failed'} | ${d.messageAttempted ? 'yes' : 'no'} | ${d.status ?? '—'} | ${d.category ?? '—'} | ${d.paths.join(' ') || '—'} | ${d.signals.join(' ') || '—'} | ${d.requestId ?? '—'} | ${d.usage ? `${d.usage.inputTokens}/${d.usage.outputTokens}` : '—'} | ${d.chargedUsdMicros}${d.conservative ? ' (conservative)' : ''} |`,
+      );
+  }
   md.push('', '## Provider errors', '');
   const refused = probes.flatMap((p) =>
     p.calls.flatMap((c) =>

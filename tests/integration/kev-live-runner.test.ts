@@ -183,7 +183,7 @@ const expectNothingLeftOpen = (rec: Awaited<ReturnType<typeof reconcile>>, befor
 
 describe('the plan, live path, against a local stub', () => {
   it('live verification #2’s plan: the six probes pass through the real gateway; every model call counted first, in the US, its count compared with the reported input; reconciled', async () => {
-    const plan = buildPlan();
+    const plan = buildPlan('verification-2');
     expect(plan.name).toBe('verification-2');
     const before = await leftOpen();
     const run = await executePlan(plan, {
@@ -477,7 +477,7 @@ describe('provider refusals are diagnosable from the job log, and nothing else l
   };
 
   it('each refused call prints its status, category, request id, paths and signals; the report keeps them; no secret, prompt or provider text anywhere', async () => {
-    const plan = buildPlan();
+    const plan = buildPlan('verification-2');
     stub.queue.length = 0;
     for (let i = 0; i < 50; i++)
       stub.queue.push((req, res, raw) =>
@@ -579,6 +579,273 @@ describe('provider refusals are diagnosable from the job log, and nothing else l
   });
 });
 
+describe('the tool-use diagnostic (ADR 0012 §53): adaptive, one call a probe, counted first', () => {
+  type Sent = {
+    tools?: { name: string; strict?: boolean }[];
+    output_config?: { format?: unknown };
+    tool_choice?: { type: string };
+  };
+  /** Which diagnostic row a body is, from what it carries (never its text). */
+  const rowOf = (raw: string): string => {
+    const b = JSON.parse(raw) as Sent;
+    const names = (b.tools ?? []).map((t) => t.name);
+    if (b.output_config?.format) return 'E';
+    if (names.length === 1) return 'C';
+    if (names.length === 10 && !names.includes('get_tasks')) return 'F1';
+    if (names.length === 10 && !names.includes('get_today')) return 'F3';
+    if (names.length === 12 && (b.tools ?? []).every((t) => t.strict === undefined)) return 'F4';
+    if (names.length === 12 && !/"format":"(?:date|uuid)"/.test(raw)) return 'F2';
+    if (names.length === 12) return 'D';
+    return '?';
+  };
+  const MESSAGE_TEXT = 'canary-diagnostic-free-text';
+  /** A Messages call refused as run #2's were; `named` puts a request path in the message. */
+  const refused =
+    (named: boolean): Handler =>
+    (_req, res) => {
+      const id = `req_dxrefused${++ids}`;
+      res.writeHead(400, { 'content-type': 'application/json', 'request-id': id });
+      res.end(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: named
+              ? `tools.4.custom.input_schema.properties.assignee: ${MESSAGE_TEXT} ${KEY}`
+              : `${MESSAGE_TEXT} ${KEY} ${CANARY}`,
+          },
+          request_id: id,
+        }),
+      );
+    };
+  /** The stub answers each row as `outcomes` says: accepted unless named. */
+  const answer = (outcomes: Record<string, 'refuse' | 'named'>) => {
+    stub.queue.length = 0;
+    for (let i = 0; i < 50; i++)
+      stub.queue.push((req, res, raw) => {
+        const o = req.method === 'POST' ? outcomes[rowOf(raw)] : undefined;
+        return o ? refused(o === 'named')(req, res, raw) : smart(req, res, raw);
+      });
+  };
+  const run = async (budgetMicros = buildPlan('tool-diagnostic').sessionCapUsdMicros) => {
+    const plan = buildPlan('tool-diagnostic');
+    const logged: string[] = [];
+    const before = await leftOpen();
+    const out = await executePlan(plan, {
+      gateway: gateway(),
+      actor: runner,
+      deps: { db },
+      budgetMicros,
+      log: (l) => logged.push(l),
+    });
+    const rec = await reconcile(
+      db,
+      out.results.flatMap((r) => r.attemptIds),
+    );
+    expectNothingLeftOpen(rec, before);
+    expect(rec.mismatched).toBe(0);
+    const ran = out.results.filter((r) => r.outcome !== 'not_run').map((r) => r.id);
+    const rows = stub.seen.filter((x) => x.method === 'POST').map((x) => rowOf(x.body));
+    const counted = stub.counts.map((x) => rowOf(x.body));
+    return { plan, out, rec, ran, rows, counted, logged };
+  };
+  /** G22: every Messages call is counted first, each count the same row as its call. */
+  const countedFirst = (r: Awaited<ReturnType<typeof run>>) => {
+    expect(r.counted).toEqual(r.rows);
+    for (const res of r.out.results)
+      if (res.outcome !== 'not_run') {
+        const kinds = res.evidence.map((e) => e.kind);
+        expect(kinds, res.id).toEqual(['count', 'message']);
+        expect(res.checks, res.id).toMatchObject({ countedFirst: true, modelCalls: 1 });
+      }
+  };
+  /** Not run and never reserved: its rule did not hold, or (`reason`) the session had stopped. */
+  const skipped = (r: Awaited<ReturnType<typeof run>>, ids: string[], reason = 'rule_skipped') => {
+    for (const id of ids)
+      expect(
+        r.out.results.find((x) => x.id === id),
+        id,
+      ).toMatchObject({
+        outcome: 'not_run',
+        reasons: [reason],
+        attemptIds: [],
+        evidence: [],
+      });
+  };
+
+  it('everything accepted: C, D, then E, which stops the session; no F row runs or reserves', async () => {
+    answer({});
+    const r = await run();
+    expect(r.ran).toEqual(['dx-c-one-tool', 'dx-d-all-tools', 'dx-e-tools-format']);
+    expect(r.rows).toEqual(['C', 'D', 'E']);
+    expect(r.out.stopped).toBe('dx-e-tools-format_passed');
+    skipped(
+      r,
+      ['dx-f1-no-unions', 'dx-f2-no-formats', 'dx-f3-no-empty', 'dx-f4-not-strict'],
+      'dx-e-tools-format_passed',
+    );
+    countedFirst(r);
+    // Only what ran was committed: three probes' maxima.
+    expect(r.out.committedMaxUsdMicros).toBe(3n * 266_112n);
+    expect(r.rec.attempts).toBe(3);
+  });
+
+  it('C refused: the session stops at once, one count and one call', async () => {
+    answer({ C: 'refuse' });
+    const r = await run();
+    expect(r.ran).toEqual(['dx-c-one-tool']);
+    expect(r.out.stopped).toBe('dx-c-one-tool_failed');
+    expect(r.rows).toEqual(['C']);
+    countedFirst(r);
+    for (const res of r.out.results.slice(1)) expect(res.outcome).toBe('not_run');
+  });
+
+  it('D refused with no path: F1, F2 in turn; F2 accepted stops it; E, F3 and F4 never run', async () => {
+    answer({ D: 'refuse', F1: 'refuse' });
+    const r = await run();
+    expect(r.ran).toEqual([
+      'dx-c-one-tool',
+      'dx-d-all-tools',
+      'dx-f1-no-unions',
+      'dx-f2-no-formats',
+    ]);
+    expect(r.rows).toEqual(['C', 'D', 'F1', 'F2']);
+    expect(r.out.stopped).toBe('dx-f2-no-formats_passed');
+    skipped(r, ['dx-e-tools-format']);
+    skipped(r, ['dx-f3-no-empty', 'dx-f4-not-strict'], 'dx-f2-no-formats_passed');
+    countedFirst(r);
+    // The refused call is never retried (a 400), and is charged conservatively.
+    const d = r.out.results.find((x) => x.id === 'dx-d-all-tools')!;
+    expect(d.reasons).toContain('bad_response');
+    const msg = d.evidence.find((e) => e.kind === 'message')!;
+    expect(msg).toMatchObject({ status: 400, usage: null, retried: false });
+    expect(msg.kind === 'message' && msg.costUsdMicros).toBe(133_056n);
+  });
+
+  it('D refused naming a path: the session stops there; no F row runs', async () => {
+    answer({ D: 'named' });
+    const r = await run();
+    expect(r.ran).toEqual(['dx-c-one-tool', 'dx-d-all-tools']);
+    expect(r.out.stopped).toBe('dx-d-all-tools_named');
+    countedFirst(r);
+    expect(r.logged.join('\n')).toContain('paths tools.4.custom.input_schema.properties.assignee');
+  });
+
+  it('every row refused: six probes, F4 last, sent without strict and counted as sent; exactly the plan’s maximum committed', async () => {
+    answer({ D: 'refuse', F1: 'refuse', F2: 'refuse', F3: 'refuse', F4: 'refuse' });
+    // The budget is the plan's exact maximum: the costliest sequence fits it.
+    const r = await run(buildPlan('tool-diagnostic').totalMaxUsdMicros);
+    expect(r.rows).toEqual(['C', 'D', 'F1', 'F2', 'F3', 'F4']);
+    expect(r.out.stopped).toBe('dx-f4-not-strict_failed');
+    expect(r.out.committedMaxUsdMicros).toBe(r.plan.totalMaxUsdMicros);
+    skipped(r, ['dx-e-tools-format']);
+    countedFirst(r);
+    const f4 = JSON.parse(stub.seen.filter((x) => x.method === 'POST').at(-1)!.body) as Sent;
+    const f4count = JSON.parse(stub.counts.at(-1)!.body) as Sent;
+    for (const t of [...f4.tools!, ...f4count.tools!]) expect('strict' in t).toBe(false);
+    expect(f4count.tools).toEqual(f4.tools);
+    // Every refused call charged at the per-call maximum: none assumed free.
+    expect(r.rec.recordedUsdMicros >= 5n * 133_056n).toBe(true);
+    const charged = r.out.results.flatMap((x) =>
+      x.evidence.filter((e) => e.kind === 'message' && e.status === 400),
+    );
+    expect(charged).toHaveLength(5);
+    for (const e of charged) expect(e.kind === 'message' && e.costUsdMicros).toBe(133_056n);
+  });
+
+  it('a budget below the next probe’s maximum stops the session before it; nothing reserved for it', async () => {
+    answer({ D: 'refuse', F1: 'refuse', F2: 'refuse', F3: 'refuse', F4: 'refuse' });
+    const r = await run(5n * 266_112n);
+    expect(r.rows).toEqual(['C', 'D', 'F1', 'F2', 'F3']);
+    expect(r.out.stopped).toBe('budget');
+    expect(r.out.results.find((x) => x.id === 'dx-f4-not-strict')!.attemptIds).toEqual([]);
+  });
+
+  it('the report’s matrix: one row a probe, the shape, the refusal’s fields and charges; no key, prompt or provider text', async () => {
+    answer({ D: 'refuse', F1: 'named' });
+    const since = new Date(Date.now() - 1_000);
+    const r = await run();
+    expect(r.out.stopped).toBe('dx-f1-no-unions_named');
+    const report = buildReport({
+      plan: r.plan,
+      budgetMicros: r.plan.sessionCapUsdMicros,
+      capNzd: 4,
+      run: r.out,
+      reconciliation: r.rec,
+      startedAt: since,
+      finishedAt: new Date(),
+    });
+    const json = JSON.parse(report.json) as {
+      diagnostic: {
+        id: string;
+        shape: string;
+        model: string | null;
+        toolChoice: string;
+        strictTools: boolean;
+        answerFormat: boolean;
+        outcome: string;
+        countPassed: boolean | null;
+        messageAttempted: boolean;
+        status: number | null;
+        category: string | null;
+        paths: string[];
+        requestId: string | null;
+        conservative: boolean;
+        chargedUsdMicros: string;
+      }[];
+      stoppedBecause: string;
+    };
+    expect(json.stoppedBecause).toBe('dx-f1-no-unions_named');
+    expect(json.diagnostic.map((d) => d.id)).toEqual(r.plan.probes.map((p) => p.id));
+    const row = (id: string) => json.diagnostic.find((d) => d.id === id)!;
+    expect(row('dx-c-one-tool')).toMatchObject({
+      model: MODELS.sonnet55.id,
+      toolChoice: 'auto',
+      strictTools: true,
+      answerFormat: false,
+      outcome: 'pass',
+      countPassed: true,
+      messageAttempted: true,
+      status: 200,
+      category: null,
+      conservative: false,
+    });
+    expect(row('dx-d-all-tools')).toMatchObject({
+      outcome: 'fail',
+      countPassed: true,
+      messageAttempted: true,
+      status: 400,
+      category: 'invalid_request_error',
+      paths: [],
+      requestId: expect.stringMatching(/^req_dxrefused\d+$/),
+      conservative: true,
+      chargedUsdMicros: '133056',
+    });
+    // F1 does not send get_tasks, so `assignee` is not a name this request
+    // sent: the path keeps it as `*` (diagnostics.ts, per request).
+    expect(row('dx-f1-no-unions').paths).toEqual(['tools.4.custom.input_schema.properties.*']);
+    expect(row('dx-e-tools-format')).toMatchObject({
+      outcome: 'not_run',
+      answerFormat: true,
+      countPassed: null,
+      messageAttempted: false,
+      chargedUsdMicros: '0',
+    });
+    expect(row('dx-f4-not-strict').strictTools).toBe(false);
+    expect(report.markdown).toContain('## Diagnostic matrix (ADR 0012 §53)');
+    expect(report.markdown).toContain('Stopped: dx-f1-no-unions_named.');
+    expect(report.markdown).toMatch(
+      /\| dx-d-all-tools \| D: [^|]+\| claude-sonnet-5-5 \| auto \| yes \| no \| fail \(bad_response\) \| passed \| yes \| 400 \| invalid_request_error \|/,
+    );
+    for (const text of [report.json, report.markdown, r.logged.join('\n')]) {
+      for (const s of [KEY, CANARY, MESSAGE_TEXT]) expect(text, s).not.toContain(s);
+      for (const p of r.plan.probes)
+        if (p.kind !== 'models' && p.kind !== 'turn')
+          expect(text).not.toContain(p.request.question);
+    }
+  });
+});
+
 describe('the live probes’ request shapes (a regression snapshot)', () => {
   const SNAPSHOT = join('tests', 'integration', 'kev-live-request-shapes.json');
   const sha = (v: unknown) =>
@@ -627,7 +894,7 @@ describe('the live probes’ request shapes (a regression snapshot)', () => {
   });
 
   it('every Messages API body and count body the verification-2 plan sends, as sent on the wire', async () => {
-    const plan = buildPlan();
+    const plan = buildPlan('verification-2');
     // A fresh synthetic adult, so the turn starts with no history whatever ran before.
     const id = `live-shapes-${randomUUID()}`;
     const email = `${id}@example.test`;

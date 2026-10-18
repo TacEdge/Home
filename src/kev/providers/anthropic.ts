@@ -213,6 +213,15 @@ export function probeParams(request: ProviderRequest, probe: ProbeOptions): Para
     if (probe.effort !== 'low') throw new Error('a probe effort is `low` only');
     params.output_config = { ...params.output_config, effort: 'low' };
   }
+  if (probe.strictTools !== undefined) {
+    if (probe.strictTools !== false) throw new Error('a probe’s strictTools is `false` only');
+    if (!params.tools?.length) throw new Error('a probe without tools has no strictness to change');
+    params.tools = params.tools.map((t) => {
+      const { strict: _strict, ...rest } = t as Anthropic.Messages.Tool;
+      void _strict;
+      return rest;
+    });
+  }
   if (probe.systemMessage !== undefined) {
     const t = probe.systemMessage;
     if (typeof t !== 'string' || t.trim() === '' || t.length > PROBE_SYSTEM_MAX_CHARS)

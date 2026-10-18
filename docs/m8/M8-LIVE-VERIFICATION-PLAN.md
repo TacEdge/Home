@@ -147,3 +147,23 @@ Run #1 (2026-10-17, US$0.14 recorded) passed G1, G8 and G20 and was refused at t
 - **Not repeated:** G8 (three tiers), G20 and the `low`-effort probes, which passed in run #1.
 - **Plan hash** (the dry run prints it; `node scripts/kev-live/run.mts`): the owner approves the hash printed on `main` after the PR merges. Run #1's `f7f82b9a…` is refused.
 - **Ledger:** US$199.855 of US$200 remains (run #1 recorded at its upper bound); a US$6 budget fits.
+
+## 13. The tool-use diagnostic (prepared 2026-10-18; not run)
+
+Run #2 (2026-10-17, US$0.778283 recorded) found Kev's tool-carrying Messages API calls refused with HTTP 400 under `tool_choice: auto` on all three models, after a 200 count, while the same prompt, tools and format under `none` were accepted (G19). The cause is not established (ADR 0012 §52). This session does not repeat the campaign: it isolates the refused feature with one call per probe on Sonnet 5.5, under the same conditions as before (synthetic prompts, the runner's own fixture-only database, the evaluation key, `HOME_REAL_DATA` unset, HOME's gateway, G22 before every call, US inference). Design: ADR 0012 §53.
+
+| Probe | Shape (Kev's system prompt, `tool_choice: auto`) | Runs if | Maximum |
+|---|---|---|---|
+| `dx-c-one-tool` | one strict tool (`search`), no format | always; stops when refused | US$0.266112 |
+| `dx-d-all-tools` | the 12 strict read tools, no format | C accepted; stops when refused naming a path | US$0.266112 |
+| `dx-e-tools-format` | the 12 strict read tools and the answer format | D accepted; always stops | US$0.266112 |
+| `dx-f1-no-unions` | D without `get_tasks`, `get_gaps` | D refused; stops when accepted or a path is named | US$0.266112 |
+| `dx-f2-no-formats` | D with every string `format` removed | D, F1 refused; the same | US$0.266112 |
+| `dx-f3-no-empty` | D without `get_today`, `get_calendar_health` | D, F1, F2 refused; the same | US$0.266112 |
+| `dx-f4-not-strict` | D without `strict` | D, F1, F2, F3 refused; always stops | US$0.266112 |
+| **Maximum exposure** | at most six run (C, D, F1–F4) | | **US$1.596672** (US$0.798336 with no retry; a 400 is never retried) |
+
+- **Not run:** rows A (no tools, no format: run #1's G8) and B (the format alone: G19, accepted twice in run #2).
+- **Money:** each refused call reports no usage and is charged the per-call maximum (US$0.133056), never assumed free. **Session cap US$2.50**, in the plan's hash: HOME's own cap is then NZ$4 (US$2.222222), which holds the peak hold of US$1.995840 (five probes settled at their maxima and the sixth's reservation); the smallest workable budget is US$2.23. The ledger's remainder is 199,076,717 µ$; Anthropic's bill for runs #1 and #2 is not reconciled.
+- **Plan hash** (from this branch's dry run): `2033f85e8ec7e043c177700eb1ea0c973ae9a09a0edb3199107bbd80d04af0ad`. The owner approves the hash printed on `main` after the PR merges; run #2's is refused.
+- **Gates:** none changes status. G7 on the other models, G9, G21 and the complete G22 wait for the cause and its correction.

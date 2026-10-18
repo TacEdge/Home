@@ -14,6 +14,7 @@ import {
   planProbes,
   PROBES,
   probeMaxUsdMicros,
+  probeTools,
   systemFor,
   TURN_NOW,
   type ProbeSpec,
@@ -52,7 +53,7 @@ describe('the plan’s maxima are the gateway’s', () => {
   });
 
   it('live verification #2: only G1, G7 on the three models, G19 and the turn; its maximum within its US$6 cap; G1 first', () => {
-    const plan = buildPlan();
+    const plan = buildPlan('verification-2');
     expect(plan.name).toBe('verification-2');
     expect(plan.probes.map((p) => p.id)).toEqual([
       'g1-models',
@@ -77,7 +78,7 @@ describe('the plan’s maxima are the gateway’s', () => {
   });
 
   it('a US$6 budget: HOME’s own cap (whole NZ$) holds the plan, and every reservation fits even if each earlier probe settled at its maximum', () => {
-    const plan = buildPlan();
+    const plan = buildPlan('verification-2');
     const cap = capUsdMicros(capNzdFor(plan.sessionCapUsdMicros));
     expect(capNzdFor(plan.sessionCapUsdMicros)).toBe(10);
     expect(cap).toBe(5_555_556n);
@@ -127,7 +128,7 @@ describe('the plan’s maxima are the gateway’s', () => {
       const request = {
         tier: p.tier,
         system: systemFor(p.request),
-        tools: [],
+        tools: probeTools(p.request),
         toolChoice: p.request.toolChoice,
         messages: [
           { role: 'user' as const, content: [{ type: 'text' as const, text: p.request.question }] },
@@ -190,9 +191,33 @@ describe('the plan hash', () => {
       'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
     );
     expect(buildPlan().canonical).toMatchObject({
-      plan: 'verification-2',
-      sessionCapUsdMicros: 6_000_000n,
+      plan: 'tool-diagnostic',
+      sessionCapUsdMicros: 2_500_000n,
     });
+    // The diagnostic's rules are part of the approved plan: a changed
+    // selection, rule or stop changes the hash.
+    const dx = buildPlan().hash;
+    const dxEdit = (id: string, f: (p: ProbeSpec) => ProbeSpec) =>
+      buildPlan(
+        'tool-diagnostic',
+        planProbes('tool-diagnostic').map((p) => (p.id === id ? f(p) : p)),
+      ).hash;
+    const dxChanged = [
+      dxEdit(
+        'dx-f1-no-unions',
+        (p) =>
+          ({
+            ...p,
+            request: { ...(p as { request: object }).request, tools: { omit: ['get_tasks'] } },
+          }) as unknown as ProbeSpec,
+      ),
+      dxEdit('dx-d-all-tools', (p) => ({ ...p, stopWhenNamed: undefined }) as ProbeSpec),
+      dxEdit('dx-e-tools-format', (p) => ({ ...p, runIf: undefined }) as ProbeSpec),
+      dxEdit('dx-f4-not-strict', (p) => ({ ...p, probe: {} }) as ProbeSpec),
+      dxEdit('dx-c-one-tool', (p) => ({ ...p, stopOnFail: false })),
+    ];
+    for (const h of dxChanged) expect(h).not.toBe(dx);
+    expect(new Set(dxChanged).size).toBe(dxChanged.length);
     for (const h of changed) expect(h).not.toBe(base);
     expect(new Set(changed).size).toBe(changed.length);
   });
@@ -248,12 +273,18 @@ describe('the dry run', () => {
     expect(out).toEqual({ exitCode: EXIT.ok, code: 'dry_run' });
     const plan = buildPlan();
     const text = lines.join('\n');
-    expect(plan.name).toBe('verification-2');
+    expect(plan.name).toBe('tool-diagnostic');
     expect(text).toContain(`plan hash: ${plan.hash}`);
-    expect(text).toContain('verification-2 (session cap US$6.00)');
-    expect(text).toContain('total maximum: US$4.52 (no retries: US$3.01)');
+    expect(text).toContain('tool-diagnostic (session cap US$2.50)');
+    expect(text).toContain('total maximum: US$1.60 (no retries: US$0.80)');
+    expect(text).toContain('exactly 1596672 µ$ on the costliest sequence the rules allow');
+    expect(text).toContain('peak reservation hold: US$2.00');
+    // The matrix: each probe's shape and its rules, never its question.
+    expect(text).toContain('dx-e-tools-format: E: ');
+    expect(text).toContain('runs if: dx-d-all-tools passed; stops: on pass, on fail');
+    expect(text).toContain('runs if: always; stops: on fail');
     for (const p of PROBES)
-      if (PLANS['verification-2'].probes.includes(p.id)) expect(text).toContain(p.id);
+      if (PLANS['tool-diagnostic'].probes.includes(p.id)) expect(text).toContain(p.id);
       else expect(text).not.toContain(`${p.id} `);
     expect(text).not.toContain(KEY);
     // No prompt is printed.
@@ -280,35 +311,42 @@ describe('the dry run', () => {
         reportDir: '/nonexistent',
         log: () => undefined,
       });
-    expect(await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).toEqual(
-      {
-        exitCode: EXIT.ok,
-        code: 'plan_checked',
-      },
-    );
-    // Live verification #2's cap is US$6: anything above it is refused,
-    // US$10 (run #1's ceiling) included, and so is a budget below the plan.
-    for (const above of ['6.01', '7', '10'])
+    expect(
+      await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }),
+    ).toEqual({
+      exitCode: EXIT.ok,
+      code: 'plan_checked',
+    });
+    // The diagnostic's cap is US$2.50: anything above it is refused, run
+    // #2's US$6 and run #1's US$10 included; so is a budget below the plan's
+    // maximum (US$1.50), and one whose whole-NZ$ cap cannot hold the peak
+    // (US$2.20 is NZ$3, US$1.666667, below US$1.995840), with no database.
+    expect(
+      (await run({ KEV_LIVE_BUDGET_USD: '2.23', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+    ).toBe(EXIT.ok);
+    expect(
+      (await run({ KEV_LIVE_BUDGET_USD: '2.20', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+    ).toBe(EXIT.cap);
+    for (const above of ['2.51', '3', '6', '7', '10'])
       expect(
         (await run({ KEV_LIVE_BUDGET_USD: above, KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }))
           .exitCode,
         above,
       ).toBe(EXIT.budget);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '4.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
+      (await run({ KEV_LIVE_BUDGET_USD: '1.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash })).exitCode,
     ).toBe(EXIT.budget);
-    // Run #1's approved hash is not this plan's.
+    // Run #2's plan's hash is not this plan's.
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '6',
-          KEV_LIVE_APPROVED_PLAN_HASH:
-            'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
+          KEV_LIVE_BUDGET_USD: '2.50',
+          KEV_LIVE_APPROVED_PLAN_HASH: buildPlan('verification-2').hash,
         })
       ).exitCode,
     ).toBe(EXIT.plan_hash);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
+      (await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: 'a'.repeat(64) }))
         .exitCode,
     ).toBe(EXIT.plan_hash);
     expect(
@@ -319,13 +357,13 @@ describe('the dry run', () => {
         .exitCode,
     ).toBe(EXIT.budget);
     expect(
-      (await run({ KEV_LIVE_BUDGET_USD: '6', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
+      (await run({ KEV_LIVE_BUDGET_USD: '2.50', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }, null))
         .exitCode,
     ).toBe(EXIT.ledger);
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '6',
+          KEV_LIVE_BUDGET_USD: '2.50',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           KEV_EVAL_PROVIDER_KEY: 'test-key-not-real-0000',
         })
@@ -334,7 +372,7 @@ describe('the dry run', () => {
     expect(
       (
         await run({
-          KEV_LIVE_BUDGET_USD: '6',
+          KEV_LIVE_BUDGET_USD: '2.50',
           KEV_LIVE_APPROVED_PLAN_HASH: plan.hash,
           VERCEL: '1',
         })

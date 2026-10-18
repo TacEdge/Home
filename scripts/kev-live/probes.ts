@@ -7,7 +7,7 @@ import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { INFERENCE_GEO, LIMITS, TIERS } from '@/kev/config';
 import { handle, type KevEvent } from '@/kev/orchestrator';
 import type { ProbeGateway } from '@/kev/providers/anthropic';
-import { diagnosticLine } from '@/kev/providers/diagnostics';
+import { diagnosticLine, type ProbeErrorDetail } from '@/kev/providers/diagnostics';
 import {
   ProviderError,
   type NeutralToolResult,
@@ -17,9 +17,16 @@ import {
   type ProviderResult,
 } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
-import { toolDefinitions } from '@/kev/tools/registry';
 import type { UserActor } from '@/trust/actor';
-import { SYNTHETIC_TOOL_RESULT, systemFor, TURN_NOW, type Plan, type ProbeSpec } from './plan';
+import {
+  probeTools,
+  ruleHolds,
+  SYNTHETIC_TOOL_RESULT,
+  systemFor,
+  TURN_NOW,
+  type Plan,
+  type ProbeSpec,
+} from './plan';
 
 // Runs the plan's probes, one after another (M8 live-verification plan §7,
 // §11): each model probe on its own attempt, reserved through HOME's
@@ -79,7 +86,7 @@ function requestFor(
   return Object.freeze({
     tier: p.tier,
     system: systemFor(r),
-    tools: Object.freeze(r.tools === 'kev' ? toolDefinitions({ escalate: false }) : []),
+    tools: probeTools(r),
     toolChoice: r.toolChoice,
     messages: Object.freeze([...messages]),
     ...(r.outputFormat === 'answer' ? { outputFormat: ANSWER_JSON_SCHEMA } : {}),
@@ -288,6 +295,17 @@ async function turnProbe(
   return { outcome: reasons.length === 0 ? 'pass' : 'fail', reasons, checks, stop: null };
 }
 
+/** Whether every probe a rule names ran and ended as it requires. */
+
+/**
+ * Whether a refusal's recognised detail names a request parameter below the
+ * top level (`tools.3.custom.input_schema…`, `output_config.format…`): the
+ * provider said which part it refused, so the diagnostic has its cause.
+ */
+export function namesRequestPath(error: ProbeErrorDetail | null): boolean {
+  return (error?.message?.paths ?? []).some((p) => p.split('.').length >= 2);
+}
+
 /** Runs the plan, in order, stopping early at a stopping failure or the budget. */
 export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutcome> {
   const results: ProbeResult[] = [];
@@ -301,6 +319,23 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       tier: 'tier' in p ? p.tier : null,
       maxUsdMicros: p.maxUsdMicros,
     };
+    // The diagnostic's adaptive rules: a probe whose condition does not hold
+    // is not run, and costs nothing; the session goes on.
+    const rule = 'runIf' in p ? p.runIf : undefined;
+    if (!stopped && rule && !ruleHolds(rule, (id) => results.find((r) => r.id === id)?.outcome)) {
+      results.push(
+        Object.freeze({
+          ...base,
+          outcome: 'not_run',
+          reasons: ['rule_skipped'],
+          checks: {},
+          attemptIds: [],
+          evidence: [],
+        }),
+      );
+      ctx.log?.(`${p.id}: not run (rule_skipped)`);
+      continue;
+    }
     if (stopped || committed + p.maxUsdMicros > ctx.budgetMicros) {
       stopped ??= 'budget';
       results.push(
@@ -382,6 +417,15 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
     for (const e of evidence)
       if (e.error) ctx.log?.(`  ${e.kind} ${e.model}: ${diagnosticLine(e.error, e.error.message)}`);
     if (attempted.stop) stopped = attempted.stop;
+    else if (attempted.outcome === 'pass' && 'stopOnPass' in p && p.stopOnPass)
+      stopped = `${p.id}_passed`;
+    else if (
+      attempted.outcome === 'fail' &&
+      'stopWhenNamed' in p &&
+      p.stopWhenNamed &&
+      evidence.some((e) => namesRequestPath(e.error))
+    )
+      stopped = `${p.id}_named`;
     else if (attempted.outcome === 'fail' && p.stopOnFail) stopped = `${p.id}_failed`;
   }
   return Object.freeze({

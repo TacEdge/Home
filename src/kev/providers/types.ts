@@ -226,6 +226,13 @@ export type ProbeOptions = Readonly<{
   systemMessage?: string;
   /** G20: abort the stream after its first event (`message_start`). */
   abortAfterFirstEvent?: boolean;
+  /**
+   * The tool-use diagnostic (ADR 0012 §53): send the request's tools without
+   * `strict: true`, to tell a strict-compilation refusal from one of the
+   * definitions themselves. HOME's own Zod validation of every tool input is
+   * unchanged; only the provider's guarantee of schema-valid inputs is off.
+   */
+  strictTools?: false;
 }>;
 
 /** One HTTP exchange of the probe path, as the runner's report records it: never a body or header but the request id. */
