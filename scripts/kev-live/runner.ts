@@ -64,9 +64,40 @@ export function planLines(plan: Plan): string[] {
     lines.push(
       `${p.id.padEnd(22)} ${p.gates.join(' ').padEnd(20)} ${('tier' in p ? p.tier : '—').padEnd(5)} ${usd(p.maxUsdMicros).padStart(20)}  ${usd(p.maxNoRetryUsdMicros).padStart(18)}`,
     );
+  const matrix = plan.probes.filter((p) => 'shape' in p && p.shape);
+  if (matrix.length > 0) {
+    lines.push(
+      '',
+      'diagnostic matrix (Sonnet 5.5 unless named; tool_choice auto; each probe one call):',
+    );
+    for (const p of matrix) {
+      if (!('shape' in p)) continue;
+      const when = p.runIf
+        ? [
+            ...(p.runIf.passed ?? []).map((id) => `${id} passed`),
+            ...(p.runIf.failed ?? []).map((id) => `${id} failed`),
+          ].join(' and ')
+        : 'always';
+      const stops = [
+        p.stopOnPass ? 'on pass' : null,
+        p.stopOnFail ? 'on fail' : null,
+        p.stopWhenNamed ? 'when the provider names a path' : null,
+      ].filter(Boolean);
+      lines.push(
+        `  ${p.id}: ${p.shape}`,
+        `    runs if: ${when}; stops: ${stops.length ? stops.join(', ') : 'never'}`,
+      );
+    }
+  }
   lines.push(
     '',
     `total maximum: US$${usd(plan.totalMaxUsdMicros)} (no retries: US$${usd(plan.totalNoRetryUsdMicros)})`,
+    ...(plan.listedMaxUsdMicros !== plan.totalMaxUsdMicros
+      ? [
+          `  exactly ${plan.totalMaxUsdMicros} µ$ on the costliest sequence the rules allow; every listed probe would be US$${usd(plan.listedMaxUsdMicros)}, which no sequence runs`,
+        ]
+      : []),
+    `peak reservation hold: US$${usd(plan.peakHoldUsdMicros)} (HOME's whole-NZ$ cap must hold it)`,
     `plan hash: ${plan.hash}`,
   );
   return lines;
@@ -89,6 +120,9 @@ export async function runMode(
     const budget = parseBudgetUsd(env.KEV_LIVE_BUDGET_USD);
     assertBudgetWithinPlanCap(budget, plan.sessionCapUsdMicros);
     assertBudgetCovers(budget, plan.totalMaxUsdMicros);
+    // HOME's whole-NZ$ reservation cap for this budget must hold the plan's
+    // peak hold, checked here without a database (ADR 0012 §53).
+    assertCapCovers(capUsdMicros(capNzdFor(budget)), 0n, plan.peakHoldUsdMicros);
     assertPlanHash(env.KEV_LIVE_APPROVED_PLAN_HASH, plan.hash);
     if (opts.ledgerText === null)
       throw new LiveRefusal('ledger', 'The campaign ledger is missing.');
@@ -115,7 +149,7 @@ export async function runMode(
       const spend = await getSpendReport(systemActor, { db });
       if (spend.capUsdMicros !== capUsdMicros(capNzd))
         throw new LiveRefusal('cap', 'HOME’s bookkeeping does not see the run’s cap.');
-      assertCapCovers(spend.capUsdMicros, spend.count.countedUsdMicros, plan.totalMaxUsdMicros);
+      assertCapCovers(spend.capUsdMicros, spend.count.countedUsdMicros, plan.peakHoldUsdMicros);
       opts.log(`HOME reservation cap NZ$${capNzd} (US$${usd(spend.capUsdMicros)})`);
       const key = readKey(env);
       const gateway = opts.gatewayFor ? opts.gatewayFor(key) : createProbeGateway({ apiKey: key });

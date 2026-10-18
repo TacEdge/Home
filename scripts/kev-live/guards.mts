@@ -285,7 +285,7 @@ export function capUsdMicros(nzd: number): bigint {
   return (2n * numerator + NZD_PER_USD.num) / (2n * NZD_PER_USD.num);
 }
 
-/** The run's cap, less what the runner's database already counts, must hold the plan's maximum. */
+/** The run's cap, less what the runner's database already counts, must hold the plan's peak hold (or maximum). */
 export function assertCapCovers(
   capMicros: bigint,
   countedMicros: bigint,
@@ -294,7 +294,7 @@ export function assertCapCovers(
   if (countedMicros + planMaxMicros > capMicros)
     throw new LiveRefusal(
       'cap',
-      `HOME's reservation cap for the run (US$${usd(capMicros)}) less what its database already counts (US$${usd(countedMicros)}) cannot hold the plan's maximum (US$${usd(planMaxMicros)}).`,
+      `HOME's reservation cap for the run (US$${usd(capMicros)}) less what its database already counts (US$${usd(countedMicros)}) cannot hold the plan's peak (US$${usd(planMaxMicros)}).`,
     );
 }
 

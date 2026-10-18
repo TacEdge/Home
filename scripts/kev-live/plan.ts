@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { GEO_MULTIPLIER, INFERENCE_GEO, LIMITS, MODELS, TIERS } from '@/kev/config';
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
-import type { ProbeOptions } from '@/kev/providers/types';
+import type { ProbeOptions, ProviderToolDefinition } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
 import { toolDefinitions } from '@/kev/tools/registry';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
@@ -18,18 +18,34 @@ import { SESSION_CEILING_USD_MICROS } from './guards.mts';
 // it sends changes it, and the runner refuses a hash that does not match.
 // Synthetic prompts only, about the fixture family (docs/concepts/README.md).
 
-/** Bumped with any change to the probes or how they run (2: named plans, live verification #2). */
-export const PLAN_VERSION = 2;
+/**
+ * Bumped with any change to the probes or how they run (2: named plans, live
+ * verification #2; 3: tool selections, adaptive rules and per-probe request
+ * digests, the tool-use diagnostic, ADR 0012 §53).
+ */
+export const PLAN_VERSION = 3;
 
 /** The fixture family's scenario instant (tests/integration/kev-fixture.ts's NOW): what the turn probe's tools read. */
 export const TURN_NOW = '2026-10-13T18:03:00.000Z';
+
+/**
+ * A selection from Kev's tool definitions (no `escalate`), for the tool-use
+ * diagnostic: only the named tools, all but the named ones, and optionally
+ * every string `format` taken out of their schemas. HOME's own Zod schemas
+ * are untouched: only the copy sent to the provider differs.
+ */
+export type ToolSelection = Readonly<{
+  only?: readonly string[];
+  omit?: readonly string[];
+  dropFormats?: true;
+}>;
 
 /** One model request a probe sends, before any tool round. */
 export type ProbeRequest = Readonly<{
   /** Kev's own system prompt, or a short synthetic one. */
   system: 'kev' | 'synthetic';
-  /** Kev's tool definitions (no `escalate`), or none. */
-  tools: 'kev' | 'none';
+  /** Kev's tool definitions (no `escalate`), a selection of them, or none. */
+  tools: 'kev' | 'none' | ToolSelection;
   toolChoice: 'auto' | 'none';
   /** Kev's answer schema as structured output, or none. */
   outputFormat: 'answer' | 'none';
@@ -60,6 +76,16 @@ export type ProbeSpec = Readonly<
       probe: ProbeOptions;
       expect: string;
       stopOnFail: boolean;
+      /** The diagnostic's request-shape identifier (matrix row), when it is one. */
+      shape?: string;
+      /** The hypothesis the probe tests and how each outcome reads (diagnostic only). */
+      hypothesis?: string;
+      /** Run only when each named probe ran and ended so; otherwise not run (`rule_skipped`). */
+      runIf?: Readonly<{ failed?: readonly string[]; passed?: readonly string[] }>;
+      /** Stop the session when this probe passes: the cause is isolated. */
+      stopOnPass?: boolean;
+      /** Stop the session when this probe fails with a recognised request path: the provider named the cause. */
+      stopWhenNamed?: boolean;
     }
   | {
       id: string;
@@ -92,6 +118,188 @@ const plain = (question: string): ProbeRequest => ({
 const G7_QUESTION = 'What’s on for the family this Saturday?';
 const G8_QUESTION = 'Reply with the single word READY.';
 const G8_SYSTEM = 'Reply in lower case only.';
+
+// The tool-use diagnostic (ADR 0012 §53): why the provider refused Kev's
+// tool-carrying requests with HTTP 400 in live verification #2. One call
+// each, on Sonnet 5.5 (the fast tier), with Kev's own system prompt and
+// `tool_choice: auto`, bisecting the refused request (every strict read
+// tool and the answer format) from the smallest tool-carrying request up.
+// What run #2 already established is not repeated: a plain request (run
+// #1's G8) and Kev's whole prompt with every strict tool and the answer
+// format under `tool_choice: none` (G19, accepted twice), which holds the
+// matrix's rows A (no tools, no format) and B (the format alone).
+const DX_QUESTION = 'Which synthetic records are listed for this Saturday?';
+const dx = (tools: ProbeRequest['tools'], outputFormat: 'answer' | 'none'): ProbeRequest => ({
+  system: 'kev',
+  tools,
+  toolChoice: 'auto',
+  outputFormat,
+  question: DX_QUESTION,
+});
+/** Kev's read tools whose input schemas carry a union (`anyOf`): `get_tasks.assignee`, `get_gaps.scope`. */
+const UNION_TOOLS = ['get_tasks', 'get_gaps'] as const;
+/** Kev's read tools that take no input (`properties: {}`). */
+const EMPTY_TOOLS = ['get_today', 'get_calendar_health'] as const;
+const DX_PROBE: ProbeOptions = {};
+const DX_GATES = ['DX', 'G22', 'G10'] as const;
+
+export const DIAGNOSTIC_PROBES = [
+  {
+    id: 'dx-c-one-tool',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape: 'C: one strict tool (search), auto, no answer format',
+    hypothesis:
+      'A strict tool with one required string, nothing else. Refused: strict tool use under tool_choice auto is refused with this request’s settings whatever the schema (stop; the recognised path and signals say which setting). Accepted: the cause is in Kev’s tool set or the answer format.',
+    request: dx({ only: ['search'] }, 'none'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200); counted first; US inference',
+    stopOnFail: true,
+  },
+  {
+    id: 'dx-d-all-tools',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape: 'D: every strict read tool, auto, no answer format',
+    hypothesis:
+      'Kev’s 12 strict read tools, no format. Refused: the cause is in the tool set (the F rows narrow it, unless the provider names the path). Accepted: the tools alone compile; E tests them with the format.',
+    request: dx('kev', 'none'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200); counted first; US inference',
+    stopOnFail: false,
+    runIf: { passed: ['dx-c-one-tool'] },
+    stopWhenNamed: true,
+  },
+  {
+    id: 'dx-e-tools-format',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape: 'E: every strict read tool and the answer format, auto (run #2’s refused first call)',
+    hypothesis:
+      'Run only when D was accepted. Refused: the combination of strict tools and the answer format under tool_choice auto is the cause. Accepted: run #2’s first-call refusal does not reproduce in one call; the difference is elsewhere (stop and report).',
+    request: dx('kev', 'answer'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200); counted first; US inference',
+    stopOnFail: true,
+    runIf: { passed: ['dx-d-all-tools'] },
+    stopOnPass: true,
+  },
+  {
+    id: 'dx-f1-no-unions',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape:
+      'F1: every strict read tool but the two with unions (get_tasks, get_gaps), auto, no format',
+    hypothesis:
+      'Run only when D was refused. Accepted: a union (anyOf with a const branch beside a uuid format) is the cause (stop). Refused: not the unions alone.',
+    request: dx({ omit: UNION_TOOLS }, 'none'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200) isolates the cause',
+    stopOnFail: false,
+    runIf: { failed: ['dx-d-all-tools'] },
+    stopOnPass: true,
+    stopWhenNamed: true,
+  },
+  {
+    id: 'dx-f2-no-formats',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape:
+      'F2: every strict read tool with every string format (date, uuid) removed, auto, no format',
+    hypothesis:
+      'Run only when D and F1 were refused. Accepted: a string format is the cause (stop). Refused: not the formats alone.',
+    request: dx({ dropFormats: true }, 'none'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200) isolates the cause',
+    stopOnFail: false,
+    runIf: { failed: ['dx-d-all-tools', 'dx-f1-no-unions'] },
+    stopOnPass: true,
+    stopWhenNamed: true,
+  },
+  {
+    id: 'dx-f3-no-empty',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape:
+      'F3: every strict read tool but the two with no input (get_today, get_calendar_health), auto, no format',
+    hypothesis:
+      'Run only when D, F1 and F2 were refused. Accepted: a tool with an empty input schema is the cause (stop). Refused: not those alone.',
+    request: dx({ omit: EMPTY_TOOLS }, 'none'),
+    probe: DX_PROBE,
+    expect: 'accepted (HTTP 200) isolates the cause',
+    stopOnFail: false,
+    runIf: { failed: ['dx-d-all-tools', 'dx-f1-no-unions', 'dx-f2-no-formats'] },
+    stopOnPass: true,
+    stopWhenNamed: true,
+  },
+  {
+    id: 'dx-f4-not-strict',
+    gates: DX_GATES,
+    kind: 'single',
+    tier: 'fast',
+    shape: 'F4: every read tool, not strict, auto, no format',
+    hypothesis:
+      'Run only when D, F1, F2 and F3 were refused. Accepted: strict compilation of the whole set is refused (its combined complexity), not one feature. Refused: the tool definitions are refused even unstrict (names, descriptions, size).',
+    request: dx('kev', 'none'),
+    probe: { strictTools: false },
+    expect: 'accepted (HTTP 200) isolates the cause',
+    stopOnFail: true,
+    runIf: { failed: ['dx-d-all-tools', 'dx-f1-no-unions', 'dx-f2-no-formats', 'dx-f3-no-empty'] },
+    stopOnPass: true,
+  },
+] satisfies ProbeSpec[];
+
+/** A string `format` taken out of a JSON Schema, at keyword positions only (never a property named `format`). */
+export function withoutFormats(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(withoutFormats);
+  if (schema === null || typeof schema !== 'object') return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (k === 'format' && typeof v === 'string') continue;
+    if (k === 'properties' && v && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = Object.fromEntries(
+        Object.entries(v as Record<string, unknown>).map(([n, sub]) => [n, withoutFormats(sub)]),
+      );
+      continue;
+    }
+    out[k] = withoutFormats(v);
+  }
+  return out;
+}
+
+/**
+ * The tool definitions a probe request sends: none, Kev's read tools (no
+ * `escalate`), or a selection of them. A selection naming a tool Kev does
+ * not have, or leaving none, is refused: the plan never sends what it
+ * does not describe.
+ */
+export function probeTools(r: ProbeRequest): readonly ProviderToolDefinition[] {
+  if (r.tools === 'none') return [];
+  const all = toolDefinitions({ escalate: false });
+  if (r.tools === 'kev') return all;
+  const sel = r.tools;
+  const names = new Set(all.map((t) => t.name));
+  for (const n of [...(sel.only ?? []), ...(sel.omit ?? [])])
+    if (!names.has(n)) throw new Error(`a tool selection names ${n}, which Kev does not have`);
+  let picked = all;
+  if (sel.only) picked = picked.filter((t) => sel.only!.includes(t.name));
+  if (sel.omit) picked = picked.filter((t) => !sel.omit!.includes(t.name));
+  if (picked.length === 0) throw new Error('a tool selection leaves no tool');
+  if (sel.dropFormats)
+    picked = picked.map((t) =>
+      Object.freeze({
+        ...t,
+        inputSchema: Object.freeze(withoutFormats(t.inputSchema) as Record<string, unknown>),
+      }),
+    );
+  return Object.freeze(picked);
+}
 
 /** The probes, in the plan's order (§11 step 6): G1 → G22 → G7, G10, G19 → G20 → G8 → Haiku → G9/G21. */
 export const PROBES: readonly ProbeSpec[] = Object.freeze([
@@ -229,6 +437,7 @@ export const PROBES: readonly ProbeSpec[] = Object.freeze([
       'a turn with at least one tool round and no provider error; every request body extends the one before; thinking blocks replayed',
     stopOnFail: false,
   },
+  ...DIAGNOSTIC_PROBES,
 ] satisfies ProbeSpec[]);
 
 /**
@@ -243,8 +452,11 @@ export const PROBES: readonly ProbeSpec[] = Object.freeze([
  * `low` effort) are not repeated.
  */
 export const PLANS = Object.freeze({
+  // Run #1's plan: every verification probe, the diagnostic's excepted.
   full: Object.freeze({
-    probes: Object.freeze(PROBES.map((p) => p.id)),
+    probes: Object.freeze(
+      PROBES.map((p) => p.id).filter((id) => !DIAGNOSTIC_PROBES.some((d) => d.id === id)),
+    ),
     sessionCapUsdMicros: SESSION_CEILING_USD_MICROS,
   }),
   'verification-2': Object.freeze({
@@ -259,12 +471,21 @@ export const PLANS = Object.freeze({
     // The owner's planning limit for session 2 (2026-10-17): US$6.
     sessionCapUsdMicros: 6_000_000n,
   }),
+  'tool-diagnostic': Object.freeze({
+    probes: Object.freeze(DIAGNOSTIC_PROBES.map((p) => p.id)),
+    // At most six probes run on any path (C, D, F1–F4): US$1.596672 at
+    // most. A US$2.50 budget is NZ$4 in HOME's whole-NZ$ reservation cap
+    // (US$2.222222), which holds the peak (five probes settled at their
+    // maxima and the sixth's US$0.665280 reservation, US$1.995840); a
+    // budget below US$2.23 is NZ$3 and cannot (ADR 0012 §53; tested).
+    sessionCapUsdMicros: 2_500_000n,
+  }),
 } satisfies Record<string, { probes: readonly string[]; sessionCapUsdMicros: bigint }>);
 
 export type PlanName = keyof typeof PLANS;
 
 /** The plan the runner runs now. */
-export const SESSION_PLAN: PlanName = 'verification-2';
+export const SESSION_PLAN: PlanName = 'tool-diagnostic';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {
@@ -313,6 +534,49 @@ export function probeMaxNoRetryUsdMicros(p: ProbeSpec): bigint {
   return BigInt(plannedCalls(p)) * perCallMax(p.tier);
 }
 
+/** A probe's run rule (ADR 0012 §53): every named probe failed, and every other passed. */
+export function ruleHolds(
+  rule: Readonly<{ failed?: readonly string[]; passed?: readonly string[] }>,
+  outcomeOf: (id: string) => string | undefined,
+): boolean {
+  return (
+    (rule.failed ?? []).every((id) => outcomeOf(id) === 'fail') &&
+    (rule.passed ?? []).every((id) => outcomeOf(id) === 'pass')
+  );
+}
+
+/** The largest hold a probe takes at once: an attempt's reservation; a turn's ceiling. */
+export function probeHoldUsdMicros(p: ProbeSpec): bigint {
+  if (p.kind === 'models') return 0n;
+  if (p.kind === 'turn') return LIMITS.turnCeilingUsdMicros;
+  return attemptReservation(p.tier);
+}
+
+/**
+ * Every sequence of probes the plan's rules can run, each probe passing or
+ * failing (executePlan's own rules: a run rule, then stop on a pass or a
+ * failure as the probe says; stopping when the provider names a path only
+ * ever shortens a sequence, and a probe that does not run costs nothing).
+ */
+export function reachablePaths<P extends ProbeSpec>(probes: readonly P[]): P[][] {
+  const paths: P[][] = [];
+  const walk = (i: number, ran: P[], outcomes: ReadonlyMap<string, string>) => {
+    const p = probes[i];
+    if (!p) return void paths.push(ran);
+    if ('runIf' in p && p.runIf && !ruleHolds(p.runIf, (id) => outcomes.get(id)))
+      return walk(i + 1, ran, outcomes);
+    for (const outcome of ['pass', 'fail'] as const) {
+      const next = [...ran, p];
+      const stops =
+        outcome === 'pass' ? 'stopOnPass' in p && p.stopOnPass === true : p.stopOnFail === true;
+      if (stops) paths.push(next);
+      else walk(i + 1, next, new Map(outcomes).set(p.id, outcome));
+    }
+  };
+  walk(0, [], new Map());
+  return paths;
+}
+
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** JSON with sorted keys and bigints as strings: one text for one plan. */
@@ -335,9 +599,21 @@ export type Plan = Readonly<{
   canonical: Record<string, unknown>;
   hash: string;
   name: PlanName;
-  probes: readonly (ProbeSpec & { maxUsdMicros: bigint; maxNoRetryUsdMicros: bigint })[];
+  probes: readonly (ProbeSpec & {
+    maxUsdMicros: bigint;
+    maxNoRetryUsdMicros: bigint;
+    requestDigest?: string;
+  })[];
+  /** The most any sequence the rules can run may cost: the run's maximum exposure. */
   totalMaxUsdMicros: bigint;
   totalNoRetryUsdMicros: bigint;
+  /** Every listed probe at its maximum, as if no rule skipped one (never run as such). */
+  listedMaxUsdMicros: bigint;
+  /**
+   * The most HOME's reservation cap must hold at once on any sequence: what
+   * earlier probes settled at their maxima, plus the next probe's hold.
+   */
+  peakHoldUsdMicros: bigint;
   /** This plan's session cap: the budget may not exceed it (never above US$10). */
   sessionCapUsdMicros: bigint;
 }>;
@@ -355,10 +631,25 @@ export function buildPlan(
       ...p,
       maxUsdMicros: probeMaxUsdMicros(p),
       maxNoRetryUsdMicros: probeMaxNoRetryUsdMicros(p),
+      ...('request' in p ? { requestDigest: requestDigest(p.request, p.probe) } : {}),
     }),
   );
-  const totalMaxUsdMicros = priced.reduce((a, p) => a + p.maxUsdMicros, 0n);
-  const totalNoRetryUsdMicros = priced.reduce((a, p) => a + p.maxNoRetryUsdMicros, 0n);
+  const paths = reachablePaths(priced);
+  const most = (f: (path: (typeof priced)[number][]) => bigint) =>
+    paths.reduce((a, path) => (f(path) > a ? f(path) : a), 0n);
+  const sum = (path: readonly { maxUsdMicros: bigint }[]) =>
+    path.reduce((a, p) => a + p.maxUsdMicros, 0n);
+  const totalMaxUsdMicros = most(sum);
+  const totalNoRetryUsdMicros = most((path) =>
+    path.reduce((a, p) => a + p.maxNoRetryUsdMicros, 0n),
+  );
+  const listedMaxUsdMicros = sum(priced);
+  const peakHoldUsdMicros = most((path) =>
+    path.reduce((a, p, i) => {
+      const hold = sum(path.slice(0, i)) + probeHoldUsdMicros(p);
+      return hold > a ? hold : a;
+    }, 0n),
+  );
   const canonical = {
     format: 'home-kev-live-plan',
     version: PLAN_VERSION,
@@ -385,6 +676,7 @@ export function buildPlan(
     turnNow: TURN_NOW,
     probes: priced,
     totalMaxUsdMicros,
+    peakHoldUsdMicros,
   };
   return Object.freeze({
     canonical,
@@ -393,8 +685,28 @@ export function buildPlan(
     probes: Object.freeze(priced),
     totalMaxUsdMicros,
     totalNoRetryUsdMicros,
+    listedMaxUsdMicros,
+    peakHoldUsdMicros,
     sessionCapUsdMicros,
   });
+}
+
+/**
+ * A digest of the request shape a probe sends (its system prompt, the exact
+ * tool definitions with their strictness, tool_choice and the answer
+ * format), so the hash binds what each probe sends, not only how it is
+ * described.
+ */
+export function requestDigest(r: ProbeRequest, probe: ProbeOptions): string {
+  return sha256(
+    canonicalJson({
+      system: sha256(systemFor(r)),
+      tools: probeTools(r),
+      strictTools: probe.strictTools !== false,
+      toolChoice: r.toolChoice,
+      outputFormat: r.outputFormat === 'answer' ? ANSWER_JSON_SCHEMA : null,
+    }),
+  );
 }
 
 /** The system prompt a probe request sends. */
