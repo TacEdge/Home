@@ -62,6 +62,18 @@
       "anthropicBilling": "NOT RECONCILED: nothing is expected on the provider's Usage and Cost for this run; unconfirmed.",
       "reservations": "None taken: the turn was refused at admission, before HOME reserves an attempt.",
       "outcome": "FAILED before reaching Opus, an evaluation harness defect, not a model result: the deep smoke plan's one scenario turn was refused with turn_in_flight. The evaluation world left each adult's private conversation ending in their own unanswered message, written seconds earlier on the real clock, which HOME reads as a turn in flight (contract §7.2, L12); the stub and scripted suites moved the database clock years ahead and never saw it. Corrected in the fixture (ADR 0012 §60). No gate result; G7, G9, G21 and G22 on deep stay not verified."
+    },
+    {
+      "date": "2026-10-19",
+      "workflowRun": "Kev live verification #6 (run 39189762049, commit f9eba68)",
+      "planHash": "47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775",
+      "plannedMaxUsdMicros": "1500000",
+      "recordedUsdMicros": "248311",
+      "recordedBasis": "Owner-supplied evidence (the owner's reading of report.json, artifact 12160000016, in the brief of 2026-10-19): HOME recorded US$0.248311 (248,311 µ$); reservations reconciled. Not re-read in the PR that records it: GitHub serves workflow artifacts from a storage host the build environment cannot reach. First-party: the workflow run, its owner approval in kev-evals and the job's success (GitHub API).",
+      "providerListPrice": "Not supplied; the report's at-list-prices figure is in report.json. Equal to HOME's recorded figure unless a call was charged conservatively.",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "One deep attempt (Opus 5.5), held to the US$1.50 turn ceiling and settled; reconciled (owner-supplied).",
+      "outcome": "PASSED: the deep smoke plan (ADR 0012 §59). One orchestrated deep turn on realistic.weekend_look through kev.handle(), Opus 5.5 on every call: five model calls (three tool rounds with five tool calls, then the answer phase and one regeneration). The first answer was refused by HOME's checker with answer.schema; the regeneration was accepted with citations. 35.64 s to the checked answer (owner-supplied). The job's success proves every smoke and scenario check passed (ADR 0012 §61)."
     }
   ]
 }

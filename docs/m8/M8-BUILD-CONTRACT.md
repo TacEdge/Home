@@ -865,6 +865,31 @@ Evidence sources: the job's success (GitHub API; first-party) proves the turn pr
 | G22 | A count before every authorised call; one synthetic count compared with the call's `message_start` input | Count before all five calls (job success). **The comparison (`maxCountDelta`) is unread** | Count-first verified; **the complete gate NOT VERIFIED** until the comparison is read |
 | G3, G4, G16 (Neon), G17 | Preview | Not exercised | **NOT VERIFIED** |
 
+**Live verification #6 update (2026-10-19; run 39189762049 on f9eba68; ADR 0012 §61; the `deep-smoke` plan, hash `47710b79…`).** One orchestrated deep turn (Opus 5.5) on `realistic.weekend_look`, asked by the synthetic Sam: five calls (three tool rounds with five tool calls, then the answer phase and one regeneration). The first answer was refused with `answer.schema`; the regeneration was accepted. 35.64 s to the checked answer. HOME recorded 248,311 µ$; reservations reconciled. Anthropic's bill is NOT RECONCILED. Scope: **deep tier only, n = 1.** (Live verification #5, the same plan, was refused before any call by an evaluation-world defect: ADR 0012 §60.)
+
+Evidence sources:
+- **First-party.** The run's owner approval in `kev-evals` and the job's success, from the GitHub API. The job succeeds only when the smoke probe passed every check:
+  - every call on Opus 5.5, each counted first, each in the US;
+  - a grow-only history;
+  - at least one tool round, then an answer phase, never the format under `auto`;
+  - an answer HOME's checker accepted, first time or after its one regeneration, with at least one citation;
+  - the scenario's own checker verdict.
+- **Owner-supplied.** The call and tool counts, the first answer's code, the latency and the cost, from `report.json`.
+- **Unread.** `report.json` (artifact 12160000016, expiring 2026-11-18) cannot be read from the build session. `thinkingBlocks`, `maxCountDelta` and the per-call breakdown are unread.
+
+| Gate | Evidence | Status |
+|---|---|---|
+| G7 (revised) | Tool rounds, then the answer phase under `none`; never the format with `auto`; an accepted, cited answer (job success) | **PASS (deep)**, n = 1; fast passed in run #4 |
+| G8 | The regeneration form (the labelled user-turn block) was accepted on Opus 5.5 and the regenerated answer passed | Recorded (accepted on deep); decides nothing further |
+| G9 | Byte-prefix growth held on every call (job success); three tool rounds and a regeneration (owner-supplied). **The organisation's creation date: not recorded** | **NOT VERIFIED** until the creation date is recorded |
+| G10 | `inference_geo` `us` on every call (job success) | **PASS** for the calls made (deep) |
+| G21 | Replay of whatever was sent held; **whether thinking blocks were present (`thinkingBlocks`) is unread** | **NOT VERIFIED** |
+| G22 | A count before all five calls (job success); **the comparison (`maxCountDelta`) is unread** | Count-first verified on deep; **the complete gate NOT VERIFIED** |
+| E1, E9 | One run of one realistic scenario on deep | Evidence recorded (n = 1); **not passed**: they need the campaign's runs |
+| G3, G4, G16 (Neon), G17 | Preview | Not exercised: **NOT VERIFIED** |
+
+**The owner's action, free, before the artifacts expire** (#4's on 2026-11-17, #6's on 2026-11-18): from each `report.json`, read the turn probe's `checks.thinkingBlocks` and `checks.maxCountDelta` and each call's `stop`, `outputTokens`, `blocks`, `ms` and cache tokens. Also record the organisation's creation date from the Console. Those values close G9, G21 and the complete G22 on both tiers, or show what remains. Package 5E's readiness paper (`docs/m8/M8-PACKAGE-5E-READINESS.md`) says what the call fields would show about the first answer's `answer.schema`.
+
 **Live verification #3 and the two-phase answer (2026-10-18; run 39090124303 on 6fbb27a; ADR 0012 §54).** C and D accepted (strict tools under `auto`, no format; valid `tool_use`; counts 200); E refused (HTTP 400, grammar compilation signals) and the session stopped. HOME recorded US$0.160675 (the owner's figure from the report); Anthropic's bill NOT RECONCILED. Decision: two phases inside the format path. G7 is revised (row above). The runner's plan is now `two-phase-acceptance`: one orchestrated fast turn, maximum US$1.50, session cap US$2. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED until that turn runs; nothing is PASS.
 
 **Tool-use diagnostic plan (2026-10-18; ADR 0012 §53; prepared and dry-run only, not run).** The runner's plan is now `tool-diagnostic`: one Sonnet 5.5 call per probe under `tool_choice: auto`, bisecting run #2's refused request (C one strict tool; D the 12 strict read tools; E with the answer format; F1–F4 without the unions, without string formats, without the empty-input tools, without `strict`), each run only when the earlier results call for it and stopping when the cause is established; G22 and G10 on every call. At most six probes run: maximum exposure US$1.596672, session cap US$2.50. The diagnostic (`DX`) finds a cause and is not a gate. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED, and nothing is PASS.

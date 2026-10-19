@@ -1,6 +1,6 @@
 # M8 Package 5 — Evaluation and tuning: the plan
 
-*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57; PR #98). **5C is built** (§14; ADR 0012 §58; PR #99). **5D is prepared** (§15; ADR 0012 §59): the deep smoke plan, dry-run and keyless-checked only. No provider call and no dispatch has been made. 5E has not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
+*Prepared 2026-10-18. Revised the same day after the owner's review. The direction is **approved in principle**, with the corrections and decisions in §10. Its PR merged (#96). **5A is built** (§12; ADR 0012 §56; PR #97). **5B is built** (§13; ADR 0012 §57; PR #98). **5C is built** (§14; ADR 0012 §58; PR #99). **5D (i), the deep smoke run, is prepared** (§15; ADR 0012 §59). Live verification #5 was refused before any call by an evaluation-world defect, corrected (ADR 0012 §60). **Live verification #6 passed on Opus 5.5** (ADR 0012 §61; HOME recorded US$0.248311). 5D (ii), the fast smoke, is not prepared. **5E's readiness paper** (`M8-PACKAGE-5E-READINESS.md`, 2026-10-19) proposes the staged campaign with measured costs; 5E's implementation has not started. The plan preserves the contract (`M8-BUILD-CONTRACT.md` §2.2, §12, §13, §15.6 E1–E13, §17.1) and adds or lowers no threshold.*
 
 ## 1. Where M8 stands
 
@@ -234,7 +234,7 @@ Each package is one focused PR (5A may be two: diagnostics, then the harness). P
 
 | Item | Figure |
 |---|---|
-| Campaign remainder | 198,827,241 µ$ (US$198.83) |
+| Campaign remainder | 198,827,241 µ$ (US$198.83) when this plan was written; 198,578,930 µ$ after live verification #6 (`M8-PACKAGE-5E-READINESS.md` §9 re-estimates the campaign) |
 | Run ceiling | US$175; each run's maximum computed first (turns × US$1.50 where escalation is possible), never above the remainder |
 | Household cap | NZ$100 a month, independent |
 | 5D | Opus smoke ≤ US$1.50; fast smoke ≤ about US$15 maximum, a few dollars expected |
