@@ -893,6 +893,27 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - Mutations of the flag's allow-list and of the probe's wiring are caught.
     - **Not dispatchable until the owner approves the hash and the budget.** The workspace's US$10 monthly limit holds this run with room for Stage 1's expected spend, but not Stage 1's US$31.50 maximum (§62, the readiness paper).
 
+64. **Live verification #7: G9 and G21 closed; the answer check failed** (2026-10-19; run 39315432291 on 4d8989b, the `g9-binding` plan, hash `baa99170…`; the owner's acceptance; evidence only, no code change).
+    - **What ran.** One orchestrated fast turn (Sonnet 5.5 `medium`) through `kev.handle()`, with the provider's prefix check opted into on every count and call (§63). Five model calls and four tool calls, all accepted. No escalation.
+    - **The two results, kept apart.**
+      - **Provider history (G9, and G21's evidence): PASS.** The probe's only failure reason was `turn_fallback`. Its G9 checks name their own reasons, and none was printed:
+        - coverage: two tool rounds and a regeneration in one attempt, with thinking;
+        - `input_transformations` present and empty on every answered call;
+        - a grow-only history;
+        - a count before every call;
+        - US inference.
+
+        No provider refusal line was printed. The provider refuses `block_binding` without the beta flag, so the flag reached it.
+      - **Answer validation: FAIL.** HOME's checker refused the first answer (`fact.field`, `view.unsupported`) and its one regeneration (`fact.field`), and the turn ended in HOME's safe fallback. That is the checker working as designed; the failure is answer quality, not provider history. G7 is not passed on this run. It stays PASS on fast (run #4) and on deep (run #6), each n = 1.
+    - **Gate dispositions (contract §5.7, live verification #7 update).**
+      - **G9: PASS** (fast, n = 1), on the owner's acceptance. Every element of its row is met, including the organisation's creation date: by 24 July 2026, before the cutoff (§63).
+      - **G21: PASS** (fast, Sonnet 5.5, n = 1). Signed thinking blocks were replayed within the attempt and accepted with the check on. HOME sends no `display`, so Sonnet 5.5 returns them with empty text (the provider's documented default), which is G21's empty-text case. The offline half passes too.
+      - **G22:** count-first verified; the complete gate stays open until `maxCountDelta` is read from a report.
+      - **G10: PASS** for the calls made.
+      - No further G9 provider call is needed.
+    - **The charge.** The job log says "HOME recorded US$0.08". The ledger enters it provisionally at 85,000 µ$, the upper bound, until `report.json` (artifact 12217956060, expiring 2026-11-18) gives the exact figure. The campaign remainder is then **US$198.493930**. Anthropic's bill is NOT RECONCILED.
+    - **Stage 1 (§62), unchanged.** `review-fast`: the review set (20 scenarios, 21 turns) once each on fast (Sonnet 5.5 `medium`). Maximum US$31.50; proposed budget and cap US$31.67; hash `29d57657…`. The session plan is still `g9-binding`. Naming `review-fast` again is a one-line change that leaves its hash unchanged, made only on the owner's direction.
+
 ## Consequences
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
