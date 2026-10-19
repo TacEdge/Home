@@ -44,7 +44,10 @@ import { providerTlsOptions, type ProviderTlsOptions } from './tls';
 //   adds is dropped: the `x-stainless-*` platform headers (OS, architecture,
 //   runtime and package versions, retry count; the API does not need them),
 //   any `authorization`, `anthropic-beta`, cookie or HOME header, and
-//   whatever ANTHROPIC_CUSTOM_HEADERS injected.
+//   whatever ANTHROPIC_CUSTOM_HEADERS injected. The one exception is a beta
+//   flag HOME enables (contract §5.4): production enables none; the live
+//   verification runner's fetch enables exactly the thinking-binding
+//   controls for G9 (ADR 0012 §63), and only that exact value is sent.
 // - Errors: `ProviderNetError` with a closed code only. No error, here or
 //   from here, carries the key, a header, a URL's query or a body. A
 //   request Node cannot even form (a key with a control character, say) is
@@ -169,12 +172,24 @@ function headerValue(headers: Headers, name: string): string | null {
   return headers.get(name);
 }
 
+/**
+ * The thinking-binding controls (G9; ADR 0012 §63): the beta that lets a
+ * request opt into the provider's prefix check on an organisation created
+ * before 31 August 2026. The only beta flag HOME ever enables, and only on
+ * the live verification runner's fetch.
+ */
+export const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
+
+/** The beta flags a fetch may send: none in production. */
+type EnabledBetas = readonly (typeof THINKING_BINDING_BETA)[];
+
 /** The outgoing headers: the allow-list, or a refusal (§5.4). Exported for its test. */
 export function allowedHeaders(
   input: HeadersInit | undefined,
   method: string,
   key: string,
   bodyBytes: number,
+  betas: EnabledBetas = [],
 ): Record<string, string> {
   let h: Headers;
   try {
@@ -194,6 +209,9 @@ export function allowedHeaders(
     accept === 'text/event-stream' || accept === 'application/json' ? accept : 'application/json';
   const ua = headerValue(h, 'user-agent');
   if (ua && /^Anthropic\/JS [0-9][0-9A-Za-z.+-]{0,40}$/.test(ua)) out['user-agent'] = ua;
+  // A beta flag only when this fetch enables it, and only its exact value.
+  const beta = headerValue(h, 'anthropic-beta');
+  if (beta !== null && (betas as readonly string[]).includes(beta)) out['anthropic-beta'] = beta;
   if (method === 'POST') {
     out['content-type'] = 'application/json';
     out['content-length'] = String(bodyBytes);
@@ -248,7 +266,7 @@ function isTlsRefusal(err: unknown): boolean {
   );
 }
 
-function build(key: string, transport: Transport, limits: Limits) {
+function build(key: string, transport: Transport, limits: Limits, betas: EnabledBetas = []) {
   const fetchImpl = async (
     input: string | URL | Request,
     init: FetchInit = {},
@@ -268,7 +286,7 @@ function build(key: string, transport: Transport, limits: Limits) {
     if (body.length > limits.maxRequestBytes) throw new ProviderNetError('too_large', false, false);
     if (method === 'GET' && body.length > 0)
       throw new ProviderNetError('refused_destination', false, false);
-    const headers = allowedHeaders(init.headers, method, key, body.length);
+    const headers = allowedHeaders(init.headers, method, key, body.length, betas);
     const signal = init.signal ?? undefined;
     if (signal?.aborted) throw abortError();
 
@@ -471,6 +489,34 @@ const deployed = (source: Record<string, string | undefined>) =>
   Boolean(source.VERCEL_ENV || source.VERCEL || source.NODE_ENV === 'production');
 
 /**
+ * The live verification runner's fetch (G9; ADR 0012 §63): production's in
+ * every rule, enabling exactly the thinking-binding beta flag. Refused on
+ * any deployed process, in `source` or in the process's own environment;
+ * only the probe gateway builds it.
+ */
+export function createRunnerProviderFetch(
+  key: string,
+  source: Record<string, string | undefined> = deploymentEnv(),
+): ProviderFetch {
+  if (deployed(source) || deployed(deploymentEnv()))
+    throw new Error('the runner’s provider fetch is never built on a deployed process');
+  if (typeof key !== 'string' || !PROVIDER_KEY_FORMAT.test(key))
+    throw new Error('a well-formed provider key is required');
+  return build(
+    key,
+    {
+      kind: 'tls',
+      lookup: dnsLookup as unknown as Lookup,
+      allowAddress: isPublicAddress,
+      port: 443,
+      tls: providerTlsOptions(),
+    },
+    PROVIDER_FETCH_LIMITS,
+    [THINKING_BINDING_BETA],
+  );
+}
+
+/**
  * Refuses anywhere deployed: the test seam can never reach a real
  * deployment. The process's own environment is checked whatever `source`
  * says (a benign `source` cannot open the seam on a deployed process).
@@ -498,6 +544,8 @@ export function createProviderFetchForTests(
     tlsStub?: { port: number; ca: string };
     lookup?: Lookup;
     limits?: Partial<Limits>;
+    /** The runner's beta flag (G9), as createRunnerProviderFetch enables it. */
+    betas?: EnabledBetas;
   },
   source: Record<string, string | undefined> = deploymentEnv(),
 ): ProviderFetch {
@@ -523,7 +571,7 @@ export function createProviderFetchForTests(
       port: 443,
       tls: providerTlsOptions(),
     };
-  return build(key, transport, limits);
+  return build(key, transport, limits, opts.betas ?? []);
 }
 
 /**

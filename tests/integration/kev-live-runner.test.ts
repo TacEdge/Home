@@ -9,7 +9,7 @@ import { createPerson } from '@/domain/people/service';
 import type { UserActor } from '@/trust/actor';
 import { TIERS, MODELS } from '@/kev/config';
 import { buildProbeGateway } from '@/kev/providers/anthropic';
-import { createProviderFetchForTests } from '@/kev/providers/fetch';
+import { createProviderFetchForTests, THINKING_BINDING_BETA } from '@/kev/providers/fetch';
 import { perCallMax } from '@/kev/router';
 import { assertFixtureDatabase } from '../../scripts/kev-live/db-checks';
 import { runG16 } from '../../scripts/kev-live/g16';
@@ -1139,6 +1139,233 @@ describe('the two-phase acceptance plan (ADR 0012 §54): one fast turn through k
     expect(turn.outcome).toBe('fail');
     expect(turn.reasons).toContain('no_tool_round');
     expect(turn.checks).toMatchObject({ answerPhase: true, formatWithAuto: false });
+  });
+});
+
+describe('G9’s prefix-check plan (ADR 0012 §63): one fast turn, every call bound to its history', () => {
+  // Its own synthetic adult: the turns above count toward the runner adult's
+  // per-minute limit, which HOME enforces and these tests do not work around.
+  let adult: UserActor;
+  beforeAll(async () => {
+    const id = `live-runner-g9-${randomUUID()}`;
+    const email = `${id}@example.test`;
+    await admin.db.insert(user).values({ id, name: 'Synthetic G9 adult', email });
+    adult = { kind: 'user', userId: id, email, via: 'kev', channel: 'web' };
+  });
+  type Body = {
+    model: string;
+    system?: unknown;
+    tools?: unknown[];
+    tool_choice?: { type: string };
+    output_config?: { format?: unknown };
+    thinking?: { type?: string; block_binding?: { prefix_mismatch_behavior?: string } };
+    messages: { role: string; content: unknown }[];
+  };
+  const json = (v: unknown) => JSON.stringify(v);
+  /**
+   * The provider as G9 needs it, in miniature: a request that sets
+   * `block_binding` without the beta flag is refused, as the API refuses it;
+   * with it, each Messages body must extend the last one's system, tools and
+   * messages byte for byte, else the prefix check's refusal. The turn reads
+   * twice, then ends its read phase; its first answer is not HOME's format
+   * (so HOME regenerates), its second cites what was read.
+   */
+  const provider = (opts: { transformations?: unknown[]; firstAnswerValid?: boolean } = {}) => {
+    let previous: Body | null = null;
+    let answers = 0;
+    const handler: Handler = (req, res, raw) => {
+      if (req.method === 'GET') return smart(req, res, raw);
+      const body = JSON.parse(raw) as Body;
+      const id = `req_g9binding${++ids}`;
+      const refuse = (message: string) => {
+        res.writeHead(400, { 'content-type': 'application/json', 'request-id': id });
+        res.end(json({ type: 'error', error: { type: 'invalid_request_error', message } }));
+      };
+      if (body.thinking?.block_binding && req.headers['anthropic-beta'] !== THINKING_BINDING_BETA)
+        return refuse('thinking.block_binding: Extra inputs are not permitted');
+      if (previous) {
+        const extends_ =
+          json(previous.system) === json(body.system) &&
+          json(previous.tools) === json(body.tools) &&
+          previous.messages.every((m, i) => json(m) === json(body.messages[i]));
+        if (!extends_)
+          return refuse(
+            'Invalid `signature` in `thinking` block. The block is bound to a different conversation.',
+          );
+      }
+      previous = body;
+      const rounds = body.messages.filter(
+        (m) =>
+          Array.isArray(m.content) &&
+          (m.content as { type: string }[]).some((b) => b.type === 'tool_result'),
+      ).length;
+      const start = messageStart(
+        body.model,
+        { input_tokens: 2_000 },
+        opts.transformations
+          ? { input_transformations: opts.transformations }
+          : { input_transformations: [] },
+      );
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'request-id': id });
+      if (body.output_config?.format) {
+        answers += 1;
+        if (answers === 1 && !opts.firstAnswerValid)
+          return res.end(
+            start + textBlock(0, 'Synthetic, not the answer format.') + messageEnd('end_turn'),
+          );
+        const ref = firstRef(body.messages);
+        const plan = {
+          lead: 'here_you_go',
+          facts: ref
+            ? [{ kind: ref.type, ref: { ...ref, at: ref.at ?? null }, show: [], scope: null }]
+            : [],
+          view: null,
+          decline: null,
+        };
+        return res.end(start + textBlock(0, json(plan)) + messageEnd('end_turn'));
+      }
+      if (rounds < 2)
+        return res.end(
+          start +
+            thinking(0) +
+            toolBlock(1, `toolu_g9_${ids}`, 'get_agenda', {
+              from: rounds === 0 ? '2026-10-17' : '2026-10-18',
+              to: rounds === 0 ? '2026-10-17' : '2026-10-18',
+            }) +
+            messageEnd('tool_use', 60),
+        );
+      return res.end(
+        start + thinking(0) + textBlock(0 + 1, 'Synthetic prose.') + messageEnd('end_turn'),
+      );
+    };
+    // The count endpoint runs the same opt-in rule.
+    const count: Handler = (req, res, raw) => {
+      const body = JSON.parse(raw) as Body;
+      if (body.thinking?.block_binding && req.headers['anthropic-beta'] !== THINKING_BINDING_BETA) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(
+          json({
+            type: 'error',
+            error: {
+              type: 'invalid_request_error',
+              message: 'thinking.block_binding: Extra inputs are not permitted',
+            },
+          }),
+        );
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(json({ input_tokens: 2_000 }));
+    };
+    stub.queue.length = 0;
+    stub.countQueue.length = 0;
+    for (let i = 0; i < 20; i++) {
+      stub.queue.push(handler);
+      stub.countQueue.push(count);
+    }
+  };
+  const run = async (betas = true) => {
+    const plan = buildPlan('g9-binding');
+    const before = await leftOpen();
+    const out = await executePlan(plan, {
+      gateway: buildProbeGateway(
+        KEY,
+        createProviderFetchForTests(KEY, {
+          stubPort: stub.port,
+          ...(betas ? { betas: [THINKING_BINDING_BETA] } : {}),
+        }),
+        {},
+      ),
+      actor: adult,
+      deps: { db },
+      budgetMicros: plan.sessionCapUsdMicros,
+    });
+    const rec = await reconcile(
+      db,
+      out.results.flatMap((r) => r.attemptIds),
+    );
+    expectNothingLeftOpen(rec, before);
+    const turn = out.results[0]!;
+    return { plan, out, rec, turn, calls: turn.evidence.filter((e) => e.kind === 'message') };
+  };
+
+  it('passes: two tool rounds and a regeneration, thinking replayed, every body extending the last, the beta flag and block_binding on every count and call', async () => {
+    provider();
+    const { plan, out, rec, turn, calls } = await run();
+    expect(plan.probes.map((p) => p.id)).toEqual(['g9-binding-turn']);
+    expect(turn.outcome, turn.reasons.join(',')).toBe('pass');
+    expect(out.stopped).toBeNull();
+    expect(turn.checks).toMatchObject({
+      outcome: 'answer',
+      g9Covered: true,
+      transformationsSeen: true,
+      transformed: 0,
+      growOnly: true,
+      countedFirst: true,
+      usInference: true,
+      answerPhase: true,
+      formatWithAuto: false,
+      toolRounds: 2,
+    });
+    expect(turn.checks.thinkingBlocks as number).toBeGreaterThanOrEqual(3);
+    expect(
+      calls.map((c) => c.kind === 'message' && `${c.toolChoice}${c.answerFormat ? '+format' : ''}`),
+    ).toEqual(['auto', 'auto', 'auto', 'none+format', 'none+format']);
+    for (const c of calls)
+      expect(c.kind === 'message' && c.transformations).toEqual({
+        dropped: 0,
+        allowed: 0,
+        other: 0,
+      });
+    // Every count and every call carried the flag and the opt-in; nothing else changed.
+    expect(stub.counts).toHaveLength(5);
+    expect(stub.seen).toHaveLength(5);
+    for (const r of [...stub.counts, ...stub.seen]) {
+      expect(r.headers['anthropic-beta']).toBe(THINKING_BINDING_BETA);
+      expect((JSON.parse(r.body) as Body).thinking).toEqual({
+        type: 'adaptive',
+        block_binding: { prefix_mismatch_behavior: 'error' },
+      });
+    }
+    expect(rec.mismatched).toBe(0);
+    const report = buildReport({
+      plan,
+      budgetMicros: 1_670_000n,
+      capNzd: 3,
+      run: out,
+      reconciliation: rec,
+      startedAt: new Date(Date.now() - 1_000),
+      finishedAt: new Date(),
+    });
+    expect(report.json).toMatch(/"transformations": ?\{/);
+    for (const s of [KEY, CANARY]) {
+      expect(report.markdown).not.toContain(s);
+      expect(report.json).not.toContain(s);
+    }
+  });
+
+  it('without the beta flag the opt-in is refused at the first count: the turn fails and the session stops', async () => {
+    provider();
+    const { out, turn, calls } = await run(false);
+    expect(stub.counts[0]!.headers['anthropic-beta']).toBeUndefined();
+    expect(turn.outcome).toBe('fail');
+    expect(calls).toHaveLength(0);
+    expect(out.stopped).toBe('g9-binding-turn_failed');
+  });
+
+  it('fails when the turn is not covered: an answer accepted first time is no regeneration', async () => {
+    provider({ firstAnswerValid: true });
+    const { turn } = await run();
+    expect(turn.checks).toMatchObject({ outcome: 'answer', g9Covered: false, transformed: 0 });
+    expect(turn.outcome).toBe('fail');
+    expect(turn.reasons).toEqual(['g9_not_covered']);
+  });
+
+  it('fails when the provider reports a transformation: a block dropped or let through is not a pass', async () => {
+    provider({ transformations: [{ type: 'thinking_mismatch_allowed' }] });
+    const { turn } = await run();
+    expect(turn.checks.transformed as number).toBeGreaterThan(0);
+    expect(turn.outcome).toBe('fail');
+    expect(turn.reasons).toContain('g9_transformed');
   });
 });
 

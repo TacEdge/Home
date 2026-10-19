@@ -36,8 +36,8 @@ const HASH = '47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep smoke plan’s design', () => {
-  it('one catalogue scenario, on deep, in the owner’s review set (no longer the session plan: Stage 1 is, ADR 0012 §62)', () => {
-    expect(SESSION_PLAN).toBe('review-fast');
+  it('one catalogue scenario, on deep, in the owner’s review set (no longer the session plan: G9’s is, ADR 0012 §63)', () => {
+    expect(SESSION_PLAN).toBe('g9-binding');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('deep-smoke');
     expect(plan.kind).toBe('evaluation');

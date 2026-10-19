@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ANSWER_JSON_SCHEMA } from '@/kev/answer/schema';
 import { GEO_MULTIPLIER, INFERENCE_GEO, LIMITS, MODELS, TIERS } from '@/kev/config';
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
+import { THINKING_BINDING_BETA } from '@/kev/providers/fetch';
 import type { ProbeOptions, ProviderToolDefinition } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
 import { REVIEW_SET } from '@/kev/evals/review-set';
@@ -29,7 +30,10 @@ import { EVALUATION_RUN_CEILING_USD_MICROS, SESSION_CEILING_USD_MICROS } from '.
  * two-phase checks and the two-phase acceptance plan, ADR 0012 §54; 5: plan
  * kinds, the scenario probe and the evaluation records, Package 5A, ADR 0012
  * §56; 6: the smoke scenario probe's checks and the deep smoke plan, Package
- * 5D, ADR 0012 §59).
+ * 5D, ADR 0012 §59). Not bumped for the G9 prefix-check plan (ADR 0012
+ * §63): it adds a plan and an optional turn option without changing how
+ * any existing plan runs, so the approved Stage 1 hash stands; the new
+ * plan's own hash binds its option and the beta flag it enables.
  */
 export const PLAN_VERSION = 6;
 
@@ -101,6 +105,8 @@ export type ProbeSpec = Readonly<
       /** One turn through kev.handle() as the fixture adult Sam, on the runner's database. */
       kind: 'turn';
       question: string;
+      /** Every call of the turn changed only as this names: G9's prefix check (ADR 0012 §63). */
+      probe?: Readonly<Pick<ProbeOptions, 'prefixCheck'>>;
       expect: string;
       stopOnFail: boolean;
     }
@@ -552,6 +558,29 @@ export const PROBES: readonly ProbeSpec[] = Object.freeze([
  * the two-phase loop, grounding and HOME's checks on deep. It is in the
  * owner's review set, so the run writes the deep review page.
  */
+/**
+ * G9's verification on this (pre-cutoff) organisation (ADR 0012 §63): one
+ * orchestrated fast turn through kev.handle(), the production path, with
+ * every call opted into the provider's prefix check (`block_binding`
+ * `prefix_mismatch_behavior: "error"` under the thinking-binding beta flag),
+ * so a request that does not extend its conversation's history is refused
+ * rather than silently stripped. The question is live verification #4's,
+ * which gave two tool rounds and a regeneration on fast; neither can be
+ * forced, so the probe passes only when one attempt shows both.
+ */
+export const G9_BINDING_PROBES: readonly ProbeSpec[] = Object.freeze([
+  {
+    id: 'g9-binding-turn',
+    gates: ['G9', 'G21', 'G7', 'G22', 'G10'],
+    kind: 'turn',
+    question: 'What’s on this Saturday, and what’s left to do on the back fence?',
+    probe: Object.freeze({ prefixCheck: 'error' as const }),
+    expect:
+      'HOME’s checked answer, citing what it read; one attempt with at least two tool rounds and a regeneration, thinking replayed; every call accepted with the prefix check on, its input_transformations present and empty',
+    stopOnFail: true,
+  },
+] satisfies ProbeSpec[]);
+
 export const DEEP_SMOKE_PROBES: readonly ProbeSpec[] = Object.freeze([
   {
     id: 'realistic.weekend_look@deep#1',
@@ -657,6 +686,16 @@ export const PLANS = Object.freeze({
     specs: REVIEW_FAST_PROBES,
     sessionCapUsdMicros: 31_670_000n,
   }),
+  // G9's verification (ADR 0012 §63): one fast turn with the prefix check
+  // on. Its maximum is the US$1.50 turn ceiling (a fast attempt and any
+  // escalation together). A US$1.67 budget is NZ$3 in HOME's whole-NZ$
+  // reservation cap (US$1.666667), which holds it; a budget below US$1.67 is
+  // NZ$2 and cannot (tested). The smallest practical cap, then.
+  'g9-binding': Object.freeze({
+    probes: Object.freeze(G9_BINDING_PROBES.map((p) => p.id)),
+    specs: G9_BINDING_PROBES,
+    sessionCapUsdMicros: 1_670_000n,
+  }),
 } satisfies Record<string, PlanDef>);
 
 /**
@@ -674,8 +713,12 @@ export type PlanDef = Readonly<{
 
 export type PlanName = keyof typeof PLANS;
 
-/** The plan the runner runs now: Package 5E's Stage 1, the review set on fast, for the owner's approval. */
-export const SESSION_PLAN: PlanName = 'review-fast';
+/**
+ * The plan the runner runs now: G9's prefix-check verification (ADR 0012
+ * §63), for the owner's approval; Stage 1 (`review-fast`) follows it, its
+ * approved hash unchanged.
+ */
+export const SESSION_PLAN: PlanName = 'g9-binding';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {
@@ -923,6 +966,11 @@ export function buildPlan(
     probes: priced,
     totalMaxUsdMicros,
     peakHoldUsdMicros,
+    // The beta flag a plan's prefix check enables (G9), bound into its hash;
+    // absent from every other plan, whose hashes it leaves as they were.
+    ...(probes.some((p) => p.kind === 'turn' && p.probe?.prefixCheck)
+      ? { betas: [THINKING_BINDING_BETA] }
+      : {}),
   };
   return Object.freeze({
     canonical,

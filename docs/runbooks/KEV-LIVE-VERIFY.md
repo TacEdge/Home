@@ -100,7 +100,15 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    It prints the database and host, counts and latest `created_at` per table, how many person names are not the fixture family's (a count), accounts not on a `.test` address (the adults' own sign-in accounts appear here) and calendar connections. Record the date and the result. Also confirm in Neon that the Vercel integration is not creating Preview branches from Production, and in Vercel that no provider key is set anywhere (plan §6).
 3. **GitHub:** create the environment **`kev-evals`** (Settings › Environments) with **required reviewer: the owner**, deployment branches limited to `main`; add the secret **`KEV_EVAL_PROVIDER_KEY`** to that environment only (never a repository secret, never Vercel). The key is the evaluation workspace's own (plan §3 step 4).
 4. **Dry run, locally:** `node scripts/kev-live/run.mts`. Read the table; note the hash.
-5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plan is now Package 5E's Stage 1, `review-fast`** (ADR 0012 §62):
+5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plan is now G9's prefix check, `g9-binding`** (ADR 0012 §63):
+   - **What it runs:** one turn on fast (Sonnet 5.5, `medium`) through `kev.handle()` on the runner's database, with the provider's prefix check opted into on every count and call (`block_binding` `"error"`, beta flag `thinking-binding-controls-2026-08-01`, sent by the runner's fetch only).
+   - **Pass:** HOME's checked answer with a citation, and one attempt with at least two tool rounds and a regeneration, thinking replayed, no refusal, and every call's `input_transformations` present and empty.
+   - **Not covered:** a turn without both is a fail with `g9_not_covered`. Neither can be forced; repeating it needs a fresh approval.
+   - **Hash:** `baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3`.
+   - **Budget:** US$1.67, the smallest that works. The maximum is US$1.50, the turn ceiling, including any escalation to Opus 5.5. US$1.66 is refused at the cap, and anything above US$1.67 at the plan's cap.
+   - **Read from `report.json`:** the probe's `checks` (`g9Covered`, `transformationsSeen`, `transformed`, `thinkingBlocks`, `toolRounds`, `maxCountDelta`) and each call's `transformations`.
+
+   After G9's run, Package 5E's Stage 1, `review-fast` (ADR 0012 §62), becomes the session plan again in its own reviewed PR (its hash is unchanged):
    - **What it runs:** the owner's review set (5C's twenty scenarios, 21 turns), once each, on the fast tier as configured (Sonnet 5.5, `medium`), on the synthetic evaluation world. No scenario, check or threshold is added.
    - **Hash:** `29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa`.
    - **Budget:** US$31.67, the smallest that works. The plan's maximum is US$31.50 (21 turns at the US$1.50 turn ceiling), and HOME's whole-NZ$ cap must hold all of it: US$31.67 is NZ$57 (US$31.666667), US$31.66 is NZ$56 (US$31.11) and is refused at the cap, and anything above US$31.67 is refused at the plan's cap.

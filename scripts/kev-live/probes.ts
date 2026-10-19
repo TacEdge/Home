@@ -311,7 +311,7 @@ async function turnProbe(
   const events: KevEvent[] = [];
   for await (const e of handle(
     { actor: ctx.actor, channel: 'web', input: { text: p.question }, now: new Date(TURN_NOW) },
-    { db: ctx.deps.db, provider: ctx.gateway.provider() },
+    { db: ctx.deps.db, provider: ctx.gateway.provider(p.probe) },
   ))
     events.push(e);
   const done = events.at(-1);
@@ -441,6 +441,47 @@ export function phaseChecks(evidence: readonly ProbeEvidence[]): {
 }
 
 /**
+ * G9's coverage and result with the prefix check on (ADR 0012 §63), from a
+ * turn's Messages calls: one attempt with at least two tool rounds and a
+ * regeneration (two answer-phase calls), with thinking replayed; and every
+ * call answered with its `input_transformations` present (the beta flag
+ * applied) and empty (no thinking block dropped or let through on a
+ * mismatch). A refusal of the history is the turn's own error.
+ */
+export function bindingChecks(evidence: readonly ProbeEvidence[]): {
+  covered: boolean;
+  transformationsSeen: boolean;
+  transformed: number;
+  reasons: string[];
+} {
+  const calls = evidence.flatMap((e) => (e.kind === 'message' ? [e] : []));
+  const byAttempt = new Map<string, typeof calls>();
+  for (const c of calls) byAttempt.set(c.attemptId, [...(byAttempt.get(c.attemptId) ?? []), c]);
+  const covered = [...byAttempt.values()].some(
+    (a) =>
+      a.filter((c) => c.stop === 'tool_use').length >= 2 &&
+      a.filter((c) => c.answerFormat && c.toolChoice === 'none').length >= 2 &&
+      a.some((c) => (c.blocks.thinking ?? 0) + (c.blocks.redacted_thinking ?? 0) > 0),
+  );
+  const answered = calls.filter((c) => c.usage !== null);
+  const transformationsSeen =
+    answered.length > 0 && answered.every((c) => c.transformations !== null);
+  const transformed = answered.reduce(
+    (n, c) =>
+      n +
+      (c.transformations
+        ? c.transformations.dropped + c.transformations.allowed + c.transformations.other
+        : 0),
+    0,
+  );
+  const reasons: string[] = [];
+  if (!covered) reasons.push('g9_not_covered');
+  if (!transformationsSeen) reasons.push('g9_no_transformations');
+  if (transformed > 0) reasons.push('g9_transformed');
+  return { covered, transformationsSeen, transformed, reasons };
+}
+
+/**
  * Whether a refusal's recognised detail names a request parameter below the
  * top level (`tools.3.custom.input_schema…`, `output_config.format…`): the
  * provider said which part it refused, so the diagnostic has its cause.
@@ -565,6 +606,13 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
         attempted.checks.answerPhase = phases.answerPhase;
         attempted.checks.formatWithAuto = phases.formatWithAuto;
         attempted.reasons.push(...phases.reasons);
+        if (p.kind === 'turn' && p.probe?.prefixCheck) {
+          const binding = bindingChecks(msgs);
+          attempted.checks.g9Covered = binding.covered;
+          attempted.checks.transformationsSeen = binding.transformationsSeen;
+          attempted.checks.transformed = binding.transformed;
+          attempted.reasons.push(...binding.reasons);
+        }
       }
       if (attempted.reasons.length > 0)
         attempted.outcome = attempted.outcome === 'not_run' ? 'not_run' : 'fail';

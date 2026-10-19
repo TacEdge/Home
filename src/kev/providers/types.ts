@@ -233,6 +233,15 @@ export type ProbeOptions = Readonly<{
    * unchanged; only the provider's guarantee of schema-valid inputs is off.
    */
   strictTools?: false;
+  /**
+   * G9 (ADR 0012 §63): opt every count and call into the provider's prefix
+   * check, which an organisation created before 31 August 2026 runs only on
+   * request: `thinking: {type: "adaptive", block_binding:
+   * {prefix_mismatch_behavior: "error"}}` (adaptive is the tiers' default, so
+   * the model thinks as it does without it) and the thinking-binding beta
+   * flag. A history the check rejects is a 400 before any output.
+   */
+  prefixCheck?: 'error';
 }>;
 
 /** One HTTP exchange of the probe path, as the runner's report records it: never a body or header but the request id. */
@@ -271,6 +280,15 @@ export type ProbeEvidence =
       blocks: Readonly<Record<string, number>>;
       /** Whether this request's system, tools and messages extend the attempt's previous request (G9); null for the first. */
       growOnly: boolean | null;
+      /**
+       * The provider's `input_transformations` (G9), counted by type, never
+       * a path: present only when the thinking-binding beta applied (every
+       * response then carries the array, empty when nothing failed); null
+       * when absent. `dropped`: thinking blocks removed; `allowed`: blocks
+       * that failed the prefix check yet reached the model; `other`: any type
+       * this code does not know.
+       */
+      transformations: Readonly<{ dropped: number; allowed: number; other: number }> | null;
       retried: boolean;
       ms: number;
     }>
