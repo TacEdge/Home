@@ -18,6 +18,7 @@ import {
   probeTools,
   systemFor,
   TURN_NOW,
+  type PlanDef,
   type ProbeSpec,
 } from '../../scripts/kev-live/plan';
 import { phaseChecks } from '../../scripts/kev-live/probes';
@@ -26,6 +27,7 @@ import {
   assertCapCovers,
   capNzdFor,
   capUsdMicros,
+  EVALUATION_RUN_CEILING_USD_MICROS,
   EXIT,
   SESSION_CEILING_USD_MICROS,
 } from '../../scripts/kev-live/guards.mts';
@@ -101,11 +103,14 @@ describe('the plan’s maxima are the gateway’s', () => {
     expect(settled).toBe(plan.totalMaxUsdMicros);
   });
 
-  it('every named plan names only probes that exist, each once, with a cap no higher than US$10', () => {
+  it('every named plan names only probes that exist, each once, with a cap no higher than its kind’s ceiling (US$10 to verify, US$175 for an evaluation run)', () => {
     for (const [name, p] of Object.entries(PLANS)) {
       expect(new Set(p.probes).size, name).toBe(p.probes.length);
       expect(planProbes(name as keyof typeof PLANS).length, name).toBe(p.probes.length);
-      expect(p.sessionCapUsdMicros <= SESSION_CEILING_USD_MICROS, name).toBe(true);
+      const def: PlanDef = p;
+      const ceiling =
+        def.kind === 'evaluation' ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS;
+      expect(def.sessionCapUsdMicros <= ceiling, name).toBe(true);
     }
   });
 
@@ -192,7 +197,7 @@ describe('the plan hash', () => {
     expect(buildPlan().hash).not.toBe(
       'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8',
     );
-    expect(buildPlan().canonical).toMatchObject({
+    expect(buildPlan('deep-smoke').canonical).toMatchObject({
       plan: 'deep-smoke',
       sessionCapUsdMicros: 1_670_000n,
     });
@@ -270,10 +275,15 @@ describe('the dry run', () => {
     const out = await runMode(
       'dry-run',
       { KEV_EVAL_PROVIDER_KEY: KEY, DATABASE_URL: 'postgres://u:p@localhost/home_live_verify' },
-      { ledgerText: null, reportDir: '/nonexistent', log: (l) => lines.push(l) },
+      {
+        ledgerText: null,
+        reportDir: '/nonexistent',
+        log: (l) => lines.push(l),
+        plan: buildPlan('deep-smoke'),
+      },
     );
     expect(out).toEqual({ exitCode: EXIT.ok, code: 'dry_run' });
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     const text = lines.join('\n');
     expect(plan.name).toBe('deep-smoke');
     expect(text).toContain(`plan hash: ${plan.hash}`);
@@ -302,7 +312,7 @@ describe('the dry run', () => {
   it('the keyless plan check: the hash, the budget and the ledger, each refused with its code, and no network', async () => {
     const httpSpy = vi.spyOn(http, 'request');
     const httpsSpy = vi.spyOn(https, 'request');
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     const ledgerText = JSON.stringify({
       format: 'home-kev-live-ledger',
       version: 1,
@@ -314,6 +324,7 @@ describe('the dry run', () => {
         ledgerText: ledger,
         reportDir: '/nonexistent',
         log: () => undefined,
+        plan,
       });
     expect(
       await run({ KEV_LIVE_BUDGET_USD: '1.67', KEV_LIVE_APPROVED_PLAN_HASH: plan.hash }),

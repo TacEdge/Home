@@ -157,7 +157,7 @@ function context(transcripts: Transcript[], budgetMicros: bigint): RunContext {
 
 describe('the deep smoke plan (Package 5D)', () => {
   it('is the session plan: one deep scenario turn, US$1.50 at most, a US$1.67 cap the run’s NZ$3 holds', () => {
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     expect(plan.name).toBe('deep-smoke');
     expect(plan.kind).toBe('evaluation');
     expect(plan.probes.map((p) => [p.id, p.kind, 'tier' in p ? p.tier : null])).toEqual([
@@ -171,7 +171,7 @@ describe('the deep smoke plan (Package 5D)', () => {
 
   it('runs end to end on Opus: a read round, the answer phase, an accepted, cited answer, recorded and reconciled; the transcript and the deep review page are written; the report holds no question', async () => {
     for (let i = 0; i < 12; i++) stub.queue.push(modelLike({ read: true }));
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     const transcripts: Transcript[] = [];
     const run = await executePlan(plan, context(transcripts, 1_670_000n));
     expect(run.stopped).toBeNull();
@@ -264,7 +264,7 @@ describe('the deep smoke plan (Package 5D)', () => {
   it('fails, never passes, when the model answers without reading: no tool round, no accepted answer', async () => {
     for (let i = 0; i < 12; i++) stub.queue.push(modelLike({ read: false }));
     const transcripts: Transcript[] = [];
-    const run = await executePlan(buildPlan(), context(transcripts, 1_670_000n));
+    const run = await executePlan(buildPlan('deep-smoke'), context(transcripts, 1_670_000n));
     const [r] = run.results;
     expect(r!.outcome).toBe('fail');
     expect(r!.reasons).toContain('no_tool_round');
@@ -277,7 +277,7 @@ describe('the deep smoke plan (Package 5D)', () => {
 
   it('is not run at all on a budget below its maximum: no model call', async () => {
     for (let i = 0; i < 12; i++) stub.queue.push(modelLike({ read: true }));
-    const run = await executePlan(buildPlan(), context([], 1_499_999n));
+    const run = await executePlan(buildPlan('deep-smoke'), context([], 1_499_999n));
     expect(run.results[0]).toMatchObject({ outcome: 'not_run', reasons: ['budget'] });
     expect(run.stopped).toBe('budget');
     expect(stub.seen).toHaveLength(0);
