@@ -74,6 +74,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "One deep attempt (Opus 5.5), held to the US$1.50 turn ceiling and settled; reconciled (owner-supplied).",
       "outcome": "PASSED: the deep smoke plan (ADR 0012 §59). One orchestrated deep turn on realistic.weekend_look through kev.handle(), Opus 5.5 on every call: five model calls (three tool rounds with five tool calls, then the answer phase and one regeneration). The first answer was refused by HOME's checker with answer.schema; the regeneration was accepted with citations. 35.64 s to the checked answer (owner-supplied). The job's success proves every smoke and scenario check passed (ADR 0012 §61)."
+    },
+    {
+      "date": "2026-10-19",
+      "workflowRun": "Kev live verification #7 (run 39315432291, commit 4d8989b)",
+      "planHash": "baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3",
+      "plannedMaxUsdMicros": "1500000",
+      "recordedUsdMicros": "85000",
+      "recordedBasis": "PROVISIONAL: the job log's figure, \"HOME recorded US$0.08\" (rounded half-up to the cent, so 75,000 to 84,999 µ$). Entered at the upper bound until the exact figure from report.json (artifact 12217956060, expiring 2026-11-18) replaces it, so the remainder is never overstated. GitHub serves workflow artifacts from a storage host the build environment cannot reach.",
+      "providerListPrice": "Not read (the report's at-list-prices figure is in report.json). The turn reported 47,397 input and 1,164 output tokens (the job log's kev_turn line).",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "One fast attempt (Sonnet 5.5), held to the US$1.50 turn ceiling under the US$1.67 session cap (NZ$3) and settled; no escalation. The job's own report was written (the job log), so the runner reconciled it; the reconciliation figures are in report.json.",
+      "outcome": "FAILED at the answer check, after G9's evidence: the g9-binding plan (ADR 0012 §63), one orchestrated fast turn through kev.handle() with the provider's prefix check opted into on every count and call (block_binding \"error\", beta thinking-binding-controls-2026-08-01). Five model calls, four tool calls; every call accepted; the probe's only failure reason was turn_fallback (no g9_not_covered, g9_no_transformations, g9_transformed, history_not_grow_only, call_not_counted_first or not_us_inference, and no provider refusal line). The first answer was refused by HOME's checker (fact.field, view.unsupported), the one regeneration was refused (fact.field), and the turn ended in HOME's safe fallback; no escalation. G9 PASS and G21 PASS (fast, n = 1) on the owner's acceptance; G7 not passed on this run (ADR 0012 §64)."
     }
   ]
 }

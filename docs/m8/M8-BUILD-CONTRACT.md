@@ -895,6 +895,39 @@ Evidence sources:
 - **The run that is.** The runner's `g9-binding` plan: one fast turn with the check opted into (`"error"`) on every count and call. It passes only with at least two tool rounds and a regeneration in one attempt, thinking replayed, no refusal, and every call's `input_transformations` present and empty. Hash `baa99170…`; maximum US$1.50; budget US$1.67.
 - **Status.** G9 and G21 stay **NOT VERIFIED** until that run is approved, dispatched and its report read. The account facts above are the owner's; G11 and G12 are recorded by the owner (DEPLOY.md §E items 25–26).
 
+
+**Live verification #7 update (2026-10-19; run 39315432291 on 4d8989b; ADR 0012 §64; the `g9-binding` plan, hash `baa99170…`).**
+
+One orchestrated fast turn (Sonnet 5.5 `medium`) through `kev.handle()`, with the provider's prefix check opted into on every count and call (`block_binding` `"error"`, beta flag `thinking-binding-controls-2026-08-01`). The job failed at the answer check, after G9's evidence was gathered.
+
+- **Turn:** five model calls and four tool calls. Every call was accepted, with no escalation.
+- **Answers:** the first answer was refused by HOME's checker (`fact.field`, `view.unsupported`), and the one regeneration was refused too (`fact.field`). The turn ended in HOME's safe fallback.
+- **Charge:** HOME recorded US$0.08 in the job log. The ledger holds it provisionally at 85,000 µ$ until `report.json` gives the exact figure. Anthropic's bill is NOT RECONCILED.
+
+Evidence sources:
+- **First-party (the job log, read through the GitHub API).**
+  - The probe's complete failure-reason line was `g9-binding-turn: fail (turn_fallback)`.
+  - Every check below names its own reason, and none was printed:
+    - `g9_not_covered`: one attempt with at least two tool rounds, two answer-phase calls and thinking blocks;
+    - `g9_no_transformations`: `input_transformations` present on every answered call;
+    - `g9_transformed`: none of them carried an entry;
+    - `history_not_grow_only`;
+    - `call_not_counted_first`;
+    - `not_us_inference`;
+    - `no_tool_round`, `no_answer_phase` and `format_with_auto`.
+  - No provider refusal line was printed; the runner prints one for each refused call.
+  - The `kev_turn` line: `modelCalls` 5, `toolCalls` 4, `answersChecked` 2, `firstCodes` `fact.field` and `view.unsupported`, outcome `fallback`, reason `invalid`.
+- **Owner's acceptance (2026-10-19).** G9 is accepted on run #7's recorded coverage and failure-reason checks, with no further G9 provider call.
+- **Unread.** `report.json` (artifact 12217956060, expiring 2026-11-18): the per-call breakdown, `maxCountDelta` and HOME's exact recorded µ$.
+
+| Gate | Requirement | Evidence | Status |
+|---|---|---|---|
+| G9 | Record the organisation's creation date. One synthetic attempt with two tool rounds and a regeneration, thinking on. Each body a byte-prefix extension of the one before. An older organisation opts in with `"error"` so the check can fail. No 400 for an edited history | The organisation existed by 24 July 2026, before the 31 August 2026 cutoff (owner-supplied). The check was opted into with `"error"`; the provider refuses `block_binding` without the beta flag, and no call was refused. Two tool rounds and a regeneration in one attempt, with thinking (`g9_not_covered` absent). Grow-only on every call. `input_transformations` present and empty on every answered call | **PASS** (fast, n = 1; 2026-10-19, owner-accepted) |
+| G21 | Thinking blocks with signatures, empty-text ones included, replay verbatim within an attempt and are accepted by the provider | Thinking blocks were produced and replayed within the covered attempt, and every later call was accepted with the prefix check set to `"error"`. That check verifies each replayed block against the conversation, so nothing was dropped or let through (`input_transformations` empty). HOME sends no `display`, so Sonnet 5.5 returns its thinking blocks with empty text, each with its signature (the provider's documented default). The replayed blocks were therefore the empty-text case. The offline half passes too (`kev-request-wire.test.ts`) | **PASS** (fast, Sonnet 5.5, n = 1); deep not exercised with the check on |
+| G7 (revised) | An accepted, cited structured answer after a tool round, in the answer phase | The answer phase ran under `none` with the format, never under `auto`. Both answers were refused by HOME's checker, and the turn fell back | **Not passed on this run.** It stays PASS on fast (run #4) and on deep (run #6), each n = 1 |
+| G22 | A count before every authorised call; one synthetic count compared with the call's `message_start` input | Counted before all five calls (`call_not_counted_first` absent). **The comparison (`maxCountDelta`) is unread** | Count-first verified; **the complete gate stays NOT VERIFIED** until `maxCountDelta` is recorded from a report |
+| G10 | US inference on every call | `not_us_inference` absent | **PASS** for the calls made |
+
 **Live verification #3 and the two-phase answer (2026-10-18; run 39090124303 on 6fbb27a; ADR 0012 §54).** C and D accepted (strict tools under `auto`, no format; valid `tool_use`; counts 200); E refused (HTTP 400, grammar compilation signals) and the session stopped. HOME recorded US$0.160675 (the owner's figure from the report); Anthropic's bill NOT RECONCILED. Decision: two phases inside the format path. G7 is revised (row above). The runner's plan is now `two-phase-acceptance`: one orchestrated fast turn, maximum US$1.50, session cap US$2. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED until that turn runs; nothing is PASS.
 
 **Tool-use diagnostic plan (2026-10-18; ADR 0012 §53; prepared and dry-run only, not run).** The runner's plan is now `tool-diagnostic`: one Sonnet 5.5 call per probe under `tool_choice: auto`, bisecting run #2's refused request (C one strict tool; D the 12 strict read tools; E with the answer format; F1–F4 without the unions, without string formats, without the empty-input tools, without `strict`), each run only when the earlier results call for it and stopping when the cause is established; G22 and G10 on every call. At most six probes run: maximum exposure US$1.596672, session cap US$2.50. The diagnostic (`DX`) finds a cause and is not a gate. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED, and nothing is PASS.
