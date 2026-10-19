@@ -50,6 +50,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "One fast attempt (the orchestrated turn), settled; 0 open, 0 unreconciled (owner-supplied).",
       "outcome": "The two-phase acceptance plan (ADR 0012 §54) passed: one orchestrated fast turn (Sonnet 5.5) through kev.handle(), five successful model calls (two tool rounds, the read phase's end, the answer phase and one regeneration), every call counted first and in the US, HOME's checked answer with one validated citation. The job's plan step took 24 s end to end (runner start, database checks and the turn; per-call times are in report.json)."
+    },
+    {
+      "date": "2026-10-18",
+      "workflowRun": "Kev live verification #5 (run 39173277077, commit 229748a)",
+      "planHash": "47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775",
+      "plannedMaxUsdMicros": "1500000",
+      "recordedUsdMicros": "0",
+      "recordedBasis": "Owner-supplied evidence (the owner's reading of the report, in the brief of 2026-10-19): zero model calls, zero token counts, zero usage rows, zero provider errors; HOME recorded US$0.00; no open or unreconciled reservation. The turn was refused before any reservation or provider call, so there is nothing to charge.",
+      "providerListPrice": "0 µ$: no call reached the provider.",
+      "anthropicBilling": "NOT RECONCILED: nothing is expected on the provider's Usage and Cost for this run; unconfirmed.",
+      "reservations": "None taken: the turn was refused at admission, before HOME reserves an attempt.",
+      "outcome": "FAILED before reaching Opus, an evaluation harness defect, not a model result: the deep smoke plan's one scenario turn was refused with turn_in_flight. The evaluation world left each adult's private conversation ending in their own unanswered message, written seconds earlier on the real clock, which HOME reads as a turn in flight (contract §7.2, L12); the stub and scripted suites moved the database clock years ahead and never saw it. Corrected in the fixture (ADR 0012 §60). No gate result; G7, G9, G21 and G22 on deep stay not verified."
     }
   ]
 }
