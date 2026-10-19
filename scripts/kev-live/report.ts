@@ -64,6 +64,7 @@ function callRows(r: ProbeResult) {
             answerFormat: e.answerFormat,
             blocks: e.blocks,
             growOnly: e.growOnly,
+            transformations: e.transformations,
             retried: e.retried,
             error: e.error,
             ms: e.ms,

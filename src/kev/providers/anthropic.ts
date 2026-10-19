@@ -6,11 +6,13 @@ import { INFERENCE_GEO, LIMITS, MODELS, TIERS } from '../config';
 import {
   ANTHROPIC_VERSION,
   createProviderFetch,
+  createRunnerProviderFetch,
   isProviderFetch,
   observedFetch,
   PROVIDER_FETCH_LIMITS,
   PROVIDER_ORIGIN,
   ProviderNetError,
+  THINKING_BINDING_BETA,
   type FetchObserver,
   type ProviderFetch,
 } from './fetch';
@@ -222,6 +224,17 @@ export function probeParams(request: ProviderRequest, probe: ProbeOptions): Para
       return rest;
     });
   }
+  if (probe.prefixCheck !== undefined) {
+    if (probe.prefixCheck !== 'error') throw new Error('a probe’s prefix check is `error` only');
+    // Adaptive is every tier's default (none is sent in production), so the
+    // model thinks as it does without it; the field opts this request into
+    // the provider's prefix check (G9; ADR 0012 §63).
+    // The SDK's types predate `block_binding`; the body carries it as sent.
+    params.thinking = {
+      type: 'adaptive',
+      block_binding: { prefix_mismatch_behavior: 'error' },
+    } as unknown as NonNullable<Params['thinking']>;
+  }
   if (probe.systemMessage !== undefined) {
     const t = probe.systemMessage;
     if (typeof t !== 'string' || t.trim() === '' || t.length > PROBE_SYSTEM_MAX_CHARS)
@@ -232,6 +245,27 @@ export function probeParams(request: ProviderRequest, probe: ProbeOptions): Para
     params.messages = [...params.messages, { role: 'system', content: t }];
   }
   return params;
+}
+
+/** The request's beta flag: the thinking-binding controls when a probe opts into the prefix check (G9). */
+function betaHeaders(probe: ProbeHooks | null): Record<string, string> | undefined {
+  return probe?.options?.prefixCheck ? { 'anthropic-beta': THINKING_BINDING_BETA } : undefined;
+}
+
+/** `input_transformations` from `message_start`, counted by type (G9); null when absent. */
+export function transformationsOf(
+  message: unknown,
+): Readonly<{ dropped: number; allowed: number; other: number }> | null {
+  const list = (message as { input_transformations?: unknown } | null)?.input_transformations;
+  if (!Array.isArray(list)) return null;
+  const out = { dropped: 0, allowed: 0, other: 0 };
+  for (const t of list) {
+    const type = (t as { type?: unknown } | null)?.type;
+    if (type === 'thinking_dropped') out.dropped += 1;
+    else if (type === 'thinking_mismatch_allowed') out.allowed += 1;
+    else out.other += 1;
+  }
+  return Object.freeze(out);
 }
 
 /** The probe path's hooks into one call: its options and where its evidence goes. */
@@ -485,7 +519,10 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
     try {
       const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
       counted = validCount(
-        await client.messages.countTokens(countParamsOf(params), { signal: call.signal }),
+        await client.messages.countTokens(countParamsOf(params), {
+          signal: call.signal,
+          headers: betaHeaders(probe),
+        }),
       );
       if (counted === null) throw failed('bad_response');
       return counted;
@@ -554,14 +591,20 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
     let record: CallRecord | null = null;
     let outcome: 'ok' | ProviderErrorCode = 'ok';
     let blocks: Readonly<Record<string, number>> = Object.freeze({});
+    let transformations: Readonly<{ dropped: number; allowed: number; other: number }> | null =
+      null;
     // The probe path's error detail (synthetic runner only; never production).
     let errorDetail: ProbeErrorDetail | null = null;
     const growOnly = probe ? probe.growOnly(budget.attemptId, params) : null;
     try {
       const client = new Anthropic(anthropicClientOptions(apiKey, observedFetch(fetch, observer)));
-      const stream = client.messages.stream(params, { signal: call.signal });
+      const stream = client.messages.stream(params, {
+        signal: call.signal,
+        headers: betaHeaders(probe),
+      });
       for await (const event of stream) {
         if (event.type === 'message_start') {
+          if (probe) transformations = transformationsOf(event.message);
           const u = event.message.usage;
           usage = {
             inputTokens: n(u.input_tokens),
@@ -748,6 +791,7 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
           answerFormat: Boolean(params.output_config?.format),
           blocks,
           growOnly,
+          transformations,
           retried,
           ms: Date.now() - started,
         }),
@@ -831,8 +875,12 @@ export type ProbeGateway = Readonly<{
   models(id: string): Promise<Extract<ProbeEvidence, { kind: 'models' }>>;
   /** One probe call: the production path, changed only as `probe` names. */
   run(request: ProviderRequest, options: RunOptions, probe?: ProbeOptions): Promise<ProviderResult>;
-  /** A KevProvider for kev.handle() (G9, G21): production requests, with evidence recorded. */
-  provider(): KevProvider;
+  /**
+   * A KevProvider for kev.handle() (G9, G21): production requests, with
+   * evidence recorded; with `probe`, every call changed only as it names
+   * (G9's prefix check).
+   */
+  provider(probe?: ProbeOptions): KevProvider;
   /** Every exchange so far, in order (no body, no key, no header but the request id). */
   evidence(): readonly ProbeEvidence[];
 }>;
@@ -929,11 +977,11 @@ export function buildProbeGateway(
     },
     run: (request: ProviderRequest, options: RunOptions, probe?: ProbeOptions) =>
       core.run(request, options, hooks(probe ?? null)),
-    provider: (): KevProvider =>
+    provider: (probe?: ProbeOptions): KevProvider =>
       Object.freeze({
         kind: 'anthropic' as const,
         run: (request: ProviderRequest, options: RunOptions) =>
-          core.run(request, options, hooks(null)),
+          core.run(request, options, hooks(probe ?? null)),
       }),
     evidence: () => Object.freeze([...log]),
   });
@@ -953,7 +1001,9 @@ export function createProbeGateway(
     throw new Error('the probe gateway takes the key and nothing else');
   if (deployedSource(source) || deployedSource(deploymentEnv()))
     throw new Error('the probe gateway is for the live verification runner only, never deployed');
-  return buildProbeGateway(config.apiKey, createProviderFetch(config.apiKey), source);
+  // The runner's fetch: production's rules, with the thinking-binding beta
+  // flag enabled (G9; sent only when a probe opts into the prefix check).
+  return buildProbeGateway(config.apiKey, createRunnerProviderFetch(config.apiKey, source), source);
 }
 
 class ProbeAborted extends Error {

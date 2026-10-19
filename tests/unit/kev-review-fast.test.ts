@@ -24,16 +24,18 @@ import { runMode } from '../../scripts/kev-live/runner';
 // Package 5E's Stage 1 (M8-PACKAGE-5E-READINESS.md §8; ADR 0012 §62): the
 // owner's review set once on the fast tier, as configured. Its design, its
 // exact maximum, its budget edges and the keyless check against the
-// committed campaign ledger. No network, no key, no database.
+// committed campaign ledger. No network, no key, no database. G9's
+// prefix-check plan runs first (ADR 0012 §63) and leaves this plan, and its
+// approved hash, exactly as they were.
 
 const HASH = '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('Stage 1’s design', () => {
-  it('is the session plan: the review set, in its order, once each, on fast as configured', () => {
-    expect(SESSION_PLAN).toBe('review-fast');
+  it('the review set, in its order, once each, on fast as configured (after G9’s plan)', () => {
+    expect(SESSION_PLAN).toBe('g9-binding');
     expect(PLAN_VERSION).toBe(6);
-    const plan = buildPlan();
+    const plan = buildPlan('review-fast');
     expect(plan.name).toBe('review-fast');
     expect(plan.kind).toBe('evaluation');
     expect(plan.probes.map((p) => p.kind === 'scenario' && p.scenario)).toEqual(
@@ -55,9 +57,9 @@ describe('Stage 1’s design', () => {
     expect(REVIEW_FAST_PROBES).toHaveLength(20);
   });
 
-  it('has a deterministic hash for the owner to approve', () => {
-    expect(buildPlan().hash).toBe(HASH);
+  it('has a deterministic hash for the owner to approve, unchanged by G9’s plan', () => {
     expect(buildPlan('review-fast').hash).toBe(HASH);
+    expect(buildPlan().hash).not.toBe(HASH);
     expect(buildPlan('deep-smoke').hash).not.toBe(HASH);
     expect(
       buildPlan('review-fast', REVIEW_FAST_PROBES.slice(1), PLANS['review-fast']).hash,
@@ -70,7 +72,7 @@ describe('its exact maximum exposure', () => {
     // A fast turn's attempt (US$0.66528) and an escalation (US$1.50) are held
     // together to the turn ceiling.
     expect(scenarioTurnMaxUsdMicros('fast')).toBe(LIMITS.turnCeilingUsdMicros);
-    const plan = buildPlan();
+    const plan = buildPlan('review-fast');
     expect(plan.totalMaxUsdMicros).toBe(31_500_000n);
     expect(plan.totalNoRetryUsdMicros).toBe(31_500_000n);
     expect(plan.peakHoldUsdMicros).toBe(31_500_000n);
@@ -85,7 +87,7 @@ describe('its exact maximum exposure', () => {
     const ledger = parseLedger(LEDGER);
     const spent = ledger.sessions.reduce((a, s) => a + BigInt(s.recordedUsdMicros), 0n);
     expect(CAMPAIGN_USD_MICROS - spent).toBe(198_578_930n);
-    expect(buildPlan().sessionCapUsdMicros).toBeLessThan(CAMPAIGN_USD_MICROS - spent);
+    expect(buildPlan('review-fast').sessionCapUsdMicros).toBeLessThan(CAMPAIGN_USD_MICROS - spent);
   });
 });
 
@@ -101,6 +103,7 @@ describe('the keyless preflight against the committed ledger', () => {
       mode,
       { KEV_LIVE_BUDGET_USD: budget, KEV_LIVE_APPROVED_PLAN_HASH: hash },
       {
+        plan: buildPlan('review-fast'),
         ledgerText: LEDGER,
         reportDir: '/nonexistent',
         log: (l) => lines.push(l),

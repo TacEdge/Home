@@ -83,7 +83,11 @@ export type Usage = {
 export const ev = (type: string, data: Record<string, unknown>) =>
   `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
 
-export function messageStart(model: string, usage: Usage = {}) {
+export function messageStart(
+  model: string,
+  usage: Usage = {},
+  extra: Record<string, unknown> = {},
+) {
   const u: Record<string, unknown> = {
     input_tokens: 4_100,
     output_tokens: 1,
@@ -103,6 +107,7 @@ export function messageStart(model: string, usage: Usage = {}) {
       stop_reason: null,
       stop_sequence: null,
       usage: u,
+      ...extra,
     },
   });
 }

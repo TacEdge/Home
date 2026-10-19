@@ -860,6 +860,38 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - Keyless checks (no network): US$31.67 passes. US$31.66 (17), US$31.68 and US$31.49 (14), another plan's hash (15) and a key in the check (13) are refused.
       - The live path against a local synthetic `home_live_verify`: fixture family only, the world built, HOME's cap NZ$57, stopped at a gateway that throws. No reservation or usage was written.
     - **Not yet dispatchable.** Contract §2.2's preconditions for a Package 5 live run are open: G9, G21 and the complete G22 (the run #4 and #6 reports), and G11 and G12 for the evaluation workspace.
+63. **G9's prefix check, opted into on the runner only** (2026-10-19; the owner's brief "Final G9 Verification", with M8's scope frozen; built and verified offline, no provider call, no dispatch).
+    - **The account facts (owner-supplied).** The organisation existed by 24 July 2026, so it predates the 31 August 2026 cutoff. Evaluation workspace "HOME - Kev Evaluations"; US-only inference; monthly spending limit US$10; automatic reload off; prepaid credits US$19.23. G11 is supported and G12's controls are confirmed; these settings are not changed.
+    - **What G9 needs (the provider's preserved-thinking documentation, read 2026-10-19).**
+      - The prefix check runs on Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. It is enforced by default only for organisations created on or after 31 August 2026 00:00 UTC.
+      - For an older organisation it is enforced only on a request that sets `thinking.block_binding.prefix_mismatch_behavior` (`"error"` or `"drop_block"`), which needs the beta flag `thinking-binding-controls-2026-08-01`. The flag alone changes nothing; the field without the flag is refused (HTTP 400). The count endpoint runs the same check.
+      - On Sonnet 5.5 `block_binding` is accepted with `thinking: {type: "adaptive"}`, which is also the default when no thinking is sent, as HOME's production requests send none.
+      - `tool_choice`, `effort`, `max_tokens` and `output_config` are outside the check: the two phases (§54) change only those.
+      - A response reports `input_transformations` on `message_start`: `thinking_dropped` or `thinking_mismatch_allowed` entries, empty when nothing was changed.
+      - So **live verifications #4 and #6 could not have failed on a prefix violation**: this organisation was never checked. G9 needs a new live run with the check opted into (contract §5.7, G9's row: "an older organisation adds the beta header with `"error"` so the check can fail").
+    - **The change (runner only; production unchanged).**
+      - `src/kev/providers/fetch.ts`: the header allow-list sends `anthropic-beta` only when the fetch enables that exact value. Production's fetch enables none (unchanged: the header is dropped). The runner's new `createRunnerProviderFetch` enables exactly `thinking-binding-controls-2026-08-01`. It keeps production's rules (TLS, the provider's origin, public addresses, the limits) and refuses a deployed process and a malformed key. Contract §5.4 allows "beta flags HOME enables".
+      - `src/kev/providers/anthropic.ts`:
+        - a probe option `prefixCheck: 'error'` (nothing else accepted) sets `thinking: {type: "adaptive", block_binding: {prefix_mismatch_behavior: "error"}}` and sends the flag on that request's count and call;
+        - each probe call's evidence records `input_transformations` counted by type (null when absent);
+        - the probe gateway's KevProvider takes probe options (production's provider still ignores them), and the probe gateway uses the runner's fetch.
+      - `scripts/kev-live/`:
+        - a turn probe may carry `prefixCheck`;
+        - its checks add `bindingChecks`: one attempt with at least two tool rounds and a regeneration (two answer-phase calls), with thinking replayed, and every answered call's `input_transformations` present and empty;
+        - the report keeps the counts.
+    - **The plan.** `g9-binding` is a verification plan and now the session plan:
+      - **What it runs:** one turn, `g9-binding-turn` (gates G9, G21, G7, G22, G10), on fast (Sonnet 5.5 `medium`) through `kev.handle()`, as the fixture adult on the runner's database. It uses live verification #4's question, which gave two tool rounds and a regeneration on fast.
+      - **Stopping:** it stops on failure.
+      - **Coverage:** neither the rounds nor the regeneration can be forced without changing Kev, so the probe passes only if the turn shows both. A turn that does not is a fail with `g9_not_covered`, and needs a fresh owner approval to repeat.
+      - **Exposure:** the maximum is the US$1.50 turn ceiling, a fast attempt and any escalation together. Escalation runs Opus 5.5 under the same check.
+      - **Budget:** US$1.67 (NZ$3, US$1.666667) is the smallest budget whose whole-NZ$ cap holds it, and is the plan's cap. US$1.66 (NZ$2) is refused at the cap.
+      - **Hash:** `baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3`. The canonical plan binds the opt-in and the flag (a `betas` field only in a plan that uses one). `PLAN_VERSION` stays 6, so Stage 1's approved hash (`29d57657…`) and every other plan's are unchanged.
+    - **Verified offline.**
+      - Unit tests: the allow-list (production drops the flag; the runner's fetch sends only its exact value), the request body, the evidence, the coverage rules, the plan, its hash and its maximum.
+      - Keyless checks against the committed ledger: US$1.67 passes; US$1.66 (17), US$1.68, US$1.49 and US$31.67 (14) and Stage 1's hash (15) are refused.
+      - A stub run through the real adapter and `kev.handle()`: two tool rounds, a regeneration, thinking replayed. The stub refuses any body that does not extend the last one's `system`, `tools` and `messages` byte for byte (the two phases pass it), refuses `block_binding` without the flag (the session stops at the first count), and fails the probe on a missing regeneration and on a reported transformation.
+      - Mutations of the flag's allow-list and of the probe's wiring are caught.
+    - **Not dispatchable until the owner approves the hash and the budget.** The workspace's US$10 monthly limit holds this run with room for Stage 1's expected spend, but not Stage 1's US$31.50 maximum (§62, the readiness paper).
 
 ## Consequences
 

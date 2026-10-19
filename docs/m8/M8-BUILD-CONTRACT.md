@@ -642,7 +642,7 @@ The SDK's own HTTP stack would bypass HOME's outbound policy (digest tension 17)
 - **Redirects:** refused.
 - **Size:** request body ≤ 1 MiB; response ≤ 2 MiB, counted while streaming.
 - **Time:** the per-call timeout (§5.3) and a 15-second idle limit (no bytes).
-- **Headers:** only those the SDK sets for the API (key, version, content type, beta flags HOME enables); no cookie or HOME header.
+- **Headers:** only those the SDK sets for the API (key, version, content type, beta flags HOME enables); no cookie or HOME header. *(ADR 0012 §63: production enables no beta flag. The live verification runner's fetch enables exactly `thinking-binding-controls-2026-08-01`, sent only on a probe that opts into G9's prefix check.)*
 - **Errors:** a closed set of `ProviderError` codes (`unreachable`, `timeout`, `too_large`, `refused_destination`, `rate_limited`, `overloaded`, `bad_response`, `refusal`, `auth`); nothing logs or carries the key, a header or a body.
 
 Whether the TypeScript SDK accepts a custom `fetch` that preserves streaming is an **assumption, verified first in Package 1** (N4). If it does not, Package 1 stops and the owner chooses between calling the Messages API with HOME's own small client (no SDK) and the SDK's transport with a destination allow-list only.
@@ -889,6 +889,11 @@ Evidence sources:
 | G3, G4, G16 (Neon), G17 | Preview | Not exercised: **NOT VERIFIED** |
 
 **The owner's action, free, before the artifacts expire** (#4's on 2026-11-17, #6's on 2026-11-18): from each `report.json`, read the turn probe's `checks.thinkingBlocks` and `checks.maxCountDelta` and each call's `stop`, `outputTokens`, `blocks`, `ms` and cache tokens. Also record the organisation's creation date from the Console. Those values close G9, G21 and the complete G22 on both tiers, or show what remains. Package 5E's readiness paper (`docs/m8/M8-PACKAGE-5E-READINESS.md`) says what the call fields would show about the first answer's `answer.schema`.
+
+**G9's prefix check (2026-10-19; ADR 0012 §63; built and checked offline, not run).**
+- **What changes the gate (owner-supplied).** The organisation existed by 24 July 2026, before the 31 August 2026 cutoff. The provider enforces the prefix check on such an organisation only for a request that sets `thinking.block_binding.prefix_mismatch_behavior` under the beta flag `thinking-binding-controls-2026-08-01`. So runs #4 and #6 could not have failed on a prefix violation, and their job success is not G9's evidence.
+- **The run that is.** The runner's `g9-binding` plan: one fast turn with the check opted into (`"error"`) on every count and call. It passes only with at least two tool rounds and a regeneration in one attempt, thinking replayed, no refusal, and every call's `input_transformations` present and empty. Hash `baa99170…`; maximum US$1.50; budget US$1.67.
+- **Status.** G9 and G21 stay **NOT VERIFIED** until that run is approved, dispatched and its report read. The account facts above are the owner's; G11 and G12 are recorded by the owner (DEPLOY.md §E items 25–26).
 
 **Live verification #3 and the two-phase answer (2026-10-18; run 39090124303 on 6fbb27a; ADR 0012 §54).** C and D accepted (strict tools under `auto`, no format; valid `tool_use`; counts 200); E refused (HTTP 400, grammar compilation signals) and the session stopped. HOME recorded US$0.160675 (the owner's figure from the report); Anthropic's bill NOT RECONCILED. Decision: two phases inside the format path. G7 is revised (row above). The runner's plan is now `two-phase-acceptance`: one orchestrated fast turn, maximum US$1.50, session cap US$2. **No gate changes status:** G7, G9, G21 and the complete G22 stay NOT VERIFIED until that turn runs; nothing is PASS.
 
