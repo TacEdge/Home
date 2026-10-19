@@ -110,6 +110,30 @@ function refsIn(node: unknown, type: string, needle?: string): Ref[] {
   return out;
 }
 
+/**
+ * The person refs of the birthdays an agenda read lists (`{type: 'birthday',
+ * ref}`), in order: an agenda absence with `else` holds only when every
+ * record in its scope is shown, birthdays included (a person ref alone could
+ * be an event's attendee, so the birthday entry is matched, not the ref).
+ */
+function birthdaysIn(node: unknown): Ref[] {
+  const out: Ref[] = [];
+  const seen = new Set<string>();
+  const walk = (n: unknown) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (typeof n !== 'object' || n === null) return;
+    const o = n as Record<string, unknown>;
+    const ref = o.ref as Ref | undefined;
+    if (o.type === 'birthday' && ref && typeof ref.id === 'string' && !seen.has(ref.id)) {
+      seen.add(ref.id);
+      out.push(ref);
+    }
+    for (const [k, v] of Object.entries(o)) if (k !== 'ref') walk(v);
+  };
+  walk(node);
+  return out;
+}
+
 const record = (r: Ref, show: string[] = []): Fact => ({
   kind: r.type,
   ref: wire(r),
@@ -220,9 +244,11 @@ function scriptFor(q: string, today: string): LocalScript {
         ...twice((req: ProviderRequest) => {
           const read = resultsOf(req);
           const events = refsIn(read, 'event').slice(0, 8);
+          const birthdays = birthdaysIn(read);
           return plan('when', [
             ...events.map((r) => record(r, ['people'])),
-            agendaAbsence(today, today, events.length),
+            ...birthdays.map((r) => record(r, ['birthday'])),
+            agendaAbsence(today, today, events.length + birthdays.length),
           ]);
         }),
       ],
@@ -233,10 +259,13 @@ function scriptFor(q: string, today: string): LocalScript {
       script: [
         tools(['get_agenda', { from: tomorrow, to: tomorrow }]),
         ...twice((req: ProviderRequest) => {
-          const events = refsIn(resultsOf(req), 'event').slice(0, 8);
+          const read = resultsOf(req);
+          const events = refsIn(read, 'event').slice(0, 8);
+          const birthdays = birthdaysIn(read);
           return plan('when', [
             ...events.map((r) => record(r, ['people'])),
-            agendaAbsence(tomorrow, tomorrow, events.length),
+            ...birthdays.map((r) => record(r, ['birthday'])),
+            agendaAbsence(tomorrow, tomorrow, events.length + birthdays.length),
           ]);
         }),
       ],
@@ -283,10 +312,12 @@ function scriptFor(q: string, today: string): LocalScript {
         ...twice((req: ProviderRequest) => {
           const read = resultsOf(req);
           const events = refsIn(read, 'event').slice(0, 6);
+          const birthdays = birthdaysIn(read);
           return plan('righto_when', [
             ...events.map((r) => record(r, ['people'])),
+            ...birthdays.map((r) => record(r, ['birthday'])),
             ...refsIn(read, 'forecast').map((r) => record(r, ['phrase'])),
-            agendaAbsence(sat, sun, events.length),
+            agendaAbsence(sat, sun, events.length + birthdays.length),
           ]);
         }),
       ],
