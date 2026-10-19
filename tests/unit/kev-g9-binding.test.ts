@@ -218,10 +218,10 @@ describe('the coverage checks (bindingChecks)', () => {
 });
 
 describe('the plan: one fast turn, the prefix check on', () => {
-  it('is the session plan; Stage 1 is unchanged, its approved hash too', () => {
-    expect(SESSION_PLAN).toBe('g9-binding');
+  it('ran as live verification #7; Stage 1 is the session plan again, its approved hash unchanged', () => {
+    expect(SESSION_PLAN).toBe('review-fast');
     expect(PLAN_VERSION).toBe(6);
-    const plan = buildPlan();
+    const plan = buildPlan('g9-binding');
     expect(plan.name).toBe('g9-binding');
     expect(plan.kind).toBe('verification');
     expect(plan.probes).toHaveLength(1);
@@ -242,8 +242,8 @@ describe('the plan: one fast turn, the prefix check on', () => {
   });
 
   it('has a deterministic hash that binds the opt-in', () => {
-    expect(buildPlan().hash).toBe(HASH);
     expect(buildPlan('g9-binding').hash).toBe(HASH);
+    expect(buildPlan().hash).toBe(STAGE_1_HASH);
     const { probe: _p, ...without } = G9_BINDING_PROBES[0] as Extract<
       (typeof G9_BINDING_PROBES)[number],
       { kind: 'turn' }
@@ -253,7 +253,7 @@ describe('the plan: one fast turn, the prefix check on', () => {
   });
 
   it('its maximum is the US$1.50 turn ceiling; US$1.67 is the smallest budget whose whole-NZ$ cap holds it', () => {
-    const plan = buildPlan();
+    const plan = buildPlan('g9-binding');
     expect(plan.totalMaxUsdMicros).toBe(LIMITS.turnCeilingUsdMicros);
     expect(plan.totalMaxUsdMicros).toBe(1_500_000n);
     expect(plan.peakHoldUsdMicros).toBe(1_500_000n);
@@ -281,6 +281,7 @@ describe('the keyless preflight against the committed ledger', () => {
       mode,
       { KEV_LIVE_BUDGET_USD: budget, KEV_LIVE_APPROVED_PLAN_HASH: hash },
       {
+        plan: buildPlan('g9-binding'),
         ledgerText: LEDGER,
         reportDir: '/nonexistent',
         log: (l) => lines.push(l),

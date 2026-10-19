@@ -292,4 +292,18 @@ M8 (Kev Intelligence) items. **Added in M8 Package 0** (ADR 0012 §37, the owner
 | 30 | The dates Preview's and Production's logs were reviewed; no question, answer, title, name, prompt, provider body or key found (yes/no). |
 | 31 | The date; answers read as facts with Kev's view marked (yes/no); nothing read as availability or "the best" time (yes/no); declines honest (yes/no); anything that read wrong, in general terms only. |
 
+**Items 25 and 26, the evaluation workspace only (owner-supplied, 2026-10-19; recorded in M8 Package 5E, ADR 0012 §65; not independently verified by the recording agent).** Neither item is complete: each also covers the Preview and Production workspaces and keys, which do not exist yet.
+- **Item 25, evaluation workspace:**
+  - workspace "HOME - Kev Evaluations", separate from any Preview or Production workspace (none exists yet): yes;
+  - workspace geo: United States;
+  - US inference enforced (inference geo US only): yes;
+  - the evaluation key only as the `kev-evals` environment's `KEV_EVAL_PROVIDER_KEY` (the workflow's own reference; the environment's settings page is the owner's to read);
+  - Preview and Production keys: not created (Kev is off everywhere deployed).
+- **Item 26, evaluation workspace:**
+  - provider spend limit offered and set: yes, a monthly workspace limit of US$10;
+  - automatic credit reload: off;
+  - the evaluation workspace's limit at or below the evaluation allocation's remainder (US$198.493930): yes.
+
+  HOME's household cap and the Preview and Production workspaces' limits are not recorded here.
+
 Not an acceptance item, but recommended before any `pg` 9 upgrade: change both GitHub `DATABASE_URL_MIGRATE` secrets (`production` and `preview` environments) from `sslmode=require` to `sslmode=verify-full`. `pg` 8 already verifies certificates for `require`; `pg` 9 will not.
