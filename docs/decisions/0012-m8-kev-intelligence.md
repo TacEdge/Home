@@ -849,6 +849,17 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **The three extra citations.** By the relevance rule they are non-event refs. They are classified from the transcript by the owner.
       - **Money.** The campaign as specified is expected at about US$221, against US$198.58 left. The runner's rule (a run's budget ≥ its maximum, ≤ the remainder) needs about US$40–60 more headroom to finish with sensibly sized runs.
     - **Decisions for the owner:** the readiness paper's §11. Nothing is implemented until the owner approves.
+62. **Package 5E Stage 1 prepared: the review set on fast** (2026-10-19; the owner's direction with M8's scope frozen; dry run and keyless checks only, no provider call, no dispatch).
+    - **The plan.** `review-fast` is a named `evaluation` plan and now the session plan.
+      - **What it runs:** the owner's review set (5C, twenty scenarios in its order, 21 turns: one is a follow-up), once each, on the fast tier as configured: Sonnet 5.5, `medium`.
+      - **No new checks:** plain scenario probes, the catalogue's own checker, no smoke checks, and no stop on a failed scenario (a run of evidence). No scenario, check, threshold, prompt, validator or gateway changes.
+    - **Exposure, exact.** Each fast turn's maximum is the US$1.50 turn ceiling (the fast attempt's US$0.66528 and an escalation's US$1.50, held together). So the maximum is **US$31.50**.
+    - **Budget.** HOME's whole-NZ$ cap must hold all of the maximum, since each earlier turn is assumed settled at its maximum. **US$31.67** (NZ$57, US$31.666667) is the smallest budget that works and the plan's cap. US$31.66 (NZ$56) is refused at the cap.
+    - **Hash.** `PLAN_VERSION` stays 6. The plan hash is `29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa`. `deep-smoke` keeps `47710b79…`, but its approval no longer matches the session plan.
+    - **Verified offline.**
+      - Keyless checks (no network): US$31.67 passes. US$31.66 (17), US$31.68 and US$31.49 (14), another plan's hash (15) and a key in the check (13) are refused.
+      - The live path against a local synthetic `home_live_verify`: fixture family only, the world built, HOME's cap NZ$57, stopped at a gateway that throws. No reservation or usage was written.
+    - **Not yet dispatchable.** Contract §2.2's preconditions for a Package 5 live run are open: G9, G21 and the complete G22 (the run #4 and #6 reports), and G11 and G12 for the evaluation workspace.
 
 ## Consequences
 

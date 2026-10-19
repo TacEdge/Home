@@ -4,6 +4,7 @@ import { GEO_MULTIPLIER, INFERENCE_GEO, LIMITS, MODELS, TIERS } from '@/kev/conf
 import { SYSTEM_PROMPT } from '@/kev/prompts/system';
 import type { ProbeOptions, ProviderToolDefinition } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
+import { REVIEW_SET } from '@/kev/evals/review-set';
 import { SCENARIOS } from '@/kev/evals/scenarios';
 import type { Scenario, ScenarioClass } from '@/kev/evals/types';
 import { toolDefinitions } from '@/kev/tools/registry';
@@ -568,6 +569,20 @@ export const DEEP_SMOKE_PROBES: readonly ProbeSpec[] = Object.freeze([
 ] satisfies ProbeSpec[]);
 
 /**
+ * Package 5E's Stage 1 (ADR 0012 §62): the owner's review set (5C), in its
+ * own order, once each on the fast tier as configured (Sonnet 5.5,
+ * `medium`). Plain scenario probes: the catalogue's checker, no extra
+ * smoke check, and no stop on a failed scenario (a run of evidence).
+ */
+export const REVIEW_FAST_PROBES: readonly ProbeSpec[] = Object.freeze(
+  scenarioProbes({
+    scenarios: REVIEW_SET.map((e) => e.scenario),
+    tiers: ['fast'],
+    repeats: 1,
+  }),
+);
+
+/**
  * The named plans (live verification #2, 2026-10-17; ADR 0012 §51): which
  * probes from the list above a session runs, and its own session cap,
  * never above the US$10 ceiling (owner decision 4). `full` is run #1's
@@ -629,6 +644,19 @@ export const PLANS = Object.freeze({
     specs: DEEP_SMOKE_PROBES,
     sessionCapUsdMicros: 1_670_000n,
   }),
+  // Package 5E's Stage 1 (M8-PACKAGE-5E-READINESS.md §8; ADR 0012 §62): the
+  // owner's review set (5C's twenty scenarios, 21 turns) once each on the
+  // fast tier, Sonnet 5.5 `medium`, unchanged. Its maximum is 21 turns at
+  // the US$1.50 turn ceiling, US$31.50. HOME's whole-NZ$ cap must hold that
+  // whole sum (each earlier turn assumed settled at its maximum): US$31.67
+  // is NZ$57 (US$31.666667), which holds it; US$31.66 is NZ$56 (US$31.11)
+  // and cannot (tested). The smallest practical cap, then.
+  'review-fast': Object.freeze({
+    kind: 'evaluation',
+    probes: Object.freeze(REVIEW_FAST_PROBES.map((p) => p.id)),
+    specs: REVIEW_FAST_PROBES,
+    sessionCapUsdMicros: 31_670_000n,
+  }),
 } satisfies Record<string, PlanDef>);
 
 /**
@@ -646,8 +674,8 @@ export type PlanDef = Readonly<{
 
 export type PlanName = keyof typeof PLANS;
 
-/** The plan the runner runs now: Package 5D's deep smoke run, for the owner's approval. */
-export const SESSION_PLAN: PlanName = 'deep-smoke';
+/** The plan the runner runs now: Package 5E's Stage 1, the review set on fast, for the owner's approval. */
+export const SESSION_PLAN: PlanName = 'review-fast';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {

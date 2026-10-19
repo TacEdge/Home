@@ -36,10 +36,10 @@ const HASH = '47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep smoke plan’s design', () => {
-  it('is the session plan: one catalogue scenario, on deep, in the owner’s review set', () => {
-    expect(SESSION_PLAN).toBe('deep-smoke');
+  it('one catalogue scenario, on deep, in the owner’s review set (no longer the session plan: Stage 1 is, ADR 0012 §62)', () => {
+    expect(SESSION_PLAN).toBe('review-fast');
     expect(PLAN_VERSION).toBe(6);
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     expect(plan.kind).toBe('evaluation');
     expect(plan.probes).toHaveLength(1);
     const p = plan.probes[0]!;
@@ -64,7 +64,6 @@ describe('the deep smoke plan’s design', () => {
   });
 
   it('has a deterministic hash for the owner to approve', () => {
-    expect(buildPlan().hash).toBe(HASH);
     expect(buildPlan('deep-smoke').hash).toBe(HASH);
     // Any change to what it runs changes it.
     const edit = (over: object) =>
@@ -90,14 +89,14 @@ describe('its exact maximum exposure', () => {
     expect(LIMITS.modelCallsPerAttempt).toBe(5);
     expect(BigInt(LIMITS.modelCallsPerAttempt) * perCallMax('deep')).toBe(1_781_120n);
     expect(attemptReservation('deep')).toBe(1_500_000n);
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     expect(plan.totalMaxUsdMicros).toBe(1_500_000n);
     expect(plan.totalNoRetryUsdMicros).toBe(1_500_000n);
     expect(plan.peakHoldUsdMicros).toBe(1_500_000n);
   });
 
   it('fits every limit: its cap, the run ceiling, the campaign remainder, apart from the household cap', () => {
-    const plan = buildPlan();
+    const plan = buildPlan('deep-smoke');
     expect(plan.sessionCapUsdMicros).toBe(1_670_000n);
     expect(plan.sessionCapUsdMicros).toBeLessThan(EVALUATION_RUN_CEILING_USD_MICROS);
     // US$1.67 is NZ$3 in HOME's whole-NZ$ cap (US$1.666667), which holds the
@@ -127,6 +126,7 @@ describe('the keyless preflight against the committed ledger', () => {
         ledgerText: LEDGER,
         reportDir: '/nonexistent',
         log: (l) => lines.push(l),
+        plan: buildPlan('deep-smoke'),
         gatewayFor: () => {
           gateway = true;
           throw new Error('no gateway before a live run');
