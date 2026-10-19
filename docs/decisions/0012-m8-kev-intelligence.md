@@ -836,6 +836,19 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - A pre-provider refusal is already distinguishable in the report, with no change needed: zero model calls and an admission code (`turn_in_flight`, `rate_limited`), where a model-quality failure carries the checker's closed check names.
       - No gate result is suggested from it. Deep G7, G9, G21 and G22 stay NOT VERIFIED.
     - **Next.** A new run of the same plan needs the owner's fresh approval of the unchanged hash and US$1.67 budget, after this correction merges (runbook step 8).
+61. **Live verification #6: the deep smoke run passed; Package 5E's readiness paper** (2026-10-19; run 39189762049 on `f9eba68`, the `deep-smoke` plan; evidence closure only, no code, prompt, validator or config change, no provider call).
+    - **The run.** One orchestrated Opus 5.5 turn on `realistic.weekend_look`.
+      - **First-party:** the owner's approval in `kev-evals` and the job's success. The job succeeds only when every smoke and scenario check passed (§59).
+      - **Owner-supplied** (`report.json`, artifact 12160000016, unreadable from the build session): five calls (three tool rounds with five tool calls, then the answer phase and one regeneration); the first answer refused with `answer.schema`, the regeneration accepted; 35.64 s to the checked answer; HOME recorded **US$0.248311**, reconciled. Anthropic's bill is NOT RECONCILED.
+    - **Recorded.**
+      - **Ledger:** row #6 at 248,311 µ$. The remainder is 198,578,930 µ$.
+      - **Gate register (contract §5.7, the live verification #6 update):** G7 (revised) **PASS on deep** (n = 1); G10 PASS for the calls made; G8 recorded (the labelled regeneration accepted on Opus). G9, G21 and the complete G22 stay **NOT VERIFIED** (the creation date, `thinkingBlocks`, `maxCountDelta`). E1 and E9 have n = 1 evidence and are not passed.
+    - **Findings** (`docs/m8/M8-PACKAGE-5E-READINESS.md`, evidence separated from inference).
+      - **`answer.schema`.** It is not a provider defect. The provider's grammar is deliberately looser than HOME's Zod check, and the orchestrator does not read `stop`, so a truncated answer also reads as `answer.schema`. The cause is a Zod-only rule or truncation at deep's 8,192-token budget (thinking included). Call 4's `stop`, `outputTokens` and `blocks` in `report.json` decide which. No rule is loosened.
+      - **Latency.** Ten sequential provider round trips: five counts and five calls. The read phase reached its three-round limit where the scenario's reference reads once (agenda and weather in parallel). The tools already allow it; no orchestration change.
+      - **The three extra citations.** By the relevance rule they are non-event refs. They are classified from the transcript by the owner.
+      - **Money.** The campaign as specified is expected at about US$221, against US$198.58 left. The runner's rule (a run's budget ≥ its maximum, ≤ the remainder) needs about US$40–60 more headroom to finish with sensibly sized runs.
+    - **Decisions for the owner:** the readiness paper's §11. Nothing is implemented until the owner approves.
 
 ## Consequences
 
