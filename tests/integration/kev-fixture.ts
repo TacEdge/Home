@@ -504,6 +504,16 @@ export async function addPrivateFor(
     },
     deps,
   );
+  // An earlier conversation, not a turn in flight: an adult's last message
+  // unanswered and under 70 seconds old is one (contract §7.2, L12), so a
+  // turn started straight after the fixture is built (the live runner's, on
+  // the real clock) would be refused. Ten minutes back, by its own clock.
+  await admin.execute(sql`
+    update message set created_at = created_at - interval '10 minutes'
+     where conversation_id = ${conversation.id}::uuid`);
+  await admin.execute(sql`
+    update conversation set last_message_at = last_message_at - interval '10 minutes'
+     where id = ${conversation.id}::uuid`);
 
   // The harder joins: private records reaching household ones.
   const series = await createEventWithPeople(

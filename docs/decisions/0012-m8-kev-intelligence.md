@@ -815,6 +815,27 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - an answer without a read fails with `no_tool_round`;
       - a budget below US$1.50 runs nothing.
     - **No gate changes status.** Deep evidence for G7, G9, G21 and G22 needs the approved run and its report read. Package 5's full campaign and Package 6 are not started.
+60. **Live verification #5: the deep smoke run refused before Opus; an evaluation harness defect, corrected** (2026-10-19; run 39173277077 on commit `229748a`, dispatched by the owner 2026-10-18; no provider call in the investigation).
+    - **What happened.** The `deep-smoke` plan's one turn (`realistic.weekend_look`, deep) ended with `turn_in_flight`.
+      - No model call, count, usage row, provider error or reservation. HOME recorded US$0.00.
+      - The job's "Run the approved plan" step took four seconds end to end: the world's build and the turn.
+    - **Root cause.** The evaluation world (`buildEvalWorld`) builds each adult's private records through the Kev fixture (`addPrivateFor`).
+      - That fixture gives each adult a private conversation ending in the adult's own message, with no Kev reply after it.
+      - HOME treats an adult's unanswered message under 70 seconds old as a turn in flight (contract §7.2, L12). It then refuses Clear and the next turn, before any model call.
+      - The runner's database has only the real clock, so the scenario's first step (Clear) was refused, which the harness ignores. Its turn was then refused at admission.
+      - Every suite that builds the world (the scripted evals, 5A's harness, the deep smoke stub) moves the database clock years ahead before its first turn. None of them ever saw a recent message.
+      - The guard did what it should. The fixture's conversation was meant as an earlier one, not a turn in progress.
+    - **Correction (test fixture only).** The fixture's conversation is moved ten minutes back, by its own clock: the message's `created_at` and the conversation's `last_message_at`.
+      - It reads as an earlier conversation, as intended. Its content, visibility and privacy markers are unchanged.
+      - No production code, guard, limit, budget, plan or acceptance criterion changes. The plan hash is unchanged (`47710b79…`): the world is not part of it.
+    - **Regression** (`tests/integration/kev-eval-fresh-world.test.ts`). It runs on the real clock and builds the world, then:
+      - Clear is allowed for both adults straight away. Before the correction, Sam's Clear is refused with `turn_in_flight`.
+      - A message genuinely unanswered and recent is still a turn in flight, and Clear is refused for both adults.
+      - The existing concurrency tests are unchanged and pass (bookkeeping, orchestrator, turn route).
+    - **Reporting.** The run stays recorded as failed, in the ledger at US$0.00, with its cause.
+      - A pre-provider refusal is already distinguishable in the report, with no change needed: zero model calls and an admission code (`turn_in_flight`, `rate_limited`), where a model-quality failure carries the checker's closed check names.
+      - No gate result is suggested from it. Deep G7, G9, G21 and G22 stay NOT VERIFIED.
+    - **Next.** A new run of the same plan needs the owner's fresh approval of the unchanged hash and US$1.67 budget, after this correction merges (runbook step 8).
 
 ## Consequences
 
