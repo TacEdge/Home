@@ -245,6 +245,18 @@ describe.each([
       expect([...s.values()].join('\n')).not.toContain(added.miloSensitive);
   });
 
+  it(`the Back fence read by id counts ${reader}'s open tasks only: ${other}'s private task in it adds to ${other}'s count, never ${reader}'s (ADR 0012 §71)`, () => {
+    const k = `get_projects ${JSON.stringify({ project_id: f.id.fence })}`;
+    const open = (s: Snapshot) =>
+      (
+        JSON.parse((JSON.parse(s.get(k)!) as { content: string }).content) as {
+          project: { open_tasks: number };
+        }
+      ).project.open_tasks;
+    expect(open(after)).toBe(open(before));
+    expect(open(otherAfter)).toBe(open(otherBefore) + 1);
+  });
+
   it(`the bundle: ${reader}'s people_count, people_truncated and to_sort are unchanged; ${other}'s count both private people and the capture`, () => {
     type B = { people_count: number; people_truncated: boolean; to_sort: number };
     const read = (s: Snapshot) =>

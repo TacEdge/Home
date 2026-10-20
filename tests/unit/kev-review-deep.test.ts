@@ -26,8 +26,8 @@ import { runMode } from '../../scripts/kev-live/runner';
 // campaign ledger. No network, no key, no database. Stage 1's plan and its
 // approved hash are unchanged.
 
-const HASH = 'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627';
-const STAGE_1_HASH = '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa';
+const HASH = '235207b5b7f1a7efcdb72e5b6e29b49fc4bf8d14580e8c0673a47c3dd71f140c';
+const STAGE_1_HASH = '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep review run’s design', () => {

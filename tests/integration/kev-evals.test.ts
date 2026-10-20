@@ -12,6 +12,7 @@ import type { Transcript } from '@/kev/evals/transcript';
 import { createScriptedProvider } from '@/kev/providers/scripted';
 import type { ProviderRequest } from '@/kev/providers/types';
 import { STRICT_LIMITS, strictComplexity, strictSchemaViolations } from '@/kev/tools/strict-schema';
+import { plan, rec } from '@/kev/evals/steps';
 import { SCENARIO_CLASSES, type Scenario, type TurnSpec } from '@/kev/evals/types';
 import type { ProbeGateway } from '@/kev/providers/anthropic';
 import {
@@ -348,6 +349,60 @@ describe('live judging of the obeying scenarios (Stage 1)', () => {
       expect(run.verdict.failed, s.id).toEqual(['outcome']);
     }
   });
+});
+
+// Live verification #10 (ADR 0012 §71): Kev answered "Why did HOME flag
+// Thursday?" from HOME's insight about the overlap, correctly. The scenario
+// now accepts that conflict as a conflict block or as its own insight (the
+// same engine key), and nothing else: an insight about anything else fails.
+describe('the overlap, as a conflict block or as HOME’s insight about it (ADR 0012 §71)', () => {
+  const s = SCENARIOS.find((x) => x.id === 'realistic.why_overlap')!;
+  const answeredWith = (script: TurnSpec['script']): Scenario => ({
+    ...s,
+    turns: [{ ...s.turns[0]!, script }],
+  });
+  const ctx = (): ScenarioContext => ({
+    adults: f.kev,
+    ids,
+    markers: markersFor,
+    db: clocked,
+    reader: admin.db,
+    providerFor: (t) => createScriptedProvider(scriptFor(t, ids)),
+    beforeScenario: () => clockForward(admin, 31),
+    beforeTurn: () => clockForward(admin, 2),
+    prepare: (sc) => applyState(sc.state, admin.db),
+  });
+  const insights: TurnSpec['script'][number] = {
+    tools: [['get_insights', { surface: 'forward_week' }]],
+  };
+
+  it.each(['fast', 'deep'] as const)('%s: the conflict’s own insight passes', async (tier) => {
+    const run = await runScenario(
+      answeredWith([
+        insights,
+        plan('flagged', [rec({ find: ['Board meeting', 'Parent interviews'], type: 'insight' })]),
+      ]),
+      tier,
+      1,
+      ctx(),
+    );
+    expect(run.turns.at(-1)!.stored?.cites.map((c) => c.type)).toEqual(['insight']);
+    expect(run.verdict.failed).toEqual([]);
+  });
+
+  it.each(['fast', 'deep'] as const)(
+    '%s: an insight about something else fails, though HOME passed the answer',
+    async (tier) => {
+      const run = await runScenario(
+        answeredWith([insights, plan('flagged', [rec({ find: 'birthday', type: 'insight' })])]),
+        tier,
+        1,
+        ctx(),
+      );
+      expect(run.turns.at(-1)!.done.outcome).toBe('answer');
+      expect(run.verdict.failed).toContain('cites_conflict');
+    },
+  );
 });
 
 // The scripted runs' records and summary (Package 5A, ADR 0012 §56): the

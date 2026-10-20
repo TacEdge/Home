@@ -110,7 +110,7 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
 
    For Stage 1 (ADR 0012 §62, §65), G11 and G12 are recorded for the evaluation workspace (DEPLOY.md §E items 25–26). The US$10 monthly workspace limit stays: it holds the expected spend and the plausible worst, and can only end the run early. G22 is complete (ADR 0012 §66: run #6's `maxCountDelta` was 0), so Stage 1 needs only the owner's approval of the hash and budget:
    - **What it runs:** the owner's review set (5C's twenty scenarios, 21 turns), once each, on the fast tier as configured (Sonnet 5.5, `medium`), on the synthetic evaluation world. No scenario, check or threshold is added.
-   - **Hash:** `29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa`.
+   - **Hash:** `9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa` (it ran as `29d57657…`; `realistic.why_overlap`'s expectation changed in ADR 0012 §71).
    - **Budget:** US$31.67, the smallest that works. The plan's maximum is US$31.50 (21 turns at the US$1.50 turn ceiling), and HOME's whole-NZ$ cap must hold all of it: US$31.67 is NZ$57 (US$31.666667), US$31.66 is NZ$56 (US$31.11) and is refused at the cap, and anything above US$31.67 is refused at the plan's cap.
    - **Expected spend:** about US$1.68 (M8-PACKAGE-5E-READINESS.md §8, from run #4's measured turn).
    - **Before dispatch:** the contract's preconditions for a Package 5 live run (§2.2): G9, G21 and the complete G22 closed from the run #4 and #6 reports, and G11 and G12 recorded for the evaluation workspace.
@@ -118,7 +118,7 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
 
    For the review set on deep (ADR 0012 §68):
    - **What it runs:** the same review set once each on deep as configured (Opus 5.5): 19 scenarios and 20 turns, since the routing scenario is fast-only.
-   - **Hash:** `f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627`.
+   - **Hash:** `235207b5b7f1a7efcdb72e5b6e29b49fc4bf8d14580e8c0673a47c3dd71f140c` (it ran as `f6d41061…`; `realistic.why_overlap`'s expectation changed in ADR 0012 §71).
    - **Budget:** US$30.00, the plan's maximum (20 turns at US$1.50), which is exactly NZ$54. Anything below is refused as not covering the maximum, and anything above at the plan's cap.
    - **Expected spend:** about US$3–6 (estimated; Opus is twice Sonnet per token).
    - **Before dispatch:** read the evaluation workspace's month-to-date spend in the Console. HOME has recorded about US$3.25 this month, so the US$10 monthly limit leaves about US$6.75. If the limit is reached, the remaining turns are refused and the run ends early.

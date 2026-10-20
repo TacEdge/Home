@@ -642,6 +642,7 @@ export const more = {
         status: 'active',
         target_date: '2026-11-01',
         summary: null,
+        open_tasks: 1,
         tasks: [
           {
             ref: paint,

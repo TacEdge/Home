@@ -184,6 +184,25 @@ describe('every other kind, from its own record', () => {
     expect(text(fence, ['status', 'target'])).toBe(
       '“Back fence”: active, target Sunday 1 November.',
     );
+    // Read by id: the open-task count the read itself carries (ADR 0012 §71).
+    expect(text(fence, ['open_tasks'])).toBe('“Back fence”: one open task.');
+    expect(text(fence, ['status', 'open_tasks', 'summary'])).toBe(
+      '“Back fence”: active, one open task, no summary.',
+    );
+    // A read that carries no count is refused, never said as "no open tasks".
+    const { open_tasks: _count, ...uncounted } = (
+      more.project.data as { project: Record<string, unknown> }
+    ).project;
+    void _count;
+    const l = new Ledger(ZONE);
+    l.addResult(
+      more.project.tool,
+      { ...more.project.data, project: uncounted } as typeof more.project.data,
+      more.project.refs,
+      more.project.input,
+    );
+    expect(code(block(fence, ['open_tasks']), l)).toBe('fact.field');
+    expect(code(block(fence, ['status']), l)).toBe('ok');
     expect(text(note)).toBe('Note: “Same green as the shed.”');
     expect(text(dinosaurs)).toBe(
       'What Kev knows about Milo: “Enjoys dinosaurs at the moment.” Last confirmed Tuesday 6 October.',

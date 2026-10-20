@@ -213,14 +213,20 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
         question: 'Why did HOME flag Thursday?',
         script: [
           { tools: [['get_conflicts', { from: THU, to: THU }]] },
-          plan('flagged', [rec({ find: 'Parent interviews', type: 'conflict' })]),
+          // Thursday holds other overlaps with Parent interviews (Sam's own
+          // private evening among them): this one is with the Board meeting.
+          plan('flagged', [
+            rec({ find: ['Board meeting', 'Parent interviews'], type: 'conflict' }),
+          ]),
         ],
       },
     ],
+    // Live verification #10 answered from HOME's insight about this overlap,
+    // correctly: the conflict block and that insight both pass (ADR 0012 §71).
     expect: {
       outcome: 'answer',
-      toolsCalled: ['get_conflicts'],
-      shows: ['They overlap from 18:00 to 18:30.'],
+      citesConflict: { person: 'sam', between: ['board', 'interviews'] },
+      shows: ['18:00', '18:30'],
     },
   },
   {

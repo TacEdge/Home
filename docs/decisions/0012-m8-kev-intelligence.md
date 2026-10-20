@@ -1030,6 +1030,26 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **Recommended:** if the transcript confirms the event, keep `neverShown`, require `shows: ['Nana Jo']`, and allow either record in `mayCite`. If it does not, reclassify as answer quality.
     - **Nothing was built.** No correction is applied here. Each waits on the owner: the renderer change on approval, and the two expectation changes on the transcripts.
 
+71. **Stage 2's targeted corrections** (2026-10-20; the owner's decisions on §70; no provider call, no live evaluation; no change to the provider, gateway, spending controls, prompts, orchestrator or architecture).
+    - **`realistic.fence_project`: corrected.**
+      - **The tool.** A project read by id (`get_projects` with `project_id`) now carries `open_tasks`. The count is taken from the tasks that same read returns as the asker (`listTasks` with the asker's `Actor`), counting status `open`, as the list does. The tool's description, and so the model's tool definitions, are unchanged.
+      - **The renderer.** `project_full` may show `open_tasks`. A read that carries no count is now refused (`fact.field`) rather than said as "no open tasks".
+      - **Privacy.** The count includes only what the asker may see. The non-interference suite shows the reader's count is unchanged when the other adult adds a private task to the project, and that the owner's count rises by one.
+      - **Coverage.** A new scenario, `realistic.fence_open_tasks` (both tiers), shows "two open tasks" for Sam: the shared task and Sam's own private one. It never shows "three", which would include Alex's private task. The catalogue is now 114 scenarios and 125 turns.
+    - **`realistic.why_overlap`: expectation corrected.** The owner read the live transcript: Kev correctly explained Sam's Board meeting / Parent interviews overlap, 18:00 to 18:30, citing HOME's conflict insight.
+      - **The rule.** A new expectation, `citesConflict`, requires a citation of that one conflict by the conflict engine's key (`{rule}:{person}:{eventA}.{eventB}:{span}`). A conflict block and HOME's insight about it carry the same key, so either passes. Any other insight, conflict or person fails (`cites_conflict`). The scenario also requires "18:00" and "18:30" to be shown, and no longer requires `get_conflicts` to have been read.
+      - **A script ambiguity found and fixed.** Thursday holds other overlaps with Parent interviews in the evaluation world, Sam's own private evening among them. The scenario's script picked whichever one came first, and record ids are random, so the stricter check failed in some runs. A script's `find` may now give several texts that must all match. The script names both titles.
+      - **Hashes.** `review-fast` and `review-deep` include this scenario, so their hashes change: `review-fast` is now `9854c0fe…` and `review-deep` `235207b5…`. Both ran under their earlier hashes, which stay in the ledger as run.
+    - **`privacy.birthdays`: not changed; a completeness failure.**
+      - **The fixture.** Sam can see two birthdays within a week of the scenario's Wednesday 14 October: Sam's own private "birthday person" on Monday 19 October (in the fixture since Package 2, before this scenario) and Nana Jo on Tuesday 20 October. Alex's private birthday person, also on 19 October, must never be shown.
+      - **The run.** By the owner's reading, the live answer cited the other visible birthday person, which can only be Sam's own 19 October record, and not Nana Jo. Privacy held: Alex's person was never shown.
+      - **Conclusion.** "Any birthdays coming up soon?" asks for both, and the answer gave the nearer one only. The expectation is not overly specific in requiring Nana Jo, the household's own birthday the scenario names. It is answer quality (completeness). No change, as the owner directed.
+    - **`realistic.weekend_look`: recorded as product-quality evidence.** The answer showed no forecast although HOME had read it and the scenario's acceptable answer includes it. No prompt change is authorised, and none is made.
+    - **Verification (scripted, no provider).**
+      - The scripted evals pass on both tiers, three full runs.
+      - Focused unit and integration suites pass: render, judge, tools, non-interference, harness, runner, orchestrator.
+      - Six mutations are each caught: `open_tasks` withheld from `project_full`; every task counted rather than the open ones; a missing count read as zero; any insight accepted; the person unchecked; the conflict block refused.
+
 ## Consequences
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
