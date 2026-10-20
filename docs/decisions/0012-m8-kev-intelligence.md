@@ -969,6 +969,23 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       The brief excludes changes to orchestration, so nothing is built. The owner decides.
     - **The charge.** The job log says "HOME recorded US$1.74". The ledger enters it provisionally at 1,745,000 µ$, the upper bound, until `report.json` gives the exact figure. The campaign remainder is then **US$196.748930**. Anthropic's bill is NOT RECONCILED.
 
+68. **The review set on deep, prepared** (2026-10-20; the owner's direction "Proceed with the existing 20-turn Opus review set", after §67; dry run and keyless checks only, no provider call, no dispatch).
+    - **The plan:** `review-deep`, now the session plan. It is the owner's review set (5C), in its order, once each on the deep tier as configured (Opus 5.5).
+      - `routing.weekend_plan_escalates` is fast-only, so the plan has 19 scenarios and 20 turns.
+      - Plain scenario probes, as in Stage 1: the catalogue's checker, with §67's live judging; no smoke check; no stop on a failed scenario.
+      - No beta flag, scenario, check, threshold, prompt or model setting is added or changed.
+    - **Hash** `f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627` (`PLAN_VERSION` 6). Stage 1's hash `29d57657…` is unchanged.
+    - **Maximum and budget.** The maximum is US$30.00, 20 turns at the US$1.50 turn ceiling.
+      - The budget and cap are **US$30.00**. That is NZ$54 (US$30.000000), which holds the maximum.
+      - A budget below US$30.00 is refused because it is below the maximum; above it, at the plan's cap.
+    - **Expected spend:** about US$3–6. Opus costs twice Sonnet per token; run #6's deep turn recorded US$0.248311 (n = 1). This is an estimate, not a measurement.
+    - **The evaluation workspace's US$10 monthly limit (§65) is a real constraint this time.**
+      - HOME has recorded about US$3.25 this month across runs #1–#8 (an upper figure).
+      - That leaves about US$6.75 under the limit, close to the top of the expected range.
+      - If the provider's limit is reached, the remaining turns are refused and the run ends early. Nothing is unsafe, but the review set is incomplete.
+      - Before dispatch, the owner reads the workspace's month-to-date spend in the Console. Keeping or changing the limit is the owner's decision; nothing here changes it.
+    - **Before dispatch:** the owner approves the hash and budget, and the dispatch is the owner's own.
+
 ## Consequences
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
