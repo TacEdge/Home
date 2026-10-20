@@ -936,6 +936,18 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **If the limit is reached,** the provider refuses the rest of the run's calls (HTTP 400). Those turns fail and the report shows it. HOME may charge such a call at its per-call maximum in its own ledger, but nothing is billed.
 
 
+66. **G22 closed from live verification #6's report** (2026-10-20; owner-supplied evidence; no provider call, no code change).
+    - **Evidence.** The owner read run #6's original `report.json` (run 39189762049, artifact 12160000016):
+      - `maxCountDelta` 0, `countedFirst` true;
+      - `modelCalls` 5, `thinkingBlocks` 4;
+      - `growOnly` true, `reconciliation.ok` true.
+    - **G22: PASS** (contract §5.7, the G22 closed update). Every call was counted first, and the comparison its row asks for, one synthetic count against the following call's `message_start` input, differed by 0 tokens. The fail-closed half passed in run #1 and is tested offline; the `message_start` check stays as the backstop.
+    - **Stage 1's contract preconditions (§2.2) are now met:** G9 (§64), G21 (§64), the complete G22 (here), and G11 and G12 for the evaluation workspace (§65).
+    - **Stage 1 unchanged:** `review-fast`, the session plan, hash `29d57657…`, maximum US$31.50, budget and cap US$31.67. It waits only on the owner's approval of the hash and budget, and the dispatch.
+    - **A heading restored.** §65's edit removed this ADR's `## Consequences` heading by mistake; it is restored below, with the section's text unchanged.
+
+## Consequences
+
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
 - **KEV-AGENT-MODEL.** Annotated, not rewritten: §3 (`working`, structured `detail`, `now`); §4 (the smaller bundle, no home location; the person's words stored before the model); §5 (decided: fast Sonnet 5.5 at `medium` to start, Haiku evaluated; deep Opus 5.5 at medium; validator-initiated escalation; the append-only request within an attempt; the 12-hour window); §6 (`include_sensitive` removed; `find_free_windows` as `get_gaps`; `get_conflicts` as built; "recommend one window" and "Find us a night out" superseded; `search` titles only); §7 (phrasing deferred); §10 (four layers).
 - **SYSTEM-ARCHITECTURE.** Annotated: §2.3 (the bookkeeping path; the network policy); §2.4 (the one scheduled job, O6); §2.6 (Kev phrasing deferred); §3.1 (the person's words stored as a message, not a capture, in M8; the NZ$100 cap and reservations); §5.3 (sensitive context never to Kev); §5.4 (the bookkeeping path beside the capture exception); §5.7 (per-message retention and the daily cleanup); §5.8 (the per-turn trace).
