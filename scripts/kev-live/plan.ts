@@ -612,6 +612,20 @@ export const REVIEW_FAST_PROBES: readonly ProbeSpec[] = Object.freeze(
 );
 
 /**
+ * Package 5E's review set on deep (the owner's direction after Stage 1,
+ * ADR 0012 §68): the same review set, in its order, once each on the deep
+ * tier as configured (Opus 5.5). The fast-only routing scenario is not run
+ * on deep, so 19 scenarios and 20 turns. Plain scenario probes, as Stage 1.
+ */
+export const REVIEW_DEEP_PROBES: readonly ProbeSpec[] = Object.freeze(
+  scenarioProbes({
+    scenarios: REVIEW_SET.map((e) => e.scenario),
+    tiers: ['deep'],
+    repeats: 1,
+  }),
+);
+
+/**
  * The named plans (live verification #2, 2026-10-17; ADR 0012 §51): which
  * probes from the list above a session runs, and its own session cap,
  * never above the US$10 ceiling (owner decision 4). `full` is run #1's
@@ -686,6 +700,16 @@ export const PLANS = Object.freeze({
     specs: REVIEW_FAST_PROBES,
     sessionCapUsdMicros: 31_670_000n,
   }),
+  // The review set on deep (ADR 0012 §68): 20 turns at the US$1.50 turn
+  // ceiling, US$30.00. US$30.00 is NZ$54 in HOME's whole-NZ$ cap
+  // (US$30.000000), which holds it; US$29.99 is NZ$53 (US$29.44) and cannot
+  // (tested). The smallest practical cap, then.
+  'review-deep': Object.freeze({
+    kind: 'evaluation',
+    probes: Object.freeze(REVIEW_DEEP_PROBES.map((p) => p.id)),
+    specs: REVIEW_DEEP_PROBES,
+    sessionCapUsdMicros: 30_000_000n,
+  }),
   // G9's verification (ADR 0012 §63): one fast turn with the prefix check
   // on. Its maximum is the US$1.50 turn ceiling (a fast attempt and any
   // escalation together). A US$1.67 budget is NZ$3 in HOME's whole-NZ$
@@ -714,11 +738,11 @@ export type PlanDef = Readonly<{
 export type PlanName = keyof typeof PLANS;
 
 /**
- * The plan the runner runs now: Package 5E's Stage 1, the review set on
- * fast (ADR 0012 §62, §65), for the owner's approval. G9's prefix-check
- * plan ran as live verification #7 (§64) and stays for its tests and record.
+ * The plan the runner runs now: the review set on deep (ADR 0012 §68), for
+ * the owner's approval. Stage 1, the review set on fast, ran as live
+ * verification #8 (§67) and stays, with its hash, for its tests and record.
  */
-export const SESSION_PLAN: PlanName = 'review-fast';
+export const SESSION_PLAN: PlanName = 'review-deep';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {

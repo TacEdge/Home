@@ -33,8 +33,8 @@ const HASH = '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('Stage 1’s design', () => {
-  it('is the session plan: the review set, in its order, once each, on fast as configured', () => {
-    expect(SESSION_PLAN).toBe('review-fast');
+  it('the review set, in its order, once each, on fast as configured (ran as live verification #8; the session plan is now the deep review, ADR 0012 §68)', () => {
+    expect(SESSION_PLAN).toBe('review-deep');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('review-fast');
     expect(plan.name).toBe('review-fast');
@@ -60,7 +60,7 @@ describe('Stage 1’s design', () => {
 
   it('has a deterministic hash for the owner to approve, unchanged by G9’s plan', () => {
     expect(buildPlan('review-fast').hash).toBe(HASH);
-    expect(buildPlan().hash).toBe(HASH);
+    expect(buildPlan().hash).not.toBe(HASH);
     expect(buildPlan('g9-binding').hash).not.toBe(HASH);
     expect(buildPlan('deep-smoke').hash).not.toBe(HASH);
     expect(

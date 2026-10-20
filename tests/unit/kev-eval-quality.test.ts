@@ -543,17 +543,20 @@ describe('no change to spending controls (Package 5C)', () => {
   it('keeps the ceilings, the session plan for approval and §12.3’s targets', () => {
     expect(SESSION_CEILING_USD_MICROS).toBe(10_000_000n);
     expect(EVALUATION_RUN_CEILING_USD_MICROS).toBe(175_000_000n);
-    // Package 5D's deep smoke plan, G9's prefix check and Package 5E's
-    // Stage 1, the session plan (tests/unit/kev-deep-smoke.test.ts,
-    // kev-g9-binding.test.ts and kev-review-fast.test.ts pin them too).
+    // Package 5D's deep smoke plan, G9's prefix check, Package 5E's Stage 1
+    // and the review set on deep, the session plan (kev-deep-smoke,
+    // kev-g9-binding, kev-review-fast and kev-review-deep.test.ts pin them too).
     expect(buildPlan('deep-smoke').hash).toBe(
       '47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775',
     );
     expect(buildPlan('g9-binding').hash).toBe(
       'baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3',
     );
-    expect(buildPlan().hash).toBe(
+    expect(buildPlan('review-fast').hash).toBe(
       '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa',
+    );
+    expect(buildPlan().hash).toBe(
+      'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627',
     );
     expect(TARGETS.factual).toBe(0.95);
     expect(TARGETS.firstPass).toBe(0.9);
