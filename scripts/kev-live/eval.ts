@@ -4,7 +4,7 @@ import { TURNS_PER_MINUTE } from '@/domain/kev-bookkeeping/constants';
 import { listCitedRecords } from '@/domain/citations/service';
 import { clearConversation } from '@/domain/kev-bookkeeping/service';
 import { kevContentV2, type KevContentV2 } from '@/domain/kev-bookkeeping/schema';
-import { judge, relevanceOf, type Markers, type Verdict } from '@/kev/evals/judge';
+import { judge, relevanceOf, type Layer, type Markers, type Verdict } from '@/kev/evals/judge';
 import type { FixtureIds } from '@/kev/evals/scripted';
 import { attemptIdsOf, turnRecord, type EvalRecord, type TurnRecord } from '@/kev/evals/summary';
 import { reviewPageHtml, reviewTranscripts } from '@/kev/evals/review-page';
@@ -36,6 +36,8 @@ export type ScenarioContext = Readonly<{
   reader: Db;
   /** The provider for a scenario turn (scripted: that turn's script; live: the gateway's). */
   providerFor: (turn: TurnSpec, index: number) => KevProvider;
+  /** Which layer judges the run (default `scripted`; the live runner's probes are `live`). */
+  layer?: Layer;
   /** Further test seams for every turn (the sensitive strings the validator refuses). */
   deps?: Omit<KevDeps, 'db' | 'provider' | 'startTier'>;
   /** Called before the scenario and before each turn (the scripted evals move their test clock; the runner paces). */
@@ -132,7 +134,14 @@ export async function runScenario(
   }
   const last = turns.at(-1)!;
   const markers = typeof ctx.markers === 'function' ? ctx.markers(s.asker) : ctx.markers;
-  const verdict = judge(s, tier, { events: last.events, stored: last.stored }, ctx.ids, markers);
+  const verdict = judge(
+    s,
+    tier,
+    { events: last.events, stored: last.stored },
+    ctx.ids,
+    markers,
+    ctx.layer ?? 'scripted',
+  );
   const record: EvalRecord = Object.freeze({
     scenario: s.id,
     class: s.class,

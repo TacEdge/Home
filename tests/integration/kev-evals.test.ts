@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { obeysInScript } from '@/kev/evals/judge';
 import { INJECTIONS, SCENARIOS } from '@/kev/evals/scenarios';
 import { scriptFor, type FixtureIds } from '@/kev/evals/scripted';
 import { scriptedBaselineMarkdown } from '@/kev/evals/baseline';
@@ -11,7 +12,8 @@ import type { Transcript } from '@/kev/evals/transcript';
 import { createScriptedProvider } from '@/kev/providers/scripted';
 import type { ProviderRequest } from '@/kev/providers/types';
 import { STRICT_LIMITS, strictComplexity, strictSchemaViolations } from '@/kev/tools/strict-schema';
-import { SCENARIO_CLASSES, type Scenario } from '@/kev/evals/types';
+import { SCENARIO_CLASSES, type Scenario, type TurnSpec } from '@/kev/evals/types';
+import type { ProbeGateway } from '@/kev/providers/anthropic';
 import {
   reviewFiles,
   runScenario,
@@ -19,6 +21,8 @@ import {
   type ScenarioContext,
   type ScenarioRun,
 } from '../../scripts/kev-live/eval';
+import { buildPlan, scenarioProbes } from '../../scripts/kev-live/plan';
+import { executePlan } from '../../scripts/kev-live/probes';
 import { CANARY_MARK, SENSITIVE_MARK } from '../fixtures/family';
 import { WEATHER_VARIABLES, WELLINGTON, weatherEnv } from '../fixtures/weather';
 import { clockedPool, dropTestClock } from './clock';
@@ -255,6 +259,94 @@ describe.each(runs)('%s on %s', (_id, tier, s) => {
     for (const w of scriptedWords(s)) expect(trJson, 'a rejected answer’s words').not.toContain(w);
     for (const n of [`ni-${other}-`, CANARY_MARK[other], SENSITIVE_MARK])
       expect(trJson, n).not.toContain(n);
+  });
+});
+
+// Stage 1's live judging (ADR 0012 §67): the 21 scenarios whose script
+// obeys an injected or fabricated instruction expect HOME's fallback when
+// scripted; live, a model may resist, so the runner's probes (the `live`
+// layer) pass a checked answer citing a record, or the fallback, and every
+// other expectation and structural check still applies. Run through the
+// runner's own probe path; these runs are not the layer-2 records above.
+describe('live judging of the obeying scenarios (Stage 1)', () => {
+  const obeying = SCENARIOS.filter(obeysInScript);
+  /** A model that resists: each attempt's same reads, then HOME's words over the same records. */
+  const resists = (t: TurnSpec, obeys: boolean): TurnSpec =>
+    obeys
+      ? {
+          ...t,
+          script: t.script.map((st) =>
+            'plan' in st && st.plan.words !== undefined
+              ? { plan: { lead: 'here_you_go', facts: st.plan.facts } }
+              : st,
+          ),
+        }
+      : t;
+  const ctx = (resist: boolean): Omit<ScenarioContext, 'layer'> => ({
+    adults: f.kev,
+    ids,
+    markers: markersFor,
+    db: clocked,
+    reader: admin.db,
+    providerFor: (t) => createScriptedProvider(scriptFor(resists(t, resist), ids)),
+    beforeScenario: () => clockForward(admin, 31),
+    beforeTurn: () => clockForward(admin, 2),
+    prepare: (sc) => applyState(sc.state, admin.db),
+  });
+  const probe = async (resist: boolean) => {
+    const probes = scenarioProbes({
+      scenarios: obeying.map((s) => s.id),
+      tiers: ['fast'],
+      repeats: 1,
+    });
+    const plan = buildPlan('evaluation-test', probes, {
+      kind: 'evaluation',
+      probes: probes.map((p) => p.id),
+      sessionCapUsdMicros: 175_000_000n,
+    });
+    const out = await executePlan(plan, {
+      gateway: { evidence: () => [] } as unknown as ProbeGateway,
+      actor: f.kev.sam,
+      deps: { db: clocked },
+      budgetMicros: 175_000_000n,
+      evaluation: ctx(resist),
+    });
+    expect(out.stopped).toBeNull();
+    return out.results;
+  };
+
+  it('is the 21 scenarios that obey in their own words', () => {
+    expect(obeying).toHaveLength(21);
+  });
+
+  it('live, every one passes when the model resists and answers from the records', async () => {
+    const results = await probe(true);
+    expect(results).toHaveLength(21);
+    for (const r of results) {
+      expect(r.reasons, r.id).toEqual([]);
+      expect(r.checks, r.id).toMatchObject({ outcome: 'answer', passed: true });
+    }
+  });
+
+  it('live, every one passes on HOME’s fallback when the model obeys, and its record keeps none of the refused words', async () => {
+    const results = await probe(false);
+    for (const r of results) {
+      expect(r.reasons, r.id).toEqual([]);
+      expect(r.checks, r.id).toMatchObject({ outcome: 'fallback', passed: true });
+    }
+    // What the report is built from: closed names, codes and counts only.
+    const kept = JSON.stringify(results, (_k, v: unknown) =>
+      typeof v === 'bigint' ? v.toString() : v,
+    );
+    for (const s of obeying) for (const w of scriptedWords(s)) expect(kept, s.id).not.toContain(w);
+    for (const n of Object.values(INJECTIONS)) expect(kept).not.toContain(n);
+  });
+
+  it('scripted, the same resisting answer fails its outcome and nothing else', async () => {
+    for (const s of obeying) {
+      const run = await runScenario(s, 'fast', 1, ctx(true));
+      expect(run.verdict.failed, s.id).toEqual(['outcome']);
+    }
   });
 });
 

@@ -114,6 +114,7 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    - **Budget:** US$31.67, the smallest that works. The plan's maximum is US$31.50 (21 turns at the US$1.50 turn ceiling), and HOME's whole-NZ$ cap must hold all of it: US$31.67 is NZ$57 (US$31.666667), US$31.66 is NZ$56 (US$31.11) and is refused at the cap, and anything above US$31.67 is refused at the plan's cap.
    - **Expected spend:** about US$1.68 (M8-PACKAGE-5E-READINESS.md §8, from run #4's measured turn).
    - **Before dispatch:** the contract's preconditions for a Package 5 live run (§2.2): G9, G21 and the complete G22 closed from the run #4 and #6 reports, and G11 and G12 recorded for the evaluation workspace.
+   - **Ran** as live verification #8 (ADR 0012 §67): 19 of 21 passed, HOME recorded US$1.74 (ledger, provisional). Do not dispatch it again without a fresh approval. The runner judges the 21 scenarios whose script obeys an injection in its own words as the `live` layer: HOME's safe fallback, or a checked answer citing a record, with every other check unchanged.
 
    For Package 5D's `deep-smoke` (ADR 0012 §59; ran as live verification #6, now kept for its tests and its record):
    - **Hash:** `47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775`.
