@@ -986,6 +986,31 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - Before dispatch, the owner reads the workspace's month-to-date spend in the Console. Keeping or changing the limit is the owner's decision; nothing here changes it.
     - **Before dispatch:** the owner approves the hash and budget, and the dispatch is the owner's own.
 
+69. **Live verification #9: refused at the live cap check, and the keyless and live checks made to agree** (2026-10-20; run 39377266183 on d13e643, the `review-deep` plan, hash `f6d41061…`, budget US$30.00; the owner's brief "Financial Reservation Guard Refusal"; no provider call, no dispatch).
+    - **What happened.** The keyless check passed. The live runner built the evaluation world, then refused with exit 17 before reading the key: "HOME's reservation cap for the run (US$30.00) less what its database already counts (US$0.00) cannot hold the plan's peak (US$30.00)". No model call, no reservation and no report.
+    - **Root cause.**
+      - The keyless check tests the budget's whole-NZ$ cap against the plan's peak with nothing counted (`assertCapCovers(cap, 0, peak)`).
+      - The live check reads HOME's own count for the month from the runner's database.
+      - That database is seeded with the fixture family, and the seed recorded one synthetic `kev_usage` row per adult, 2,400 µ$ each. HOME's cap counts every usage row, so the database counted **4,800 µ$** before any call.
+      - `review-deep` has no slack: US$30.00 is NZ$54, exactly US$30.000000. So 4,800 µ$ + US$30.000000 > US$30.000000.
+      - The message rounded 4,800 µ$ to "US$0.00".
+      - Earlier plans had at least US$0.17 of slack, which absorbed it.
+      - The conversions, rounding and integer arithmetic were otherwise identical on both sides: NZD_PER_USD 9/5, NZ$ rounded down, µ$ rounded half up, `bigint` throughout, no floating point.
+    - **The correction** (no change to the plan, its hash, its budget, any limit, the orchestrator, the validator or a scenario):
+      1. **The runner's database starts empty.** The live workflow seeds the fixture family with `HOME_SEED_FIXTURES_USAGE=none`. That omits the two synthetic usage rows, which `kev_usage` (append-only) cannot later remove. Every other seed (local, privacy, export) keeps them.
+      2. **The two checks share one rule.** `assertKeylessCap` and `assertLiveCap` use the same arithmetic. The live check also refuses if the runner's database counts anything before the first call (usage this month, or an open or unreconciled reservation), because that is what the keyless check assumed. This is stricter than before, never looser.
+      3. **Exact messages.** The money checks state amounts to the micro-dollar (`usdExact`), so rounding can no longer hide a count.
+    - **Tests.**
+      - Unit tests prove:
+        - the exact US$30.00 cap is accepted by both checks with nothing counted;
+        - any count, from 1 µ$ to run #9's 4,800 µ$, is refused and stated exactly;
+        - an insufficient cap (US$29.99, NZ$53), or a cap HOME's bookkeeping does not see, is refused;
+        - for every named plan, and every budget from US$0.01 below its peak to US$1 above, the keyless and live checks decide alike.
+      - An integration test (`tests/integration/kev-live-cap.test.ts`) reproduces the failure on a synthetic database. The default seed adds 4,800 µ$ to HOME's own count, and the live check refuses it. Seeded without usage it adds nothing, and the US$30.00 cap is accepted.
+      - The workflow test requires the flag on the seed step. Seven mutations are each caught.
+    - **The ledger.** Run #9 is entered at zero, recorded US$0.00 with no reservation. Anthropic's bill is not reconciled, though nothing is expected there. The campaign remainder is unchanged at **US$196.748930**.
+    - **Next.** `review-deep` is unchanged (hash `f6d41061…`, budget US$30.00). It needs a fresh approval and dispatch after this correction merges.
+
 ## Consequences
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
