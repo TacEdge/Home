@@ -69,8 +69,11 @@ async function fixtureUser(
   return { kind: 'user', userId: row.id, email: f.email, via: 'ui', channel: 'web' };
 }
 
-/** Every user-facing type, private to one adult, each carrying that adult's canary mark. */
-async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> {
+/**
+ * Every user-facing type, private to one adult, each carrying that adult's
+ * canary mark; with `usage`, one synthetic usage row too.
+ */
+async function canaries(db: Db, a: UserActor, adult: Adult, usage: boolean): Promise<CanaryIds> {
   const mark = CANARY_MARK[adult];
   const deps = { db };
   const kev: UserActor = { ...a, via: 'kev' };
@@ -156,18 +159,19 @@ async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> 
     },
     deps,
   );
-  await recordUsage(
-    a,
-    {
-      conversationId: conv.id,
-      tier: 'fast',
-      model: 'fixture-model',
-      inputTokens: 900,
-      outputTokens: 120,
-      costUsdMicros: 2400,
-    },
-    deps,
-  );
+  if (usage)
+    await recordUsage(
+      a,
+      {
+        conversationId: conv.id,
+        tier: 'fast',
+        model: 'fixture-model',
+        inputTokens: 900,
+        outputTokens: 120,
+        costUsdMicros: FIXTURE_USAGE_USD_MICROS,
+      },
+      deps,
+    );
   const insightKey = `${mark}insight-key`;
   await respond(a, insightKey, 'dismissed', deps);
   return {
@@ -185,8 +189,21 @@ async function canaries(db: Db, a: UserActor, adult: Adult): Promise<CanaryIds> 
   };
 }
 
+/** Each adult's synthetic usage row, when the seed records one (µ$). */
+export const FIXTURE_USAGE_USD_MICROS = 2400;
+
+export type SeedOptions = Readonly<{
+  /**
+   * Record each adult's synthetic usage row (default). The live runner's
+   * throwaway database is seeded without it: HOME's cap counts every usage
+   * row, and the runner's keyless check assumes nothing is counted before
+   * its first call (ADR 0012 §69).
+   */
+  usage?: boolean;
+}>;
+
 /** Seeds the fixture family once; a second run finds it and does nothing. */
-export async function seedFixtureFamily(db: Db): Promise<SeedManifest> {
+export async function seedFixtureFamily(db: Db, opts: SeedOptions = {}): Promise<SeedManifest> {
   const deps = { db };
   const sam = await fixtureUser(db, SAM, 'fixture-sam');
   const alex = await fixtureUser(db, ALEX, 'fixture-alex');
@@ -272,8 +289,9 @@ export async function seedFixtureFamily(db: Db): Promise<SeedManifest> {
   );
 
   // Each adult's private canaries of every type.
-  const canarySam = await canaries(db, sam, 'sam');
-  const canaryAlex = await canaries(db, alex, 'alex');
+  const usage = opts.usage ?? true;
+  const canarySam = await canaries(db, sam, 'sam', usage);
+  const canaryAlex = await canaries(db, alex, 'alex', usage);
 
   // Archived household canaries of every archivable type, for "archived is excluded by default".
   const am = ARCHIVED_MARK;

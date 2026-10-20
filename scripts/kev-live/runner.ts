@@ -10,13 +10,13 @@ import { assertFixtureDatabase, fixtureAdult } from './db-checks';
 import {
   assertBudgetCovers,
   assertBudgetWithinPlanCap,
-  assertCapCovers,
   assertEnvironment,
+  assertKeylessCap,
   assertLedgerCovers,
+  assertLiveCap,
   assertPlanHash,
   assertRunnerDatabase,
   capNzdFor,
-  capUsdMicros,
   EVALUATION_RUN_CEILING_USD_MICROS,
   EXIT,
   LiveRefusal,
@@ -162,8 +162,9 @@ export async function runMode(
     assertBudgetWithinPlanCap(budget, plan.sessionCapUsdMicros);
     assertBudgetCovers(budget, plan.totalMaxUsdMicros);
     // HOME's whole-NZ$ reservation cap for this budget must hold the plan's
-    // peak hold, checked here without a database (ADR 0012 §53).
-    assertCapCovers(capUsdMicros(capNzdFor(budget)), 0n, plan.peakHoldUsdMicros);
+    // peak hold, checked here without a database (ADR 0012 §53), assuming
+    // nothing counted yet: the live check below holds the database to that.
+    assertKeylessCap(budget, plan.peakHoldUsdMicros);
     assertPlanHash(env.KEV_LIVE_APPROVED_PLAN_HASH, plan.hash);
     if (opts.ledgerText === null)
       throw new LiveRefusal('ledger', 'The campaign ledger is missing.');
@@ -216,9 +217,11 @@ export async function runMode(
       process.env.HOME_KEV_MONTHLY_CAP_NZD = String(capNzd);
       env.HOME_KEV_MONTHLY_CAP_NZD = String(capNzd);
       const spend = await getSpendReport(systemActor, { db });
-      if (spend.capUsdMicros !== capUsdMicros(capNzd))
-        throw new LiveRefusal('cap', 'HOME’s bookkeeping does not see the run’s cap.');
-      assertCapCovers(spend.capUsdMicros, spend.count.countedUsdMicros, plan.peakHoldUsdMicros);
+      assertLiveCap(
+        capNzd,
+        { capUsdMicros: spend.capUsdMicros, countedUsdMicros: spend.count.countedUsdMicros },
+        plan.peakHoldUsdMicros,
+      );
       opts.log(`HOME reservation cap NZ$${capNzd} (US$${usd(spend.capUsdMicros)})`);
       const key = readKey(env);
       const gateway = opts.gatewayFor ? opts.gatewayFor(key) : createProbeGateway({ apiKey: key });

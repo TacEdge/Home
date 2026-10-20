@@ -5,6 +5,8 @@ import {
   assertBudgetWithinPlanCap,
   assertCapCovers,
   assertEnvironment,
+  assertKeylessCap,
+  assertLiveCap,
   assertLedgerCovers,
   ledgerRemainder,
   assertNoKey,
@@ -27,7 +29,9 @@ import {
   readKey,
   SESSION_CEILING_USD_MICROS,
   usd,
+  usdExact,
 } from '../../scripts/kev-live/guards.mts';
+import { buildPlan, PLANS } from '../../scripts/kev-live/plan';
 import {
   isFixturePersonName,
   nonFixtureEmails,
@@ -206,6 +210,18 @@ describe('the budget', () => {
     );
   });
 
+  it('usdExact() never rounds: the 4,800 µ$ that "US$0.00" hid (ADR 0012 §69)', () => {
+    expect(usdExact(4_800n)).toBe('0.004800');
+    expect(usdExact(30_000_000n)).toBe('30.000000');
+    expect(usdExact(29_444_444n)).toBe('29.444444');
+    expect(usdExact(0n)).toBe('0.000000');
+    expect(usd(4_800n)).toBe('0.00');
+    // The refusal's message is exact.
+    expect(refusal(() => assertCapCovers(30_000_000n, 4_800n, 30_000_000n)).message).toContain(
+      'US$0.004800',
+    );
+  });
+
   it('usd() rounds to the cent', () => {
     expect(usd(7_277_024n)).toBe('7.28');
     expect(usd(133_056n)).toBe('0.13');
@@ -221,6 +237,74 @@ describe('the plan hash', () => {
     for (const approved of [undefined, '', 'A'.repeat(64), 'a'.repeat(63), `${H} `])
       expect(refusal(() => assertPlanHash(approved, H)).exitCode).toBe(EXIT.plan_hash);
     expect(refusal(() => assertPlanHash('b'.repeat(64), H)).exitCode).toBe(EXIT.plan_hash);
+  });
+});
+
+describe('the keyless and live cap checks agree (ADR 0012 §69)', () => {
+  // review-deep: 20 turns at the US$1.50 ceiling; US$30.00 is exactly NZ$54.
+  const deep = buildPlan('review-deep');
+  const live =
+    (budget: bigint, counted: bigint, cap = capUsdMicros(capNzdFor(budget))) =>
+    () =>
+      assertLiveCap(
+        capNzdFor(budget),
+        { capUsdMicros: cap, countedUsdMicros: counted },
+        deep.peakHoldUsdMicros,
+      );
+
+  it('the exact US$30.00 cap is accepted by both when the runner’s database genuinely counts nothing', () => {
+    expect(deep.peakHoldUsdMicros).toBe(30_000_000n);
+    expect(capUsdMicros(capNzdFor(30_000_000n))).toBe(30_000_000n);
+    expect(() => assertKeylessCap(30_000_000n, deep.peakHoldUsdMicros)).not.toThrow();
+    expect(live(30_000_000n, 0n)).not.toThrow();
+  });
+
+  it('any counted usage or reservation before the first call is refused, exactly stated: run #9’s 4,800 µ$', () => {
+    const r = refusal(live(30_000_000n, 4_800n));
+    expect(r.exitCode).toBe(EXIT.cap);
+    expect(r.message).toContain('US$0.004800');
+    expect(refusal(live(30_000_000n, 1n)).exitCode).toBe(EXIT.cap);
+    // Even with room to spare, a database that counts anything is not the one the keyless check assumed.
+    expect(refusal(live(175_000_000n, 4_800n)).exitCode).toBe(EXIT.cap);
+  });
+
+  it('an insufficient cap is refused by both; a cap HOME’s bookkeeping does not see is refused live', () => {
+    // US$29.99 is NZ$53, US$29.444444.
+    expect(refusal(() => assertKeylessCap(29_990_000n, deep.peakHoldUsdMicros)).exitCode).toBe(
+      EXIT.cap,
+    );
+    expect(refusal(live(29_990_000n, 0n)).exitCode).toBe(EXIT.cap);
+    expect(refusal(live(30_000_000n, 0n, 29_999_999n)).exitCode).toBe(EXIT.cap);
+    // A cap other than the run's, even a larger one, is not the run HOME will enforce.
+    const mismatch = refusal(live(30_000_000n, 0n, 31_000_000n));
+    expect(mismatch.exitCode).toBe(EXIT.cap);
+    expect(mismatch.message).toContain('does not see the run’s cap');
+  });
+
+  it('for every named plan and every budget from US$0.01 below its peak to US$1 above, keyless and live (nothing counted) decide alike', () => {
+    for (const name of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
+      const peak = buildPlan(name).peakHoldUsdMicros;
+      for (let b = peak - 10_000n; b <= peak + 1_000_000n; b += 10_000n) {
+        const ok = (f: () => void) => {
+          try {
+            f();
+            return true;
+          } catch (e) {
+            if (e instanceof LiveRefusal && e.exitCode === EXIT.cap) return false;
+            throw e;
+          }
+        };
+        const keyless = ok(() => assertKeylessCap(b, peak));
+        const atRun = ok(() =>
+          assertLiveCap(
+            capNzdFor(b),
+            { capUsdMicros: capUsdMicros(capNzdFor(b)), countedUsdMicros: 0n },
+            peak,
+          ),
+        );
+        expect(atRun, `${name} at ${b}`).toBe(keyless);
+      }
+    }
   });
 });
 
@@ -251,7 +335,7 @@ describe('the campaign ledger', () => {
     );
   });
 
-  it('the committed ledger: live verification #1 at its upper bound, #2 at its exact figure, #3 and #4 at the owner’s reported figures, #5 at zero (refused before any call), #6 at the owner’s reported figure, #7 and #8 provisionally at their upper bounds, the remainder covering a US$10 session', () => {
+  it('the committed ledger: live verification #1 at its upper bound, #2 at its exact figure, #3 and #4 at the owner’s reported figures, #5 at zero (refused before any call), #6 at the owner’s reported figure, #7 and #8 provisionally at their upper bounds, #9 at zero (refused before any call), the remainder covering a US$10 session', () => {
     const l = parseLedger(readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8'));
     expect(l.sessions.map((s) => [s.date, s.planHash, s.recordedUsdMicros])).toEqual([
       ['2026-10-17', 'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8', '145000'],
@@ -262,8 +346,9 @@ describe('the campaign ledger', () => {
       ['2026-10-19', '47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775', '248311'],
       ['2026-10-19', 'baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3', '85000'],
       ['2026-10-20', '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa', '1745000'],
+      ['2026-10-20', 'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627', '0'],
     ]);
-    // 200,000,000 − 145,000 − 778,283 − 160,675 − 88,801 − 0 − 248,311 − 85,000 − 1,745,000.
+    // 200,000,000 − 145,000 − 778,283 − 160,675 − 88,801 − 0 − 248,311 − 85,000 − 1,745,000 − 0.
     expect(ledgerRemainder(l)).toBe(196_748_930n);
     expect(() => assertLedgerCovers(l, SESSION_CEILING_USD_MICROS)).not.toThrow();
   });

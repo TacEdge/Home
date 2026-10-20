@@ -101,6 +101,12 @@ describe('GitHub workflows', () => {
         /DATABASE_URL: postgres:\/\/home_app:home_app@localhost:5432\/home_live_verify/,
       );
       expect(run).toMatch(/run: pnpm db:seed:fixtures/);
+      // Seeded without usage: the live cap check needs a database that counts nothing (ADR 0012 §69).
+      const seed = run.slice(
+        run.indexOf('- name: Seed the fixture family'),
+        run.indexOf('run: pnpm db:seed:fixtures'),
+      );
+      expect(seed).toMatch(/HOME_SEED_FIXTURES_USAGE: none/);
       expect(text()).not.toMatch(/neon|HOME_REAL_DATA|VERCEL/i);
       // Dispatch inputs never interpolated into a shell command.
       expect(text()).not.toMatch(/run: .*\$\{\{/);

@@ -299,7 +299,11 @@ export function capUsdMicros(nzd: number): bigint {
   return (2n * numerator + NZD_PER_USD.num) / (2n * NZD_PER_USD.num);
 }
 
-/** The run's cap, less what the runner's database already counts, must hold the plan's peak hold (or maximum). */
+/**
+ * The run's cap, less what the runner's database already counts, must hold
+ * the plan's peak hold (or maximum). Exact to the micro-dollar, in its
+ * arithmetic and its message: a cent's rounding once hid 4,800 µ$ (ADR 0012 §69).
+ */
 export function assertCapCovers(
   capMicros: bigint,
   countedMicros: bigint,
@@ -308,8 +312,39 @@ export function assertCapCovers(
   if (countedMicros + planMaxMicros > capMicros)
     throw new LiveRefusal(
       'cap',
-      `HOME's reservation cap for the run (US$${usd(capMicros)}) less what its database already counts (US$${usd(countedMicros)}) cannot hold the plan's peak (US$${usd(planMaxMicros)}).`,
+      `HOME's reservation cap for the run (US$${usdExact(capMicros)}) less what its database already counts (US$${usdExact(countedMicros)}) cannot hold the plan's peak (US$${usdExact(planMaxMicros)}).`,
     );
+}
+
+/**
+ * The keyless check (the workflow's first job, no database): the budget's
+ * whole-NZ$ cap must hold the plan's peak with nothing yet counted, which
+ * is what the live run's own database must then show (assertLiveCap).
+ */
+export function assertKeylessCap(budgetMicros: bigint, peakMicros: bigint): void {
+  assertCapCovers(capUsdMicros(capNzdFor(budgetMicros)), 0n, peakMicros);
+}
+
+/**
+ * The live check, on the runner's own database before any key is read:
+ * HOME's bookkeeping sees exactly the run's cap; the database counts
+ * nothing yet (no usage this month, no open or unreconciled reservation),
+ * as the keyless check assumed; and the cap holds the plan's peak. The
+ * same arithmetic as assertKeylessCap, so the two agree (ADR 0012 §69).
+ */
+export function assertLiveCap(
+  capNzd: number,
+  spend: Readonly<{ capUsdMicros: bigint; countedUsdMicros: bigint }>,
+  peakMicros: bigint,
+): void {
+  if (spend.capUsdMicros !== capUsdMicros(capNzd))
+    throw new LiveRefusal('cap', 'HOME’s bookkeeping does not see the run’s cap.');
+  if (spend.countedUsdMicros !== 0n)
+    throw new LiveRefusal(
+      'cap',
+      `The runner's database already counts US$${usdExact(spend.countedUsdMicros)} before any call; the keyless check assumed nothing, so the run is refused. Seed it without usage (HOME_SEED_FIXTURES_USAGE=none).`,
+    );
+  assertCapCovers(spend.capUsdMicros, spend.countedUsdMicros, peakMicros);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +388,13 @@ export function assertNotLocal(targetUrl: string | undefined, what: string): voi
       'database',
       `${what} is a local database; G16 is for home-dev’s pooled connection.`,
     );
+}
+
+/** US$ to the micro-dollar, from µ$ (never rounded), for the money checks' messages. */
+export function usdExact(micros: bigint): string {
+  const sign = micros < 0n ? '-' : '';
+  const m = micros < 0n ? -micros : micros;
+  return `${sign}${m / 1_000_000n}.${String(m % 1_000_000n).padStart(6, '0')}`;
 }
 
 /** US$ with two decimals, from µ$, for messages and the report. */

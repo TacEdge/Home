@@ -14,7 +14,10 @@ it('seeds the synthetic fixture family into the local database', async () => {
   assertSeedTarget(process.env.DATABASE_URL, process.env);
   const { db, close } = createDb(process.env.DATABASE_URL as string);
   try {
-    const result = await seedFixtureFamily(db);
+    // The live runner's throwaway database is seeded without usage
+    // (HOME_SEED_FIXTURES_USAGE=none, its workflow; ADR 0012 §69).
+    const usage = process.env.HOME_SEED_FIXTURES_USAGE !== 'none';
+    const result = await seedFixtureFamily(db, { usage });
     expect(['seeded', 'already_seeded']).toContain(result.status);
     console.info(`fixture seed: ${result.status}`);
   } finally {

@@ -107,6 +107,11 @@ jobs:
           DATABASE_URL_MIGRATE: ${{ env.ADMIN_DATABASE_URL }}
         run: pnpm exec drizzle-kit migrate
       - name: Seed the fixture family (its own guard allows a local database only)
+        env:
+          # No synthetic usage rows: HOME's cap counts every usage row, and the
+          # keyless check assumes the runner's database counts nothing yet
+          # (ADR 0012 §69). The live run refuses if it counts anything.
+          HOME_SEED_FIXTURES_USAGE: none
         run: pnpm db:seed:fixtures
       - name: Run the approved plan
         env:
