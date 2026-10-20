@@ -392,7 +392,7 @@ export async function addPrivateFor(
     [{ personId: self, role: 'attending' }],
     deps,
   );
-  await createEventWithPeople(
+  const thursday = await createEventWithPeople(
     a,
     {
       title: `${tag}thursday`,
@@ -403,7 +403,7 @@ export async function addPrivateFor(
     [{ personId: self, role: 'attending' }],
     deps,
   );
-  await createEventWithPeople(
+  const thursday2 = await createEventWithPeople(
     a,
     {
       title: `${tag}thursday-2`,
@@ -474,11 +474,18 @@ export async function addPrivateFor(
     at('2026-10-12', '06:00'),
     adult === 'sam' ? '7' : '8',
   );
-  // Their responses on whatever conflict and opening they now see.
+  // Their responses: on the conflict between their own two Thursday
+  // records, and on whatever opening they now see. The conflict is named,
+  // not taken first in rank order: several of Sam's start together, so the
+  // first is decided by random ids, and a dismissed household conflict
+  // would be hidden from the evaluation scenarios that ask about it.
   const { readConflicts } = await import('@/domain/insights/conflicts');
   const mine = await readConflicts(a, NOW, ZONE, deps);
-  if (!mine.all[0]) throw new Error('the fixture should give them a conflict to respond to');
-  await respondToInsight(a, mine.all[0].key, 'dismissed', 'today', NOW, ZONE, deps);
+  const own = new Set([thursday.id, thursday2.id]);
+  const conflict = mine.all.find((c) => c.occurrences.every((o) => own.has(o.eventId)));
+  if (!conflict)
+    throw new Error('the fixture should give them a conflict of their own to respond to');
+  await respondToInsight(a, conflict.key, 'dismissed', 'today', NOW, ZONE, deps);
   const runner = createToolRunner({
     actor: { ...a, via: 'kev' },
     now: NOW,

@@ -1049,6 +1049,11 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - The scripted evals pass on both tiers, three full runs.
       - Focused unit and integration suites pass: render, judge, tools, non-interference, harness, runner, orchestrator.
       - Six mutations are each caught: `open_tasks` withheld from `project_full`; every task counted rather than the open ones; a missing count read as zero; any insight accepted; the person unchecked; the conflict block refused.
+    - **Test isolation, found by this change's CI.** The previous-schema check failed on 15 orchestrator tests and one fresh-world test. These defects are in the tests, not in HOME. Sam and Alex, their reservations and their usage persist across suites in the shared test database. Which suites run first depends on Vitest's ordering, which this change's larger files and slower runs altered. Three corrections:
+      - **The evaluation world's dismissal is named.** Each adult's private records dismissed the first conflict in rank order. Sam has several conflicts that start together, so their random ids decided which one came first, and in about a third of builds it was Board meeting × Parent interviews. That hid HOME's insight about the overlap, so the new insight test (and a live answer through that insight) could not succeed. The adult now dismisses the conflict between their own two Thursday records, the same one in every build. The live runner builds the same world, so its dismissal is now fixed too. No plan or hash changes.
+      - **The orchestrator suite reads back only its own year (2040).** Its checks took the adult's latest reservation, and a suite that ran first could leave later ones (`kev-evals`, in 2042).
+      - **The fresh-world suite closes reservations that earlier suites left open.** The privacy suite's frozen 2030 clock leaves one open for each adult, which the real clock reads as a turn in flight. The suite closes them as the stale sweep does, since the runner's own database starts with none; its check that a recent unanswered message is still a turn in flight is unchanged.
+      - **Verification.** Each failure was reproduced in a fixed suite order and passes after its correction. `kev-evals` passed four full runs.
 
 ## Consequences
 
