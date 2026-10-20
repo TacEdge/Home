@@ -914,7 +914,27 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     - **The charge.** The job log says "HOME recorded US$0.08". The ledger enters it provisionally at 85,000 µ$, the upper bound, until `report.json` (artifact 12217956060, expiring 2026-11-18) gives the exact figure. The campaign remainder is then **US$198.493930**. Anthropic's bill is NOT RECONCILED.
     - **Stage 1 (§62), unchanged.** `review-fast`: the review set (20 scenarios, 21 turns) once each on fast (Sonnet 5.5 `medium`). Maximum US$31.50; proposed budget and cap US$31.67; hash `29d57657…`. The session plan is still `g9-binding`. Naming `review-fast` again is a one-line change that leaves its hash unchanged, made only on the owner's direction.
 
-## Consequences
+65. **Stage 1 made the session plan again; G11 and G12 recorded for the evaluation workspace** (2026-10-19; the owner's direction with M8's scope frozen; no provider call, no dispatch).
+    - **The plan.** `SESSION_PLAN` is `review-fast` again, a one-line change. The plan is unchanged:
+      - the review set (20 scenarios, 21 turns), once each on fast (Sonnet 5.5 `medium`);
+      - maximum US$31.50; budget and cap US$31.67;
+      - hash `29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa` (`PLAN_VERSION` 6).
+
+      `g9-binding` stays for its tests and its record (§64).
+    - **Evidence recorded.** G11 and G12 pass for the evaluation workspace, owner-supplied:
+      - "HOME - Kev Evaluations", workspace geo United States, inference geo US only;
+      - a monthly limit of US$10, automatic reload off.
+
+      The full record is at DEPLOY.md §E items 25–26, evaluation workspace only; Preview's and Production's stay at stage E. G22 stays NOT VERIFIED: its comparison (`maxCountDelta`) is written only to `report.json`, which the build session cannot read. The owner reads it from live verification #4's, #6's or #7's report.
+    - **The workspace limit: keep US$10.** These are separate bounds:
+      - **HOME's maximum (US$31.50) and budget (US$31.67)** bound HOME's own accounting, every call at its maximum.
+      - **The workspace limit (US$10 a month)** and **the prepaid credits** (US$19.23 reported, automatic reload off) bound what the provider can bill.
+      - **Expected spend is about US$1.7 to US$1.9:** 21 fast turns at run #4's US$0.089 or run #7's about US$0.08 a turn.
+      - **The plausible worst is about US$7.2:** every turn escalating to deep at run #6's US$0.25, on top of its fast attempt.
+      - **Month to date is at most US$1.51,** HOME's recorded total for live verifications #1–#7, which charges refused calls at their maximum, so the provider's figure is no higher.
+      - **The plausible worst therefore fits in the limit,** and the limit can only end the run early, never overspend. Raising it would add no protection: the prepaid credits bind first.
+      - **If the limit is reached,** the provider refuses the rest of the run's calls (HTTP 400). Those turns fail and the report shows it. HOME may charge such a call at its per-call maximum in its own ledger, but nothing is billed.
+
 
 - **ROADMAP.** The M8 row's status cell records Package 0 as approved by the owner (2026-10-13), in PR #81, with nothing built. "Not yet"'s "Push notifications and background jobs" gains a dated note: the single retention cleanup of expired Kev messages is approved for M8 (O6), its schedule subject to G18, and nothing else changes. Package 6's update of the row records this ADR and its narrowings: phrasing of Today's insights deferred (§31); "first evals in CI against both tiers" as four layers with live runs outside the required checks (§34); Forward's Kev items to M10 (§32). Milestone definitions are otherwise unchanged.
 - **KEV-AGENT-MODEL.** Annotated, not rewritten: §3 (`working`, structured `detail`, `now`); §4 (the smaller bundle, no home location; the person's words stored before the model); §5 (decided: fast Sonnet 5.5 at `medium` to start, Haiku evaluated; deep Opus 5.5 at medium; validator-initiated escalation; the append-only request within an attempt; the 12-hour window); §6 (`include_sensitive` removed; `find_free_windows` as `get_gaps`; `get_conflicts` as built; "recommend one window" and "Find us a night out" superseded; `search` titles only); §7 (phrasing deferred); §10 (four layers).

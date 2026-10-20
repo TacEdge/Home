@@ -25,15 +25,16 @@ import { runMode } from '../../scripts/kev-live/runner';
 // owner's review set once on the fast tier, as configured. Its design, its
 // exact maximum, its budget edges and the keyless check against the
 // committed campaign ledger. No network, no key, no database. G9's
-// prefix-check plan runs first (ADR 0012 §63) and leaves this plan, and its
-// approved hash, exactly as they were.
+// prefix-check plan ran first (live verification #7, ADR 0012 §64) and left
+// this plan, and its approved hash, exactly as they were; it is the session
+// plan again (ADR 0012 §65).
 
 const HASH = '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('Stage 1’s design', () => {
-  it('the review set, in its order, once each, on fast as configured (after G9’s plan)', () => {
-    expect(SESSION_PLAN).toBe('g9-binding');
+  it('is the session plan: the review set, in its order, once each, on fast as configured', () => {
+    expect(SESSION_PLAN).toBe('review-fast');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('review-fast');
     expect(plan.name).toBe('review-fast');
@@ -59,7 +60,8 @@ describe('Stage 1’s design', () => {
 
   it('has a deterministic hash for the owner to approve, unchanged by G9’s plan', () => {
     expect(buildPlan('review-fast').hash).toBe(HASH);
-    expect(buildPlan().hash).not.toBe(HASH);
+    expect(buildPlan().hash).toBe(HASH);
+    expect(buildPlan('g9-binding').hash).not.toBe(HASH);
     expect(buildPlan('deep-smoke').hash).not.toBe(HASH);
     expect(
       buildPlan('review-fast', REVIEW_FAST_PROBES.slice(1), PLANS['review-fast']).hash,

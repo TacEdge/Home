@@ -714,11 +714,11 @@ export type PlanDef = Readonly<{
 export type PlanName = keyof typeof PLANS;
 
 /**
- * The plan the runner runs now: G9's prefix-check verification (ADR 0012
- * §63), for the owner's approval; Stage 1 (`review-fast`) follows it, its
- * approved hash unchanged.
+ * The plan the runner runs now: Package 5E's Stage 1, the review set on
+ * fast (ADR 0012 §62, §65), for the owner's approval. G9's prefix-check
+ * plan ran as live verification #7 (§64) and stays for its tests and record.
  */
-export const SESSION_PLAN: PlanName = 'g9-binding';
+export const SESSION_PLAN: PlanName = 'review-fast';
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {
