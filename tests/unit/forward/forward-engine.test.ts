@@ -564,6 +564,43 @@ describe('rows and caps (§5.3)', () => {
     ]);
   });
 
+  // Today and Forward on the same day (the 20 October regression): Today
+  // lists a day in the agenda's own order; Forward's Week puts birthdays
+  // first (§5.3) and keeps the agenda's order otherwise. On Nana Jo's
+  // birthday, and only then, the two orders differ, by the birthday alone.
+  for (const date of ['2026-10-14', '2026-10-19', '2026-10-20', '2026-10-21'])
+    it(`${date}: Forward’s row for today is Today’s, with any birthday first`, () => {
+      const house = {
+        events: [
+          ...HOUSE,
+          allDay('e-teacher-only', 'Teacher-only day', date, addDays(date, 1)),
+          timed('e-walk', 'Early walk', `${date}T08:00:00+13:00`, `${date}T08:30:00+13:00`),
+        ],
+      };
+      const today = agenda({
+        from: date,
+        to: date,
+        timeZone: NZ,
+        events: house.events,
+        people: PEOPLE.map((p) => ({ id: p.id, name: p.name, dateOfBirth: p.dateOfBirth })),
+        tasks: [],
+        projects: [],
+      })[0]!.items.map(entryKey);
+      const row = run(house, at(`${date}T07:03:00+13:00`), 'week')
+        .units[0]!.notable.map((e) => e.key)
+        .filter((k) => today.includes(k));
+      const birthday = (k: string) => k.startsWith('birthday:');
+      const shown = today.filter((k) => row.includes(k));
+      expect(row).toEqual([...shown.filter(birthday), ...shown.filter((k) => !birthday(k))]);
+      expect(shown).toContain('e-teacher-only:' + date);
+      expect(today.some(birthday)).toBe(date === '2026-10-20');
+      if (date === '2026-10-20') {
+        // Today's own order has it after the day's all-day event; Forward's leads with it.
+        expect(today.indexOf('birthday:p-nana:2026-10-20')).toBeGreaterThan(0);
+        expect(row[0]).toBe('birthday:p-nana:2026-10-20');
+      }
+    });
+
   // Determinism (contract §8.1, matrix U-10): a seeded Fisher–Yates (the
   // conflict engine's T19 helper) over events, tasks, projects and people, and
   // over the items within each of the agenda's days. Every seed gives the
