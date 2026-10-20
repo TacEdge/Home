@@ -928,6 +928,20 @@ Evidence sources:
 | G22 | A count before every authorised call; one synthetic count compared with the call's `message_start` input | Counted before all five calls (`call_not_counted_first` absent). **The comparison (`maxCountDelta`) is unread** | Count-first verified; **the complete gate stays NOT VERIFIED** until `maxCountDelta` is recorded from a report |
 | G10 | US inference on every call | `not_us_inference` absent | **PASS** for the calls made |
 
+**G22 closed (2026-10-20; ADR 0012 §66; owner-supplied evidence, no provider call).** The owner read live verification #6's original `report.json` (run 39189762049 on f9eba68, artifact 12160000016; the `deep-smoke` plan, Opus 5.5):
+- `checks.maxCountDelta`: 0
+- `countedFirst`: true
+- `modelCalls`: 5
+- `thinkingBlocks`: 4
+- `growOnly`: true
+- `reconciliation.ok`: true
+
+| Gate | Requirement | Evidence | Status |
+|---|---|---|---|
+| G22 | The complete assembled input counted on `POST /v1/messages/count_tokens` before every authorised live call, failing closed. One synthetic count compared with the following call's `message_start` input | Run #6 counted before each of its five calls (`countedFirst`). The largest difference between a count and the input its call then reported was **0 tokens** (`maxCountDelta`), so the count matched the call exactly on every call. The fail-closed half passed in run #1 (a refused count stopped its call with no model call or charge) and is tested offline (`kev-preflight.test.ts`). The `message_start` input check stays as the authoritative backstop | **PASS** (2026-10-20; owner-supplied from run #6's report; deep tier, Opus 5.5) |
+
+`thinkingBlocks` 4 and `growOnly` on run #6 are recorded beside it: on deep, thinking blocks were replayed in a grow-only history. They do not change G21's disposition (PASS on fast, live verification #7), whose deep run did not have the prefix check on.
+
 **Stage 1 readiness update (2026-10-19; ADR 0012 §65; no provider call).** The evaluation workspace's Console settings are owner-supplied and recorded at DEPLOY.md §E items 25–26 (evaluation workspace only). `review-fast` is the session plan again, with its hash `29d57657…` unchanged.
 
 | Gate | Requirement | Evidence | Status |
