@@ -88,7 +88,7 @@ describe('its exact maximum exposure', () => {
     expect(capUsdMicros(capNzdFor(31_660_000n))).toBeLessThan(31_500_000n);
     const ledger = parseLedger(LEDGER);
     const spent = ledger.sessions.reduce((a, s) => a + BigInt(s.recordedUsdMicros), 0n);
-    expect(CAMPAIGN_USD_MICROS - spent).toBe(196_748_930n);
+    expect(CAMPAIGN_USD_MICROS - spent).toBe(194_575_003n);
     expect(buildPlan('review-fast').sessionCapUsdMicros).toBeLessThan(CAMPAIGN_USD_MICROS - spent);
   });
 });

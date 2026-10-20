@@ -335,7 +335,7 @@ describe('the campaign ledger', () => {
     );
   });
 
-  it('the committed ledger: live verification #1 at its upper bound, #2 at its exact figure, #3 and #4 at the owner’s reported figures, #5 at zero (refused before any call), #6 at the owner’s reported figure, #7 and #8 provisionally at their upper bounds, #9 at zero (refused before any call), the remainder covering a US$10 session', () => {
+  it('the committed ledger: live verification #1 at its upper bound, #2 at its exact figure, #3 and #4 at the owner’s reported figures, #5 at zero (refused before any call), #6 at the owner’s reported figure, #7 and #8 provisionally at their upper bounds, #9 at zero (refused before any call), #10 at its exact figure, the remainder covering a US$10 session', () => {
     const l = parseLedger(readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8'));
     expect(l.sessions.map((s) => [s.date, s.planHash, s.recordedUsdMicros])).toEqual([
       ['2026-10-17', 'f7f82b9ab622b2cc096e93837850c4cd67e787cbc17d9ed3aa95201944c3f8e8', '145000'],
@@ -347,9 +347,10 @@ describe('the campaign ledger', () => {
       ['2026-10-19', 'baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3', '85000'],
       ['2026-10-20', '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa', '1745000'],
       ['2026-10-20', 'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627', '0'],
+      ['2026-10-20', 'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627', '2173927'],
     ]);
-    // 200,000,000 − 145,000 − 778,283 − 160,675 − 88,801 − 0 − 248,311 − 85,000 − 1,745,000 − 0.
-    expect(ledgerRemainder(l)).toBe(196_748_930n);
+    // 200,000,000 − 145,000 − 778,283 − 160,675 − 88,801 − 0 − 248,311 − 85,000 − 1,745,000 − 0 − 2,173,927.
+    expect(ledgerRemainder(l)).toBe(194_575_003n);
     expect(() => assertLedgerCovers(l, SESSION_CEILING_USD_MICROS)).not.toThrow();
   });
 

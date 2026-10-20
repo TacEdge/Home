@@ -110,6 +110,18 @@
       "anthropicBilling": "NOT RECONCILED: nothing is expected on the provider's Usage and Cost for this run; unconfirmed.",
       "reservations": "None taken: the run was refused before its first probe, so HOME reserved no attempt.",
       "outcome": "FAILED before any model call, a financial preflight inconsistency, not an evaluation result: the review-deep plan (ADR 0012 §68) at its exact US$30.00 budget (NZ$54 = US$30.000000) passed the keyless check, which assumes the runner's database counts nothing, but the job's fixture seed had recorded two synthetic usage rows (2 × 2,400 µ$), and HOME's cap counted the 4,800 µ$: 4,800 µ$ + US$30.00 > US$30.00. The refusal printed the 4,800 µ$ as US$0.00. Corrected in ADR 0012 §69 with no change to the plan, its hash or its budget."
+    },
+    {
+      "date": "2026-10-20",
+      "workflowRun": "Kev live verification #10 (run 39383870066, commit 5315d64)",
+      "planHash": "f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627",
+      "plannedMaxUsdMicros": "30000000",
+      "recordedUsdMicros": "2173927",
+      "recordedBasis": "Owner-supplied: HOME's exact recorded figure from the run's report, US$2.173927 (the job log rounds it to \"HOME recorded US$2.17\"; artifact 12246826725, expiring 2026-11-19).",
+      "providerListPrice": "Not read here (the report's at-list-prices figure is in report.json).",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "20 scenario turns on deep (Opus 5.5), each held to the US$1.50 turn ceiling under the US$30.00 cap (NZ$54), which the runner's database started at zero (ADR 0012 §69), and settled. The job's own report was written, so the runner reconciled it; the reconciliation figures are in report.json.",
+      "outcome": "COMPLETED: Stage 2, the review-deep plan (ADR 0012 §68), the owner's review set of 19 scenarios and 20 turns once each on deep. 15 of 19 scenarios passed. Four failed, each on one check: realistic.fence_project (outcome: HOME's safe fallback after fact.field, view.unsupported, then fact.field), realistic.weekend_look (limits#0: no forecast credit), realistic.why_overlap (shows#0) and privacy.birthdays (must_cite#0). No privacy, sensitive-context, never-shown or unchecked-lead check failed on any turn. 18 of 20 answers passed HOME's checker first time; one after its regeneration; one ended in the fallback. Classified in ADR 0012 §70."
     }
   ]
 }

@@ -123,6 +123,7 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    - **Expected spend:** about US$3–6 (estimated; Opus is twice Sonnet per token).
    - **Before dispatch:** read the evaluation workspace's month-to-date spend in the Console. HOME has recorded about US$3.25 this month, so the US$10 monthly limit leaves about US$6.75. If the limit is reached, the remaining turns are refused and the run ends early.
    - **Live verification #9 was refused at the live cap check** (exit 17, before any call; ADR 0012 §69). The runner's database counted the fixture seed's 4,800 µ$ of synthetic usage. The workflow now seeds it without usage, and the live run refuses if its database counts anything before the first call. The plan, hash and budget are unchanged; dispatch needs a fresh approval.
+   - **Ran** as live verification #10 (ADR 0012 §70): 15 of 19 scenarios passed, HOME recorded US$2.173927 (exact). Do not dispatch it again without a fresh approval.
 
    For Package 5D's `deep-smoke` (ADR 0012 §59; ran as live verification #6, now kept for its tests and its record):
    - **Hash:** `47710b79a8fff475c877d3ecbc79f93f634b314bb3db470294eca6ea856ec775`.
