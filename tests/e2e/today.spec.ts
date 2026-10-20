@@ -134,6 +134,14 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   // Nobody is recorded on these, so they are in Also today: all-day first, then by time.
   const on = page.locator('section[aria-labelledby="today-also"]');
   const rows = await on.getByRole('link').allTextContents();
+  // A birthday's row links to the person (src/app/_agenda/agenda-list.tsx).
+  const birthdays = new Set(
+    await on
+      .getByRole('link')
+      .evaluateAll((as) =>
+        as.filter((a) => a.getAttribute('href')?.startsWith('/people/')).map((a) => a.textContent),
+      ),
+  );
   const allDayEnd = rows.findIndex((r) => !r.startsWith('All day'));
   expect(rows.slice(0, allDayEnd).every((r) => r.startsWith('All day'))).toBe(true);
   expect(rows.slice(allDayEnd).some((r) => r.startsWith('All day'))).toBe(false);
@@ -142,7 +150,10 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
   expect(walk).toBeGreaterThan(-1);
   expect(dentist).toBeGreaterThan(walk);
   expect(rows.some((r) => r.startsWith('All day') && r.includes('Teacher-only day'))).toBe(true);
-  // Forward's Today section has the same rows, in the same order (and whatever else the family has on).
+  // Forward's Today section has the same rows (and whatever else the family
+  // has on), in Week's order (M6 contract §5.3): birthdays first, then the
+  // agenda's order, which is Today's. Only a birthday moves, so on the
+  // fixture's own birthday (Nana Jo, 20 October) it leads Forward's row.
   await page.goto('/forward');
   await page.evaluate(() =>
     document.querySelectorAll('main details').forEach((d) => d.setAttribute('open', '')),
@@ -151,7 +162,10 @@ test('a busy day: the date as the headline, today’s events in agenda order, du
     .locator(`li[data-unit="${t.d}"]`)
     .getByRole('link')
     .allTextContents();
-  expect(forwardToday.filter((r) => rows.includes(r))).toEqual(rows);
+  expect(forwardToday.filter((r) => rows.includes(r))).toEqual([
+    ...rows.filter((r) => birthdays.has(r)),
+    ...rows.filter((r) => !birthdays.has(r)),
+  ]);
   await page.goto('/today');
   await on.getByRole('link', { name: /Dentist/ }).click();
   await expect(page).toHaveURL(/\/events\/[0-9a-f-]{36}$/);
