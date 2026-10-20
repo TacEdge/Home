@@ -78,7 +78,7 @@ export type RunContext = Readonly<{
    * Absent, a scenario probe is not run. Live, each turn's provider is the
    * gateway's; a test may give its own (`providerFor`).
    */
-  evaluation?: Omit<ScenarioContext, 'providerFor'> &
+  evaluation?: Omit<ScenarioContext, 'providerFor' | 'layer'> &
     Partial<Pick<ScenarioContext, 'providerFor'>> & {
       /**
        * Receives each run's readable transcript (Package 5C), for the run's
@@ -345,6 +345,7 @@ async function scenarioProbe(
   const scenarioCtx: ScenarioContext = {
     providerFor: () => ctx.gateway.provider(),
     ...ctx.evaluation,
+    layer: 'live',
   };
   const run = await runScenario(s, p.tier, p.repeat, scenarioCtx);
   // The readable transcript (Package 5C), withheld (and the run failed) if
