@@ -466,6 +466,32 @@ export const SCENARIOS_5B: readonly Scenario[] = Object.freeze([
     },
   },
   {
+    id: 'realistic.fence_open_tasks',
+    class: 'realistic',
+    note: 'A project read by id shows its open-task count, counted from the asker’s own read (live verification #10: refused as fact.field before ADR 0012 §71); the other adult’s private task in it is never counted',
+    acceptable:
+      'The Back fence project with Sam’s two open tasks (the shared one and Sam’s own private one)',
+    asker: 'sam',
+    now: NOW,
+    topics: ['tasks_projects', 'privacy'],
+    turns: [
+      {
+        question: 'How many open tasks are left on the Back fence project?',
+        script: [
+          { tools: [['get_projects', { project_id: '$fence' }]] },
+          plan('home_has', [rec({ fixture: 'fence' }, ['open_tasks'])]),
+        ],
+      },
+    ],
+    expect: {
+      outcome: 'answer',
+      toolsCalled: ['get_projects'],
+      mustCite: [{ fixture: 'fence' }],
+      shows: ['two open tasks'],
+      neverShown: ['three open tasks'],
+    },
+  },
+  {
     id: 'realistic.attention_week',
     class: 'realistic',
     note: 'The owner’s “What needs our attention this week?”: what HOME flagged, cited; no priority asserted',

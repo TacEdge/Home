@@ -6,7 +6,7 @@ import { archiveEvent, createEventWithPeople } from '@/domain/events/service';
 import { respondToInsight } from '@/domain/insights/today';
 import { createNote } from '@/domain/notes/service';
 import { archiveProject, createProject, updateProject } from '@/domain/projects/service';
-import { archiveTask, createTask } from '@/domain/tasks/service';
+import { archiveTask, createTask, updateTask } from '@/domain/tasks/service';
 import { assembleBundle } from '@/kev/context/assemble';
 import { createToolRunner, REGISTRY, type ToolCallOutcome } from '@/kev/tools/registry';
 import { ContextRefusal } from '@/kev/tools/types';
@@ -351,6 +351,7 @@ describe('T3–T14: each tool on the fixture', () => {
       project: {
         title: { untrusted_text: string };
         summary: { untrusted_text: string };
+        open_tasks: number;
         tasks: { title: { untrusted_text: string } }[];
         notes: { ref: { id: string }; body: { untrusted_text: string } }[];
       };
@@ -358,6 +359,8 @@ describe('T3–T14: each tool on the fixture', () => {
     const p = await data<P>(f.kev.sam, 'get_projects', { project_id: f.id.fence });
     expect(p.project.title).toEqual({ untrusted_text: 'Back fence' });
     expect(p.project.summary).toEqual({ untrusted_text: 'Paint it before summer.' });
+    // Counted from the same read's tasks, as the list counts them (ADR 0012 §71).
+    expect(p.project.open_tasks).toBe(1);
     expect(p.project.tasks.map((t) => t.title)).toEqual([
       { untrusted_text: 'Paint the back fence' },
     ]);
@@ -371,6 +374,27 @@ describe('T3–T14: each tool on the fixture', () => {
       [`${CANARY_MARK.alex}project`, 1],
       ['Garage', 1],
     ]);
+  });
+
+  it('T7b: a project read by id counts its open tasks only: a done task is listed, never counted (ADR 0012 §71)', async () => {
+    type P = { project: { open_tasks: number; tasks: { status: string }[] } };
+    const done = await createTask(
+      f.h.sam,
+      { title: 'Buy the paint', projectId: f.id.fence, visibility: 'household' },
+      deps,
+    );
+    await updateTask(f.h.sam, done.id, { status: 'done' }, deps);
+    try {
+      const p = await data<P>(f.kev.sam, 'get_projects', { project_id: f.id.fence });
+      expect(p.project.tasks.map((t) => t.status).sort()).toEqual(['done', 'open']);
+      expect(p.project.open_tasks).toBe(1);
+      // The same count the list gives.
+      type L = { projects: { ref: { id: string }; open_tasks: number }[] };
+      const list = await data<L>(f.kev.sam, 'get_projects', {});
+      expect(list.projects.find((x) => x.ref.id === f.id.fence)?.open_tasks).toBe(1);
+    } finally {
+      await archiveTask(f.h.sam, done.id, deps);
+    }
   });
 
   it('T8: get_people: Milo 9, Isla 6, Nana Jo’s next birthday 20 October; no date of birth anywhere', async () => {

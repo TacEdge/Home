@@ -20,8 +20,9 @@ import {
 
 // get_projects (contract §6.2): the reader's projects, or one in full. A
 // list: each project's title, status, target date and open-task count. One
-// project: its summary, its tasks and up to ten of its notes (newest first),
-// each note at most 500 characters. Through `listProjects`, `getProject`,
+// project: its summary, its open-task count (from the same read's tasks, as
+// the list counts them; ADR 0012 §71), its tasks and up to ten of its notes
+// (newest first), each note at most 500 characters. Through `listProjects`, `getProject`,
 // `listTasks` and `listNotes` as the adult; a project the reader cannot see
 // reads as one that does not exist.
 
@@ -52,6 +53,7 @@ const output = z
         status: z.enum(PROJECT_STATUSES),
         target_date: dateSchema.nullable(),
         summary: untrustedSchema(TEXT_CAP.body).nullable(),
+        open_tasks: z.number().int().nonnegative(),
         tasks: z.array(taskSchema).max(MAX_ITEMS),
         notes: z
           .array(z.object({ ref: refSchema, body: untrustedSchema(TEXT_CAP.body) }).strict())
@@ -145,6 +147,8 @@ export const getProjects: ReadTool<Input, Read, z.output<typeof output>> = {
           status: status(p.status),
           target_date: p.targetDate,
           summary: p.summary === null ? null : untrusted(p.summary, TEXT_CAP.body),
+          // Every task of the project the reader may see, before the limit.
+          open_tasks: read.tasks.filter((t) => t.status === 'open').length,
           tasks,
           notes,
           notes_count: read.notes.length,

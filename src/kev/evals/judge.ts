@@ -1,4 +1,5 @@
 import 'server-only';
+import { CONFLICT_RULES } from '@/domain/engines/conflicts';
 import type { KevEvent } from '../orchestrator';
 import type { Ref } from '../tools/types';
 import { resolveRef, type FixtureIds } from './scripted';
@@ -42,7 +43,8 @@ export type Verdict = Readonly<{
   pass: boolean;
   /**
    * The checks that failed: `outcome`, `ungrounded`, `decline`, `escalated`,
-   * `salvaged`, `say_unchecked`, `private_shown`, `sensitive_shown`, or an expectation
+   * `salvaged`, `cites_conflict`, `say_unchecked`, `private_shown`,
+   * `sensitive_shown`, or an expectation
    * with its index (`must_cite#0`, `never_shown#2`, `tool_called#1`, …).
    */
   failed: readonly string[];
@@ -99,6 +101,14 @@ export function judge(
     const not = resolveRef(r, ids);
     if (cites.some((c) => same(c, not))) failed.push(`must_not_cite#${i}`);
   });
+  if (e.citesConflict) {
+    const { person, between } = e.citesConflict;
+    const pair = [ids[between[0]], ids[between[1]]].sort().join('.');
+    const keyed = (id: string) =>
+      CONFLICT_RULES.some((rule) => id.startsWith(`${rule}:${ids[person]}:${pair}:`));
+    if (!cites.some((c) => (c.type === 'conflict' || c.type === 'insight') && keyed(c.id)))
+      failed.push('cites_conflict');
+  }
   const limits = o.stored?.limits ?? [];
   (e.limits ?? []).forEach((l, i) => {
     if (!limits.includes(l)) failed.push(`limits#${i}`);

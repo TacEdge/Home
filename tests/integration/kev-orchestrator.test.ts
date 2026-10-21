@@ -96,12 +96,18 @@ const turn = (
   opts: Partial<Parameters<typeof runTurn>[3]> = {},
 ) => runTurn(actor, text, script, { now: NOW, db: clocked, ...opts });
 
+/**
+ * This suite's year on its clock. Sam and Alex, their reservations and usage
+ * outlive every suite, and other suites write theirs in later years
+ * (kev-evals in 2042): read back only what this suite wrote, whatever ran first.
+ */
+const OWN_YEAR = { from: '2040-01-01T00:00:00Z', to: '2041-01-01T00:00:00Z' };
 const kevRows = async (actor: UserActor) =>
   (await messagesOf(admin, actor.userId)).filter((m) => m.role === 'kev');
 const usageRows = async (actor: UserActor) =>
   (
     await admin.db.execute<{ attempt_id: string; tier: string; escalated: boolean; cost: string }>(
-      sql`select attempt_id, tier, escalated, cost_usd_micros::text as cost from kev_usage where user_id = ${actor.userId} order by at, id`,
+      sql`select attempt_id, tier, escalated, cost_usd_micros::text as cost from kev_usage where user_id = ${actor.userId} and at >= ${OWN_YEAR.from}::timestamptz and at < ${OWN_YEAR.to}::timestamptz order by at, id`,
     )
   ).rows;
 const reservations = async (actor: UserActor) =>
@@ -114,7 +120,9 @@ const reservations = async (actor: UserActor) =>
       settled: string | null;
     }>(
       sql`select attempt_id, tier, status, reserved_usd_micros::text as reserved, settled_usd_micros::text as settled
-            from kev_budget_reservation where user_id = ${actor.userId} order by created_at, id`,
+            from kev_budget_reservation where user_id = ${actor.userId}
+             and created_at >= ${OWN_YEAR.from}::timestamptz and created_at < ${OWN_YEAR.to}::timestamptz
+           order by created_at, id`,
     )
   ).rows;
 const types = (t: { events: { type: string }[] }) => t.events.map((e) => e.type);

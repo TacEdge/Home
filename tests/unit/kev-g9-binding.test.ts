@@ -34,7 +34,7 @@ import { runMode } from '../../scripts/kev-live/runner';
 // network, no key, no database; the stub run is in kev-live-runner.
 
 const HASH = 'baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3';
-const STAGE_1_HASH = '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa';
+const STAGE_1_HASH = '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 const KEY = 'test-only-not-a-key';
 

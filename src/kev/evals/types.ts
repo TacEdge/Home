@@ -61,7 +61,10 @@ export type FixtureKey = (typeof FIXTURE_KEYS)[number];
  * conflicts, insights, gaps).
  */
 export type RefSpec =
-  { fixture: FixtureKey; at?: string } | { forecast: string } | { find: string; type?: string };
+  | { fixture: FixtureKey; at?: string }
+  | { forecast: string }
+  /** The first returned record whose JSON holds the text (or every text given), optionally of a type. */
+  | { find: string | string[]; type?: string };
 
 /**
  * An absence's or count's scope (contract §8.1, as amended by the owner,
@@ -167,6 +170,13 @@ export type Expectations = {
   salvaged?: boolean;
   /** Text that must be shown (in the lead or a rendered block). */
   shows?: string[];
+  /**
+   * The answer cites this one conflict, by the conflict engine's own key
+   * (`{rule}:{person}:{eventA}.{eventB}:{span}`): as a conflict block or as
+   * HOME's insight about it, which carries the same key. Any other conflict
+   * or insight does not count (ADR 0012 §71).
+   */
+  citesConflict?: { person: FixtureKey; between: [FixtureKey, FixtureKey] };
   /**
    * Records the answer may cite besides `mustCite` (Package 5B's relevance
    * diagnostic): a cited record in neither is counted as not asked for. A

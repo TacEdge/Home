@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMessage, listConversations } from '@/domain/conversations/service';
 import { clearConversation } from '@/domain/kev-bookkeeping/service';
@@ -29,6 +30,14 @@ beforeAll(async () => {
   for (const k of WEATHER_VARIABLES) delete process.env[k];
   Object.assign(process.env, weatherEnv(WELLINGTON));
   f = (await buildEvalWorld(db, admin.db)).f;
+  // The runner's database is its own and new: no reservation in it is open.
+  // This one is shared, and a suite before this one may have left an adult's
+  // reservation open on a clock of its own (the privacy suite's, in 2030),
+  // which the real clock reads as an attempt still running. Closed as the
+  // sweep closes a stale one, so only what the world wrote is tested.
+  await admin.db.execute(sql`
+    update kev_budget_reservation set status = 'unreconciled', closed_at = created_at
+     where status = 'open' and user_id in (${f.kev.sam.userId}, ${f.kev.alex.userId})`);
 });
 afterAll(async () => {
   for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];

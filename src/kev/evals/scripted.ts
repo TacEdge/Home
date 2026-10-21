@@ -30,7 +30,11 @@ function allResults(req: ProviderRequest): unknown[] {
   return out;
 }
 
-function findRef(node: unknown, needle: string, type: string | undefined): Ref | null {
+function findRef(
+  node: unknown,
+  needle: string | readonly string[],
+  type: string | undefined,
+): Ref | null {
   if (Array.isArray(node)) {
     for (const v of node) {
       const r = findRef(v, needle, type);
@@ -46,7 +50,8 @@ function findRef(node: unknown, needle: string, type: string | undefined): Ref |
     typeof ref === 'object' &&
     typeof ref.id === 'string' &&
     (type === undefined || ref.type === type) &&
-    JSON.stringify(o).includes(needle)
+    // Every fragment, when several are given: one record among several alike.
+    (typeof needle === 'string' ? [needle] : needle).every((n) => JSON.stringify(o).includes(n))
   )
     return ref;
   for (const [k, v] of Object.entries(o)) {

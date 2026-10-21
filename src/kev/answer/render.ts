@@ -420,7 +420,7 @@ function project(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
   const dates: IsoDate[] = [];
   const avail: Readonly<Partial<Record<Shape, readonly ShowField[]>>> = {
     project_list: ['status', 'target', 'open_tasks'],
-    project_full: ['status', 'target', 'summary'],
+    project_full: ['status', 'target', 'open_tasks', 'summary'],
     project_target: ['target'],
     title_only: [],
   };
@@ -442,7 +442,9 @@ function project(e: LedgerEntry, show: readonly ShowField[], ctx: Ctx): Out {
         break;
       }
       case 'open_tasks': {
-        const n = typeof o.open_tasks === 'number' ? o.open_tasks : 0;
+        // Counted by HOME in the read (list or one project): never assumed.
+        if (typeof o.open_tasks !== 'number') return 'fact.field';
+        const n = o.open_tasks;
         parts.push(n === 0 ? 'no open tasks' : `${numberWord(n)} open task${n === 1 ? '' : 's'}`);
         break;
       }

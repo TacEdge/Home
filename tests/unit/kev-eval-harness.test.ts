@@ -397,6 +397,48 @@ describe('live judging of the obeying scenarios (Stage 1, ADR 0012 §67)', () =>
   });
 });
 
+describe('citesConflict: one conflict, as a conflict block or its own insight (ADR 0012 §71)', () => {
+  const overlap = SCENARIOS.find((s) => s.id === 'realistic.why_overlap')!;
+  const markers = { otherAdult: ['canary-alex-'], sensitive: [] };
+  const pair = [IDS.board, IDS.interviews].sort().join('.');
+  const key = `conflict.overlap:${IDS.sam}:${pair}:202610150500-202610150530`;
+  const answer = (cite: { type: string; id: string }): Observed => ({
+    events: [
+      { type: 'say', text: 'Thursday has an overlap.' },
+      { type: 'detail', blocks: [{ kind: 'fact', text: 'Sam … 18:00–18:30.', cites: [cite] }] },
+      { type: 'done', outcome: 'answer', limits: [], escalated: false, keepable: false },
+    ] as KevEvent[],
+    stored: {
+      outcome: 'answer',
+      say: 'Thursday has an overlap.',
+      cites: [cite as never],
+      trace: [],
+    },
+  });
+  const failed = (cite: { type: string; id: string }) =>
+    judge(overlap, 'deep', answer(cite), IDS, markers, 'live').failed;
+
+  it('the conflict block and the conflict’s own insight both pass', () => {
+    expect(failed({ type: 'conflict', id: key })).toEqual([]);
+    expect(failed({ type: 'insight', id: key })).toEqual([]);
+    expect(
+      failed({ type: 'insight', id: key.replace('conflict.overlap', 'conflict.responsible') }),
+    ).toEqual([]);
+  });
+
+  it('any other insight, conflict, person or record fails', () => {
+    expect(failed({ type: 'insight', id: 'birthday.upcoming:nana' })).toEqual(['cites_conflict']);
+    expect(failed({ type: 'conflict', id: key.replace(IDS.sam, IDS.alex) })).toEqual([
+      'cites_conflict',
+    ]);
+    expect(failed({ type: 'insight', id: key.replace(IDS.board, IDS.swimming) })).toEqual([
+      'cites_conflict',
+    ]);
+    expect(failed({ type: 'event', id: IDS.board })).toEqual(['cites_conflict']);
+    expect(failed({ type: 'insight', id: `x${key}` })).toEqual(['cites_conflict']);
+  });
+});
+
 describe('turn records and the summary (§12.3)', () => {
   const stored = (
     check: KevContentV2['check'],

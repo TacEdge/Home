@@ -553,10 +553,10 @@ describe('no change to spending controls (Package 5C)', () => {
       'baa9917077b28340f237530bd83ba0bd721eac147ab8d9f193e92d779cad33e3',
     );
     expect(buildPlan('review-fast').hash).toBe(
-      '29d5765739ae270f11cf7b3ed1354ca598c034da8479b88a07d855d4f223ceaa',
+      '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa',
     );
     expect(buildPlan().hash).toBe(
-      'f6d410611d4bd93da87b9dfc71e9e5be38651870b1eee5117d46e05396ae8627',
+      '235207b5b7f1a7efcdb72e5b6e29b49fc4bf8d14580e8c0673a47c3dd71f140c',
     );
     expect(TARGETS.factual).toBe(0.95);
     expect(TARGETS.firstPass).toBe(0.9);
