@@ -776,10 +776,18 @@ describe('the scenario probe and evaluation plans (§12.4)', () => {
     expect(() => buildPlan('wrong', wrong, evalDef(10_000_000n, ['x']))).toThrow(/does not match/);
     // The verification plans hold no scenario probe and keep the US$10
     // ceiling; the named evaluation plans (Package 5D's deep smoke run and
-    // Package 5E's review set, on fast and deep) are held to the US$175 run ceiling.
+    // Package 5E's review set: on fast and deep, and Stage 3's Sonnet `low`
+    // and Haiku runs) are held to the US$175 run ceiling.
+    const EVALUATION_PLANS = [
+      'deep-smoke',
+      'review-fast',
+      'review-deep',
+      'review-sonnet-low',
+      'review-haiku',
+    ];
     for (const name of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
       const p = buildPlan(name);
-      const evaluation = name === 'deep-smoke' || name === 'review-fast' || name === 'review-deep';
+      const evaluation = EVALUATION_PLANS.includes(name);
       expect(p.kind, name).toBe(evaluation ? 'evaluation' : 'verification');
       expect(p.ceilingUsdMicros, name).toBe(
         evaluation ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS,

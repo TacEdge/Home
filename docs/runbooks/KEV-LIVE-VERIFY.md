@@ -100,7 +100,15 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    It prints the database and host, counts and latest `created_at` per table, how many person names are not the fixture family's (a count), accounts not on a `.test` address (the adults' own sign-in accounts appear here) and calendar connections. Record the date and the result. Also confirm in Neon that the Vercel integration is not creating Preview branches from Production, and in Vercel that no provider key is set anywhere (plan §6).
 3. **GitHub:** create the environment **`kev-evals`** (Settings › Environments) with **required reviewer: the owner**, deployment branches limited to `main`; add the secret **`KEV_EVAL_PROVIDER_KEY`** to that environment only (never a repository secret, never Vercel). The key is the evaluation workspace's own (plan §3 step 4).
 4. **Dry run, locally:** `node scripts/kev-live/run.mts`. Read the table; note the hash.
-5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plan is the review set on deep, `review-deep`** (ADR 0012 §68). Stage 1, `review-fast` (ADR 0012 §65), ran as live verification #8 (§67). G9's prefix check, `g9-binding` (ADR 0012 §63), ran as live verification #7 (ADR 0012 §64): G9 and G21 passed, and the answer check failed. Do not dispatch it again; G9 needs no further provider call.
+5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plans are Stage 3's two, `review-sonnet-low` and `review-haiku`** (ADR 0012 §72): each its own run, approval, budget, report and ledger row. The dry run prints both; the approved hash selects which one runs.
+   - **What each runs:** the owner's review set (20 scenarios, 21 turns), once each, started on fast, on the synthetic evaluation world. Only the fast attempt's calls change: Sonnet 5.5 at `low` effort, or Haiku 5.5 at the fast tier's own settings (`medium`, 4,096 `max_tokens`). An escalation re-runs the turn on Opus 5.5 at `medium`, as configured. The report names the configuration; a run whose calls were not it fails (`not_configured_model`, `not_configured_effort`).
+   - **Hashes:** `review-sonnet-low` `715085a9f8078a92fa59c2211ea4bfc76253f0d5d010f06ea6c3047eea2eee23`; `review-haiku` `1bc1126e20d1be818962d965b32eecce0f3eaaa1f8e3bb45e66ced4155364b3a`.
+   - **Budget, each:** US$31.67, the smallest that works. The maximum is US$31.50 (21 turns at the US$1.50 turn ceiling; a Haiku call is reserved at Sonnet 5.5's per-call maximum and recorded at Haiku's prices). US$31.50 to US$31.66 is refused at the cap (exit 17), anything above US$31.67 at the plan's cap, anything below US$31.50 as not covering the maximum.
+   - **Expected spend (estimates):** Sonnet `low` about US$1.0–1.8; Haiku about US$1–3, mostly its escalations to Opus. The campaign remainder is US$194.575003.
+   - **Before each dispatch:** read the evaluation workspace's month-to-date spend in the Console. HOME has recorded US$5.42 in October; the US$10 monthly limit stays, and a run that reaches it ends early in provider errors, which makes its comparison invalid. Dispatch only when the expected spend fits.
+   - **Compare** (step 11): with Stage 1's and Stage 2's reports, once both have run.
+
+   The review set on deep, `review-deep` (ADR 0012 §68), ran as live verification #10 (§70). Stage 1, `review-fast` (ADR 0012 §65), ran as live verification #8 (§67). G9's prefix check, `g9-binding` (ADR 0012 §63), ran as live verification #7 (ADR 0012 §64): G9 and G21 passed, and the answer check failed. Do not dispatch it again; G9 needs no further provider call.
    - **What it runs:** one turn on fast (Sonnet 5.5, `medium`) through `kev.handle()` on the runner's database, with the provider's prefix check opted into on every count and call (`block_binding` `"error"`, beta flag `thinking-binding-controls-2026-08-01`, sent by the runner's fetch only).
    - **Pass:** HOME's checked answer with a citation, and one attempt with at least two tool rounds and a regeneration, thinking replayed, no refusal, and every call's `input_transformations` present and empty.
    - **Not covered:** a turn without both is a fail with `g9_not_covered`. Neither can be forced; repeating it needs a fresh approval.
@@ -147,6 +155,17 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
     node scripts/kev-live/quality-review.mts review-fast.json kev-review-live-fast.json
     ```
     It prints HOME's automated result and your ratings side by side, and lists the answers that were **correct but not useful**. It refuses a sheet for other transcripts.
+
+    **Compare configurations (Stage 3, ADR 0012 §72).** With each run's `report.json` (and, where rated, its `review-<tier>.json` and review sheet) in one folder, list them in a `comparison.json`:
+    ```
+    { "runs": [
+      { "label": "Sonnet 5.5 medium (run #8)", "report": "run8/report.json" },
+      { "label": "Opus 5.5 medium (run #10)", "report": "run10/report.json" },
+      { "label": "Sonnet 5.5 low", "report": "low/report.json",
+        "review": { "transcripts": "low/review-fast.json", "sheet": "low/sheet.json" } },
+      { "label": "Haiku 5.5", "report": "haiku/report.json" } ] }
+    ```
+    then `node scripts/kev-live/compare.mts comparison.json`. It prints one table, one column per configuration: pass rate, first-pass validation, factual correctness, grounding, safety, privacy and injection, latency (median, P95), escalation and regeneration, cost per turn and the owner's usefulness ratings. Each column comes from its own run's judge records, summarised exactly as its report did. It refuses scripted results and decides nothing. The baseline reports expire on 2026-11-19 (artifacts 12233668597 and 12246826725): download them before then. Each Stage 3 run's review page is named `review-fast.html` (its runs started on fast); its report says which configuration it holds.
 
     These files hold synthetic questions and answers. Keep them out of the repository, the ledger and any log; the artifact expires after 30 days. A transcript that would show the other adult's private record or a sensitive string is withheld, and its run fails (`transcript_withheld`).
 

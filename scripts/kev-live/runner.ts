@@ -27,7 +27,7 @@ import {
   usd,
   type Mode,
 } from './guards.mts';
-import { buildPlan, type Plan } from './plan';
+import { buildPlan, sessionPlan, SESSION_PLANS, type Plan } from './plan';
 import { applyState, buildEvalWorld } from '../../tests/integration/kev-eval-world';
 import { WELLINGTON } from '../../tests/fixtures/weather';
 import { paceTurn, reviewFiles } from './eval';
@@ -89,10 +89,23 @@ export type RunnerOptions = {
   plan?: Plan;
 };
 
+/** A comparison plan's configuration (Stage 3), as the hash binds it: model ids and efforts. */
+function configurationLines(plan: Plan): string[] {
+  const c = plan.canonical.configuration as
+    | Readonly<Record<'fast' | 'escalation', Readonly<{ model: string; effort: string }>>>
+    | undefined;
+  return c
+    ? [
+        `configuration: fast calls on ${c.fast.model} at effort ${c.fast.effort}; an escalation on ${c.escalation.model} at effort ${c.escalation.effort}`,
+      ]
+    : [];
+}
+
 /** The plan as a table: ids, gates, tiers, calls and maxima. Never a prompt. */
 export function planLines(plan: Plan): string[] {
   const lines = [
     `Kev live ${plan.kind} plan v${String(plan.canonical.version)}: ${plan.name} (session cap US$${usd(plan.sessionCapUsdMicros)}; ceiling US$${usd(plan.ceilingUsdMicros)})`,
+    ...configurationLines(plan),
     '',
     'probe                  gates                tier  max US$ (with retry)  max US$ (no retry)',
   ];
@@ -146,13 +159,24 @@ export async function runMode(
 ): Promise<RunnerOutcome> {
   try {
     assertEnvironment(mode, env);
-    const plan = opts.plan ?? buildPlan();
-    for (const l of planLines(plan)) opts.log(l);
     if (mode === 'dry-run') {
+      // Every plan the runner may run now (Stage 3: two, each its own run).
+      const shown = opts.plan ? [opts.plan] : SESSION_PLANS.map((n) => buildPlan(n));
+      for (const [i, p] of shown.entries()) {
+        if (i > 0) opts.log('');
+        for (const l of planLines(p)) opts.log(l);
+      }
       opts.log('');
-      opts.log('Dry run: nothing was sent. Approve the hash above to run this plan.');
+      opts.log(
+        shown.length > 1
+          ? 'Dry run: nothing was sent. Each plan is its own run: approve one hash above, with its budget, for each dispatch.'
+          : 'Dry run: nothing was sent. Approve the hash above to run this plan.',
+      );
       return { exitCode: EXIT.ok, code: 'dry_run' };
     }
+    // The plan the approved hash names; a hash that names none is refused below.
+    const plan = opts.plan ?? sessionPlan(env.KEV_LIVE_APPROVED_PLAN_HASH);
+    for (const l of planLines(plan)) opts.log(l);
     // The plan kind's ceiling (§12.4 rule 2): US$175 for an evaluation run,
     // the US$10 session ceiling for verification.
     const budget = parseBudgetUsd(

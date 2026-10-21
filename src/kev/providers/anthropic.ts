@@ -780,6 +780,7 @@ function buildCore(apiKey: string, fetch: ProviderFetch): Core {
           kind: 'message' as const,
           attemptId: budget.attemptId,
           model,
+          effort: params.output_config?.effort ?? null,
           status: observer.status,
           requestId: validRequestId(observer.requestId),
           outcome,

@@ -555,7 +555,7 @@ describe('no change to spending controls (Package 5C)', () => {
     expect(buildPlan('review-fast').hash).toBe(
       '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa',
     );
-    expect(buildPlan().hash).toBe(
+    expect(buildPlan('review-deep').hash).toBe(
       '235207b5b7f1a7efcdb72e5b6e29b49fc4bf8d14580e8c0673a47c3dd71f140c',
     );
     expect(TARGETS.factual).toBe(0.95);
