@@ -312,6 +312,9 @@ test('a crafted skip of a one-off event is refused, calmly', async ({ page }) =>
   }, nana);
   await page.locator('button[aria-label^="Skip "]').first().click();
   await expect(page.getByText('This happens once, so there’s nothing to skip.')).toBeVisible();
+  // Forward at the fixture's own day (src/app/_agenda/now.ts), so the 20 October
+  // birthday is ahead of it whatever the real date.
+  await page.setExtraHTTPHeaders({ 'x-home-test-now': '2026-10-14T07:03:00+13:00' });
   await page.goto('/forward?h=month');
   await openFolds(page);
   await expect(
