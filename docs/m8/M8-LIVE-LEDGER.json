@@ -122,6 +122,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "20 scenario turns on deep (Opus 5.5), each held to the US$1.50 turn ceiling under the US$30.00 cap (NZ$54), which the runner's database started at zero (ADR 0012 §69), and settled. The job's own report was written, so the runner reconciled it; the reconciliation figures are in report.json.",
       "outcome": "COMPLETED: Stage 2, the review-deep plan (ADR 0012 §68), the owner's review set of 19 scenarios and 20 turns once each on deep. 15 of 19 scenarios passed. Four failed, each on one check: realistic.fence_project (outcome: HOME's safe fallback after fact.field, view.unsupported, then fact.field), realistic.weekend_look (limits#0: no forecast credit), realistic.why_overlap (shows#0) and privacy.birthdays (must_cite#0). No privacy, sensitive-context, never-shown or unchecked-lead check failed on any turn. 18 of 20 answers passed HOME's checker first time; one after its regeneration; one ended in the fallback. Classified in ADR 0012 §70."
+    },
+    {
+      "date": "2026-10-21",
+      "workflowRun": "Kev live verification #11 (run 39569280698, commit 0e826b1)",
+      "planHash": "715085a9f8078a92fa59c2211ea4bfc76253f0d5d010f06ea6c3047eea2eee23",
+      "plannedMaxUsdMicros": "31500000",
+      "recordedUsdMicros": "2027364",
+      "recordedBasis": "Owner-supplied: HOME's exact recorded figure from the run's report, US$2.027364 (the job log rounds it to \"HOME recorded US$2.03\"; artifact 12331476222, kev-live-report, expiring 2026-11-20).",
+      "providerListPrice": "Not read here (the report's at-list-prices figure is in report.json).",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "21 scenario turns started on fast (Sonnet 5.5 at low effort), each held to the US$1.50 turn ceiling under the US$31.67 cap (NZ$57), which the runner's database started at zero; eight escalated to deep (Opus 5.5 medium) within their turn; all settled. The job's own report was written, so the runner reconciled it; the reconciliation figures are in report.json.",
+      "outcome": "COMPLETED: Stage 3A, the review-sonnet-low plan (ADR 0012 §72), the owner's review set of 20 scenarios and 21 turns once each, started on fast with Sonnet 5.5 at low effort. 19 of 20 scenarios passed. realistic.weekend_look failed (limits#0: no forecast credit), the same omission Stage 2 recorded as product-quality evidence. No privacy, sensitive-context, never-shown or unchecked-lead check failed. Every turn ended in a checked answer: 12 first time on fast, 1 after its regeneration, 8 after the model escalated to deep (escalation: model). First-answer failure codes: fact.field 1, view.unsupported 1. Accepted by the owner as evaluation evidence (ADR 0012 §73); not chosen as the fast default."
     }
   ]
 }

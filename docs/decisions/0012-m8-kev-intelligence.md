@@ -1112,6 +1112,23 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
         - scripted results compared;
         - the report ignoring the configuration.
     - **Not done.** No run is dispatched, no paid call made, the full campaign not started, Package 6 not begun. Each run needs the owner's approval of its hash and budget and the owner's dispatch. HOME_REAL_DATA stays closed.
+73. **Stage 3A ran: Sonnet 5.5 at `low`** (live verification #11, 2026-10-21; run 39569280698 on `0e826b1`; the owner's approval and dispatch of `review-sonnet-low`, hash `715085a9…`, budget US$31.67). The owner accepts it as completed evaluation evidence, and does **not** choose Sonnet `low` as the fast default: the decision waits for all four configurations side by side.
+    - **Results (n = 1 per scenario).**
+      - **Scenarios:** 19 of 20 passed. `realistic.weekend_look` failed on `limits#0` (no forecast credit), the same omission Stage 2 recorded as product-quality evidence (§71).
+      - **Safety:** no privacy, sensitive-context, never-shown or unchecked-lead check failed.
+      - **Answers:** every turn ended in a checked answer. 12 passed first time on fast, 1 after its regeneration, and 8 after the model escalated to deep (`escalation: model`, 8 of 21 turns, 38%; Stage 1 at `medium` escalated 4).
+      - **First-answer failure codes:** `fact.field` 1, `view.unsupported` 1.
+      - **Latency to the checked answer** (from the job log's structural `kev_turn` lines):
+        - not escalated: median 13.0 s, P95 19.2 s (n = 13);
+        - escalated: median 23.4 s, P95 42.4 s (n = 8).
+    - **Cost.** HOME recorded **US$2.027364** (exact, owner-supplied; the job log rounds it to US$2.03). Stage 1 at `medium` recorded US$1.745 (provisional). Escalations, which run on Opus, carry most of the difference: `low` made more of them.
+    - **Ledger.** Row #11 is entered at 2,027,364 µ$, and the campaign remainder is **US$192.547639**. Anthropic's bill is not reconciled.
+    - **Artifacts.** The report, transcripts and review files are artifact 12331476222 (`kev-live-report`), which expires **2026-11-20**. The baselines' artifacts expire on 2026-11-19 (Stage 1: 12233668597; Stage 2: 12246826725). The build environment cannot reach GitHub's artifact storage, so the owner downloads and keeps all three outside the repository (they hold synthetic transcripts).
+    - **Before Stage 3B (Haiku).** The workspace's monthly limit is US$10 (G12). HOME has recorded **US$7.452361 in October** (conservative: unknown or partial usage at the per-call maximum), leaving **US$2.547639** on HOME's figures.
+      - **Expected Haiku cost:** about US$0.10 for its own turns, plus about US$0.25–0.35 for each escalation. With Stage 3A's escalation rate (about 8), that is about US$2.1–2.9, which may not fit.
+      - **Before dispatch:** read the provider's actual month-to-date spend in the Console, which is at or below HOME's figure.
+      - **When to dispatch:** dispatch `review-haiku` (hash `1bc1126e…`, budget US$31.67, unchanged; no new engineering) only if the remaining allowance holds at least about US$3.50 (the plausible cost with a margin). Otherwise wait for the month's reset on 1 November rather than change the limit. A run that reaches the limit ends early in provider errors and is unusable as a comparison.
+    - **Then compare.** Run `scripts/kev-live/compare.mts` over the four reports (runs #8, #10, #11 and Stage 3B) and the owner's review sheets, and make one evidence-based decision (contract §5.3's rules).
 
 ## Consequences
 

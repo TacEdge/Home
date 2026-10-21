@@ -117,7 +117,7 @@ describe('their financial limits', () => {
     }
   });
 
-  it('US$31.67 is the smallest budget whose whole-NZ$ cap holds US$31.50; both runs fit the campaign remainder', () => {
+  it('US$31.67 is the smallest budget whose whole-NZ$ cap holds US$31.50; each fits the campaign remainder', () => {
     expect(capNzdFor(31_670_000n)).toBe(57);
     expect(capUsdMicros(57)).toBeGreaterThanOrEqual(31_500_000n);
     expect(capUsdMicros(capNzdFor(31_660_000n))).toBeLessThan(31_500_000n);
@@ -126,9 +126,9 @@ describe('their financial limits', () => {
       0n,
     );
     const remainder = CAMPAIGN_USD_MICROS - spent;
-    expect(remainder).toBe(194_575_003n);
-    // Both budgets at once, were each spent to its cap: US$131.235003 left.
-    expect(remainder - 2n * 31_670_000n).toBe(131_235_003n);
+    expect(remainder).toBe(192_547_639n);
+    // Stage 3A ran (run #11, ADR 0012 §73); Stage 3B's budget spent to its cap: US$160.877639 left.
+    expect(remainder - 31_670_000n).toBe(160_877_639n);
   });
 });
 
