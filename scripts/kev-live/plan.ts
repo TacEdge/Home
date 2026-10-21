@@ -133,10 +133,31 @@ export type ProbeSpec = Readonly<
        * after its one regeneration) with at least one citation.
        */
       smoke?: true;
+      /**
+       * The fast attempt's calls changed only as this names (Package 5E's
+       * Stage 3, ADR 0012 §72): Haiku 5.5 in Sonnet 5.5's place, or `low`
+       * effort. On a scenario started on fast only. An escalated deep
+       * attempt is never changed: it stays the deep tier as configured.
+       */
+      fast?: FastConfiguration;
       expect: string;
       stopOnFail: boolean;
     }
 >;
+
+/** What a comparison plan changes about the fast attempt's calls (the probe gateway's options). */
+export type FastConfiguration = Readonly<Pick<ProbeOptions, 'probeModel' | 'effort'>>;
+
+/** The model and effort a scenario probe's fast calls are sent with: the tier's, or as its `fast` names. */
+export function fastCallsOf(fast: FastConfiguration | undefined): {
+  model: string;
+  effort: string;
+} {
+  return {
+    model: fast?.probeModel === 'haiku55' ? MODELS.haiku55.id : TIERS.fast.model.id,
+    effort: fast?.effort ?? TIERS.fast.effort,
+  };
+}
 
 /** The matrix rows a scenario class evidences (contract §15.6), and E9 for every run. */
 const CLASS_ROWS: Readonly<Record<ScenarioClass, readonly string[]>> = {
@@ -159,7 +180,11 @@ export function scenarioProbes(opts: {
   scenarios: readonly string[];
   tiers: readonly KevTier[];
   repeats: number;
+  /** The fast attempt's configuration (Stage 3's comparison plans); fast tier only. */
+  fast?: FastConfiguration;
 }): ProbeSpec[] {
+  if (opts.fast && opts.tiers.some((t) => t !== 'fast'))
+    throw new Error('a fast configuration is for scenarios started on fast only');
   return opts.scenarios.flatMap((id) => {
     const s = SCENARIOS.find((x) => x.id === id);
     if (!s) throw new Error(`no scenario ${id}`);
@@ -174,6 +199,7 @@ export function scenarioProbes(opts: {
           tier,
           repeat: i + 1,
           turns: s.turns.length,
+          ...(opts.fast ? { fast: Object.freeze({ ...opts.fast }) } : {}),
           expect: 'every expectation of the scenario holds (the scripted evals’ checker)',
           stopOnFail: false,
         })),
@@ -626,6 +652,34 @@ export const REVIEW_DEEP_PROBES: readonly ProbeSpec[] = Object.freeze(
 );
 
 /**
+ * Package 5E's Stage 3, the model comparison (ADR 0012 §72): the same
+ * review set, in its order, once each, started on fast, with only the fast
+ * attempt's calls changed: Sonnet 5.5 at `low` effort, and Haiku 5.5 at the
+ * fast tier's own settings (`medium`, 4,096 `max_tokens`; contract §5.3).
+ * Everything else is the fast tier as configured: the same prompt, tools,
+ * answer check and limits, the fast budget (reserved at Sonnet 5.5's
+ * per-call maximum), and escalation re-running the turn on deep (Opus 5.5
+ * `medium`), unchanged. Compared with Stage 1 (Sonnet `medium`, run #8) and
+ * Stage 2 (Opus `medium`, run #10).
+ */
+export const REVIEW_SONNET_LOW_PROBES: readonly ProbeSpec[] = Object.freeze(
+  scenarioProbes({
+    scenarios: REVIEW_SET.map((e) => e.scenario),
+    tiers: ['fast'],
+    repeats: 1,
+    fast: { effort: 'low' },
+  }),
+);
+export const REVIEW_HAIKU_PROBES: readonly ProbeSpec[] = Object.freeze(
+  scenarioProbes({
+    scenarios: REVIEW_SET.map((e) => e.scenario),
+    tiers: ['fast'],
+    repeats: 1,
+    fast: { probeModel: 'haiku55' },
+  }),
+);
+
+/**
  * The named plans (live verification #2, 2026-10-17; ADR 0012 §51): which
  * probes from the list above a session runs, and its own session cap,
  * never above the US$10 ceiling (owner decision 4). `full` is run #1's
@@ -710,6 +764,24 @@ export const PLANS = Object.freeze({
     specs: REVIEW_DEEP_PROBES,
     sessionCapUsdMicros: 30_000_000n,
   }),
+  // Stage 3 (ADR 0012 §72): the review set's 21 turns started on fast, with
+  // Sonnet 5.5 at `low` effort, then with Haiku 5.5. Each turn's maximum is
+  // still the US$1.50 turn ceiling (the fast attempt is reserved at the fast
+  // tier's maximum, Sonnet 5.5's prices, which bound Haiku's; any escalation
+  // within the ceiling), so each plan's maximum is US$31.50 and its cap
+  // US$31.67, as Stage 1's: NZ$57 holds it, NZ$56 cannot (tested).
+  'review-sonnet-low': Object.freeze({
+    kind: 'evaluation',
+    probes: Object.freeze(REVIEW_SONNET_LOW_PROBES.map((p) => p.id)),
+    specs: REVIEW_SONNET_LOW_PROBES,
+    sessionCapUsdMicros: 31_670_000n,
+  }),
+  'review-haiku': Object.freeze({
+    kind: 'evaluation',
+    probes: Object.freeze(REVIEW_HAIKU_PROBES.map((p) => p.id)),
+    specs: REVIEW_HAIKU_PROBES,
+    sessionCapUsdMicros: 31_670_000n,
+  }),
   // G9's verification (ADR 0012 §63): one fast turn with the prefix check
   // on. Its maximum is the US$1.50 turn ceiling (a fast attempt and any
   // escalation together). A US$1.67 budget is NZ$3 in HOME's whole-NZ$
@@ -738,11 +810,19 @@ export type PlanDef = Readonly<{
 export type PlanName = keyof typeof PLANS;
 
 /**
- * The plan the runner runs now: the review set on deep (ADR 0012 §68), for
- * the owner's approval. Stage 1, the review set on fast, ran as live
- * verification #8 (§67) and stays, with its hash, for its tests and record.
+ * The plans the runner may run now: Stage 3's two (ADR 0012 §72), each a
+ * separate run with its own approval, budget and report. The owner's
+ * approved hash selects which (`sessionPlan`). Stage 1 (`review-fast`, run
+ * #8) and Stage 2 (`review-deep`, run #10) stay, with their hashes, for
+ * their tests and record.
  */
-export const SESSION_PLAN: PlanName = 'review-deep';
+export const SESSION_PLANS: readonly PlanName[] = Object.freeze([
+  'review-sonnet-low',
+  'review-haiku',
+]);
+
+/** The first of them: what a dry run and `buildPlan()` show by default. */
+export const SESSION_PLAN: PlanName = SESSION_PLANS[0]!;
 
 /** A named plan's probes, in the order of the list above. */
 export function planProbes(name: PlanName): readonly ProbeSpec[] {
@@ -928,6 +1008,30 @@ export function buildPlan(
       SCENARIOS.find((s) => s.id === p.scenario)?.turns.length !== p.turns
     )
       throw new Error(`scenario probe ${p.id} does not match its scenario’s turns`);
+  // A comparison plan changes only the fast attempt's calls, only as the
+  // probe gateway allows (Haiku 5.5, `low`), and every probe of a plan alike:
+  // one configuration per run, so its results and costs stay its own.
+  const fastOf = (p: ProbeSpec) => (p.kind === 'scenario' ? p.fast : undefined);
+  for (const p of probes) {
+    const f = fastOf(p);
+    if (!f) continue;
+    if (p.kind !== 'scenario' || p.tier !== 'fast')
+      throw new Error(`probe ${p.id}: a fast configuration is for scenarios started on fast only`);
+    const keys = Object.keys(f);
+    if (
+      keys.length === 0 ||
+      keys.some((k) => k !== 'probeModel' && k !== 'effort') ||
+      (f.probeModel !== undefined && f.probeModel !== 'haiku55') ||
+      (f.effort !== undefined && f.effort !== 'low')
+    )
+      throw new Error(`probe ${p.id}: a fast configuration is Haiku 5.5 or \`low\` effort only`);
+  }
+  const configured = probes.find((p) => fastOf(p));
+  if (
+    configured &&
+    probes.some((p) => canonicalJson(fastOf(p) ?? null) !== canonicalJson(fastOf(configured)))
+  )
+    throw new Error('a comparison plan runs one fast configuration on every probe');
   // HOME's own per-adult day limit (§9.6) is never worked around: no
   // evaluation gives one adult more turns than it allows in a day.
   for (const [asker, turns] of turnsByAsker(probes))
@@ -990,6 +1094,17 @@ export function buildPlan(
     probes: priced,
     totalMaxUsdMicros,
     peakHoldUsdMicros,
+    // A comparison plan's configuration (Stage 3), by model id and effort,
+    // bound into its hash; absent from every other plan, whose hashes it
+    // leaves as they were.
+    ...(configured
+      ? {
+          configuration: {
+            fast: fastCallsOf(fastOf(configured)),
+            escalation: { model: TIERS.deep.model.id, effort: TIERS.deep.effort },
+          },
+        }
+      : {}),
     // The beta flag a plan's prefix check enables (G9), bound into its hash;
     // absent from every other plan, whose hashes it leaves as they were.
     ...(probes.some((p) => p.kind === 'turn' && p.probe?.prefixCheck)
@@ -1009,6 +1124,17 @@ export function buildPlan(
     sessionCapUsdMicros,
     ceilingUsdMicros,
   });
+}
+
+/**
+ * The session plan the owner's approved hash names (Stage 3: one of
+ * SESSION_PLANS, each its own run). With no hash, or one that names none of
+ * them, the first: the runner's own hash check then refuses it, at the same
+ * point and with the same exit code as ever.
+ */
+export function sessionPlan(approvedHash: string | undefined): Plan {
+  const plans = SESSION_PLANS.map((n) => buildPlan(n));
+  return plans.find((p) => p.hash === approvedHash) ?? plans[0]!;
 }
 
 /**

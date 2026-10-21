@@ -31,8 +31,8 @@ const STAGE_1_HASH = '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d39
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep review run’s design', () => {
-  it('is the session plan: the review set, in its order, once each, on deep as configured, without the fast-only scenario', () => {
-    expect(SESSION_PLAN).toBe('review-deep');
+  it('the review set, in its order, once each, on deep as configured, without the fast-only scenario (ran as live verification #10; the session plans are now Stage 3’s, ADR 0012 §72)', () => {
+    expect(SESSION_PLAN).toBe('review-sonnet-low');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('review-deep');
     expect(plan.name).toBe('review-deep');
@@ -59,7 +59,6 @@ describe('the deep review run’s design', () => {
 
   it('has a deterministic hash for the owner to approve, and leaves Stage 1’s hash unchanged', () => {
     expect(buildPlan('review-deep').hash).toBe(HASH);
-    expect(buildPlan().hash).toBe(HASH);
     expect(buildPlan('review-fast').hash).toBe(STAGE_1_HASH);
     // Production's request shape: no beta flag (G9's opt-in is its own plan's).
     expect(buildPlan('review-deep').canonical).not.toHaveProperty('betas');

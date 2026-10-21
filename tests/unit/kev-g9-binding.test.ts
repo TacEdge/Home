@@ -219,7 +219,7 @@ describe('the coverage checks (bindingChecks)', () => {
 
 describe('the plan: one fast turn, the prefix check on', () => {
   it('ran as live verification #7; Stage 1’s approved hash unchanged (the session plan is now the deep review, ADR 0012 §68)', () => {
-    expect(SESSION_PLAN).toBe('review-deep');
+    expect(SESSION_PLAN).toBe('review-sonnet-low');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('g9-binding');
     expect(plan.name).toBe('g9-binding');

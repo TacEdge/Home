@@ -1054,6 +1054,64 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **The orchestrator suite reads back only its own year (2040).** Its checks took the adult's latest reservation, and a suite that ran first could leave later ones (`kev-evals`, in 2042).
       - **The fresh-world suite closes reservations that earlier suites left open.** The privacy suite's frozen 2030 clock leaves one open for each adult, which the real clock reads as a turn in flight. The suite closes them as the stale sweep does, since the runner's own database starts with none; its check that a recent unanswered message is still a turn in flight is unchanged.
       - **Verification.** Each failure was reproduced in a fixed suite order and passes after its correction. `kev-evals` passed four full runs.
+72. **Stage 3, the model comparison, prepared** (2026-10-21; the owner's approval to begin Stage 3 preparation; nothing run, no provider call; M8's scope frozen; no change to the orchestrator, prompts, validator, tool definitions, provider, gateway's production path, spending controls or provider workspace settings).
+    - **What is compared.** The owner's review set (20 scenarios, 21 turns), once each, started on fast, in two configurations:
+      - **A. Sonnet 5.5 at `low` effort:** the fast cell with only its effort changed (contract §5.3).
+      - **B. Haiku 5.5 at the fast tier's own settings:** effort `medium`, `max_tokens` 4,096 (contract §5.3's evaluated row).
+      - **The baselines:** Stage 1 (Sonnet 5.5 `medium`, run #8) and Stage 2 (Opus 5.5 `medium`, run #10). Stage 2 ran 19 scenarios and 20 turns: the routing scenario is fast's only.
+    - **How the model is selected, in the existing runner.**
+      - **The fast attempt only.** A scenario probe may now name a fast configuration (`fast: { effort: 'low' }` or `fast: { probeModel: 'haiku55' }`). The runner applies it, through the probe gateway's existing options (Package 1b; G1 accepted `low` on all three models live), to the fast attempt's calls only.
+      - **Escalation is unchanged.** An escalation re-runs the turn on deep as configured (Opus 5.5 `medium`).
+      - **Budget and pricing.** The fast budget is unchanged: a Haiku call is reserved at the fast tier's per-call maximum (Sonnet 5.5's prices) and recorded at Haiku's own prices, as before. `config.ts` and the tiers are untouched: production stays Sonnet `medium` and Opus `medium`.
+      - **Validation.** A plan is refused unless it runs one configuration, on fast scenarios only, with only those two values.
+      - **Hashing.** The model ids and efforts are bound into the plan's hash (`configuration`, absent from every other plan, whose hashes are unchanged; `PLAN_VERSION` stays 6).
+    - **Verified on the wire, not trusted from the plan.**
+      - **Per-call effort evidence.** The probe path's per-call evidence now records each call's effort, beside its model (no body is kept).
+      - **The configuration check.** A comparison run fails (`not_configured_model`, `not_configured_effort`) if any call was not the configured fast model and effort, or, once escalated, the deep tier's own.
+      - **The report.** It names the plan and its configuration. It holds the summary to the configured fast model's cost target (Haiku 5.5: US$0.006 a turn).
+    - **The plans.** `review-sonnet-low` (hash `715085a9…`) and `review-haiku` (hash `1bc1126e…`). Each is its own run, with its own approval, budget, report, transcripts and ledger row.
+      - **Selection.** The runner's session plans are these two (Sonnet `low` first). The approved hash selects which one runs. Any other hash falls to the first, whose own hash check then refuses it, at the same point and with the same exit code as before.
+      - **Dry run.** It prints both, with their configurations.
+      - **No workflow change.** The workflow is unchanged.
+    - **Financial limits (each plan; exact).**
+      - **Maximum exposure:** 21 turns at the US$1.50 turn ceiling, **US$31.50**. The fast attempt's reservation is US$0.665280, and any escalation's is held so the turn stays within US$1.50.
+      - **Peak reservation hold:** **US$31.50.** Turns run one at a time, each assumed settled at its maximum.
+      - **Minimum viable budget and cap:** **US$31.67**, NZ$57 in HOME's whole-NZ$ cap (US$31.666667), which holds the peak. US$31.66 is NZ$56 and is refused (exit 17).
+      - **The US$175 run ceiling:** unchanged, never approached.
+      - **Expected spending (estimates, not limits).**
+        - **Sonnet `low`:** about US$1.0–1.8. Stage 1's 21 turns at `medium` recorded US$1.745 (provisional), with four escalations; `low` thinks less, and escalations cost the same.
+        - **Haiku:** about US$0.10 for its own turns (about US$0.005 each), plus about US$0.30 for each escalation, so about US$1–3 if four to eight escalate. Haiku's escalation rate is the unknown.
+      - **Campaign:** the remainder is **US$194.575003** before either run. It would be US$131.235003 if both budgets were spent to their caps (impossible in practice). It is expected to be about US$190–193 after both.
+    - **The provider workspace's US$10 monthly limit** (G12, owner-supplied) is unchanged.
+      - HOME has recorded US$5.424997 in October, conservatively. The provider's own figure is at or below that, but not reconciled.
+      - Both Stage 3 runs together are expected to add about US$2–5 at HOME's figures. A run that reaches the provider's limit would be refused mid-run: its remaining turns would end in provider errors, and its comparison would be invalid.
+      - So the workspace's month-to-date usage is to be read in the Console before each dispatch. Neither run should be dispatched if the expected spend would not fit under the limit.
+    - **Comparison reporting.** `node scripts/kev-live/compare.mts <comparison.json>` (`src/kev/evals/compare.ts`) puts live runs side by side, one configuration per column, from each run's own `report.json` (its judge records, summarised exactly as its report did) and, where the owner rated it, its review files.
+      - **Metrics:** scenario pass rate; first-pass validation and within one regeneration; factual correctness (realistic scenarios); grounding (runs failing a citation or checked-text check); safety failures, privacy and injection; median and P95 latency (escalated P95 too); escalation and regeneration frequency; cost per turn (all, not escalated, escalated) and run total; the owner's usefulness ratings.
+      - **What it refuses:** scripted summaries (never model-quality evidence), a review of scripted transcripts, a column mixing tiers, and a summary that is not of its records.
+      - **What it flags:** scenarios not run by every column.
+      - **What it does not do:** it decides nothing. Contract §5.3's adoption rules and the decision stay the owner's.
+    - **Verification (offline; no provider, no key, no paid call).**
+      - **Plans:** hashes deterministic and pinned; Stage 1's and Stage 2's hashes unchanged.
+      - **Dry run:** both plans, with their configurations, maxima and hashes.
+      - **Keyless check:** each approved hash selects its plan and passes at US$31.67 without a key or gateway.
+      - **Refusals:** a baseline, changed or missing hash (exit 15); a budget above the cap or the run ceiling, or below the maximum (exit 14); one the whole-NZ$ cap cannot hold (exit 17).
+      - **End to end against a local stub of the provider,** on the evaluation world in its own database:
+        - Haiku's fast calls on Haiku at `medium`, counted first, recorded at Haiku's prices;
+        - Sonnet `low`'s on Sonnet at `low`;
+        - a fast attempt that fails its answers re-runs on Opus 5.5 at `medium`, never mixed;
+        - a run whose calls lose the configuration fails.
+      - **Synthetic database isolation:** unchanged (the runner's own database, fixture family only, before any key; tested).
+      - **Mutations:** eight, each caught:
+        - the configuration applied to deep calls too;
+        - the configuration dropped;
+        - the configuration check removed;
+        - effort evidence missing;
+        - the configuration unhashed;
+        - selection by hash removed;
+        - scripted results compared;
+        - the report ignoring the configuration.
+    - **Not done.** No run is dispatched, no paid call made, the full campaign not started, Package 6 not begun. Each run needs the owner's approval of its hash and budget and the owner's dispatch. HOME_REAL_DATA stays closed.
 
 ## Consequences
 

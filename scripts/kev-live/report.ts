@@ -190,12 +190,19 @@ export function buildReport(input: {
   // The scenario probes' records and §12.3's summary (Package 5A): closed
   // check names, codes and counts only.
   const records = run.results.flatMap((r) => (r.evaluation ? [r.evaluation] : []));
+  // A comparison plan's configuration (Stage 3): which fast model it ran, so
+  // the summary holds it to that model's cost target and the report names it.
+  const configuration = (plan.canonical.configuration ?? null) as Readonly<{
+    fast: Readonly<{ model: string; effort: string }>;
+    escalation: Readonly<{ model: string; effort: string }>;
+  }> | null;
+  const fastModelId = configuration?.fast.model ?? TIERS.fast.model.id;
   const evaluation =
     records.length > 0
       ? {
           summary: summarise(records, {
             mode: 'live',
-            fastModel: TIERS.fast.model.id.includes('haiku') ? 'haiku' : 'sonnet',
+            fastModel: fastModelId.includes('haiku') ? 'haiku' : 'sonnet',
           }),
           records,
         }
@@ -210,8 +217,10 @@ export function buildReport(input: {
     run: input.identity ?? { workflowRun: null, commit: null },
     plan: {
       version: plan.canonical.version,
+      name: plan.name,
       hash: plan.hash,
       totalMaxUsdMicros: plan.totalMaxUsdMicros,
+      ...(configuration ? { configuration } : {}),
     },
     budgetUsdMicros: input.budgetMicros,
     homeCapNzd: input.capNzd,
@@ -228,7 +237,11 @@ export function buildReport(input: {
 
   const md: string[] = [];
   md.push('# Kev live verification: session report', '');
-  md.push(`- Plan v${String(plan.canonical.version)}, hash \`${plan.hash}\``);
+  md.push(`- Plan v${String(plan.canonical.version)} \`${plan.name}\`, hash \`${plan.hash}\``);
+  if (configuration)
+    md.push(
+      `- Configuration: fast calls on ${configuration.fast.model} at \`${configuration.fast.effort}\`; an escalation on ${configuration.escalation.model} at \`${configuration.escalation.effort}\``,
+    );
   md.push(
     `- Budget US$${usd(input.budgetMicros)}; HOME's reservation cap NZ$${input.capNzd}; plan maximum US$${usd(plan.totalMaxUsdMicros)}`,
   );

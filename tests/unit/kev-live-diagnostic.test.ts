@@ -47,7 +47,7 @@ function bodyOf(id: string) {
 describe('the diagnostic’s probes: one call each, Sonnet 5.5, Kev’s prompt, tool_choice auto', () => {
   it('the diagnostic plan: C, D, E, then F1–F4, each with a shape and a hypothesis', () => {
     // Run #3's plan (live verification #3, 2026-10-18); the session plan is now Package 5E's Stage 1 (ADR 0012 §65).
-    expect(buildPlan().name).toBe('review-deep');
+    expect(buildPlan().name).toBe('review-sonnet-low');
     expect(plan.probes.map((p) => p.id)).toEqual([
       'dx-c-one-tool',
       'dx-d-all-tools',

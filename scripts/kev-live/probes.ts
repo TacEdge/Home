@@ -14,6 +14,7 @@ import type { ProbeGateway } from '@/kev/providers/anthropic';
 import { diagnosticLine, type ProbeErrorDetail } from '@/kev/providers/diagnostics';
 import {
   ProviderError,
+  type KevProvider,
   type NeutralToolResult,
   type ProbeEvidence,
   type ProviderMessage,
@@ -23,11 +24,13 @@ import {
 import { attemptReservation, perCallMax } from '@/kev/router';
 import type { UserActor } from '@/trust/actor';
 import {
+  fastCallsOf,
   probeTools,
   ruleHolds,
   SYNTHETIC_TOOL_RESULT,
   systemFor,
   TURN_NOW,
+  type FastConfiguration,
   type Plan,
   type ProbeRequest,
   type ProbeSpec,
@@ -343,7 +346,7 @@ async function scenarioProbe(
       stop: null,
     };
   const scenarioCtx: ScenarioContext = {
-    providerFor: () => ctx.gateway.provider(),
+    providerFor: () => configuredProvider(ctx.gateway, p.fast),
     ...ctx.evaluation,
     layer: 'live',
   };
@@ -376,6 +379,49 @@ async function scenarioProbe(
   }
   const outcome = scenarioOutcome(run.verdict, withheld, smoke);
   return { ...outcome, checks, stop: null, evaluation: run.record };
+}
+
+/**
+ * A scenario's provider (Stage 3, ADR 0012 §72): the gateway's production
+ * requests, with the comparison's configuration on the fast attempt's calls
+ * only. An escalated deep attempt's calls are the deep tier's as
+ * configured, so escalation is unchanged.
+ */
+export function configuredProvider(
+  gateway: Pick<ProbeGateway, 'provider' | 'run'>,
+  fast: FastConfiguration | undefined,
+): KevProvider {
+  if (!fast) return gateway.provider();
+  return Object.freeze({
+    kind: 'anthropic' as const,
+    run: (request: ProviderRequest, options: Parameters<KevProvider['run']>[1]) =>
+      gateway.run(request, options, request.tier === 'fast' ? fast : undefined),
+  });
+}
+
+/**
+ * A comparison run's calls (Stage 3): each on the configured fast model at
+ * its configured effort, or, once escalated, on the deep tier's model at its
+ * own effort. Anything else is not the configuration the plan names.
+ */
+export function configurationReasons(
+  evidence: readonly ProbeEvidence[],
+  fast: FastConfiguration,
+): string[] {
+  const want = fastCallsOf(fast);
+  const reasons = new Set<string>();
+  for (const e of evidence) {
+    if (e.kind !== 'message') continue;
+    const effort =
+      e.model === want.model
+        ? want.effort
+        : e.model === TIERS.deep.model.id
+          ? TIERS.deep.effort
+          : null;
+    if (effort === null) reasons.add('not_configured_model');
+    else if (e.effort !== effort) reasons.add('not_configured_effort');
+  }
+  return [...reasons];
 }
 
 /**
@@ -580,6 +626,15 @@ export async function executePlan(plan: Plan, ctx: RunContext): Promise<RunOutco
       attempted.checks.maxCountDelta = ev.maxCountDelta;
       if (!ev.countedFirst) attempted.reasons.push('call_not_counted_first');
       if (!ev.usInference) attempted.reasons.push('not_us_inference');
+      // A comparison run (Stage 3): every call as the plan configures it.
+      if (p.kind === 'scenario' && p.fast) {
+        const msgs = evidence.filter((e) => e.kind === 'message');
+        attempted.checks.models = [...new Set(msgs.map((e) => e.model))].join(' ');
+        attempted.checks.efforts = [
+          ...new Set(msgs.map((e) => (e.kind === 'message' ? (e.effort ?? 'none') : ''))),
+        ].join(' ');
+        attempted.reasons.push(...configurationReasons(evidence, p.fast));
+      }
       // The two-phase loop's evidence (ADR 0012 §54): the turn probe, and a
       // smoke scenario run, which is also held to its tier's model (5D).
       if (p.kind === 'turn' || (p.kind === 'scenario' && p.smoke)) {

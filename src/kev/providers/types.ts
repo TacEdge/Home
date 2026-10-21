@@ -262,6 +262,8 @@ export type ProbeEvidence =
       kind: 'message';
       attemptId: string;
       model: string;
+      /** The effort the call was sent with (`output_config.effort`), or null when none was sent. */
+      effort: string | null;
       status: number | null;
       requestId: string | null;
       /** `ok`, or the closed error code the call failed with. */
