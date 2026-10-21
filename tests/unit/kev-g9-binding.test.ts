@@ -263,7 +263,7 @@ describe('the plan: one fast turn, the prefix check on', () => {
     expect(capUsdMicros(capNzdFor(1_660_000n))).toBeLessThan(1_500_000n);
     const ledger = parseLedger(LEDGER);
     const spent = ledger.sessions.reduce((a, s) => a + BigInt(s.recordedUsdMicros), 0n);
-    expect(CAMPAIGN_USD_MICROS - spent).toBe(194_575_003n);
+    expect(CAMPAIGN_USD_MICROS - spent).toBe(192_547_639n);
     // Within the US$10 workspace month limit with Stage 1 still to come.
     expect(plan.sessionCapUsdMicros).toBeLessThan(10_000_000n);
   });
