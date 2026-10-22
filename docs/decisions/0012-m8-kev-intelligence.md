@@ -1129,6 +1129,35 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **Before dispatch:** read the provider's actual month-to-date spend in the Console, which is at or below HOME's figure.
       - **When to dispatch:** dispatch `review-haiku` (hash `1bc1126e…`, budget US$31.67, unchanged; no new engineering) only if the remaining allowance holds at least about US$3.50 (the plausible cost with a margin). Otherwise wait for the month's reset on 1 November rather than change the limit. A run that reaches the limit ends early in provider errors and is unusable as a comparison.
     - **Then compare.** Run `scripts/kev-live/compare.mts` over the four reports (runs #8, #10, #11 and Stage 3B) and the owner's review sheets, and make one evidence-based decision (contract §5.3's rules).
+74. **Stage 3B ran (Haiku 5.5), and Stage 3 closes: four configurations compared** (live verification #12, 2026-10-22; run 39697753036 on `19910a5`; the owner's dispatch of `review-haiku`, hash `1bc1126e…`, budget US$31.67; the closeout is evidence and a recommendation only: no paid evaluation, no prompt, model, tier or orchestrator change, no further stage). The evidence and the recommendation are in `docs/m8/M8-STAGE3-COMPARISON.md`.
+    - **Run #12.**
+      - **Scenarios:** 19 of 20 passed. `realistic.attention_week` failed (`outcome`): its fast call timed out 19.0 s into the turn, and the turn ended with no answer. A provider timeout is never an escalation trigger (§9.9).
+      - **Safety:** no privacy, sensitive-context, never-shown or unchecked-lead check failed.
+      - **Answers:** of 21 turns, 8 passed first time on Haiku and 1 after its regeneration. 11 passed after an escalation to Opus (10 by the model, 1 after two failed answers).
+      - **Cost:** HOME recorded **US$1.446462** (exact, owner-supplied, including one conservative charge for the timed-out call's partial usage). The ledger's row #12 leaves a campaign remainder of **US$191.101177**. Anthropic's bill is not reconciled. HOME has recorded US$8.898823 in October against the workspace's US$10 limit.
+      - **Artifact:** 12392050466, expiring **2026-11-21**. The owner downloads and keeps it with the other three.
+    - **The comparison.** The comparison script was not run: the build environment cannot reach the artifacts' storage host, so the owner runs it locally (the document's §7). The document reads the four job logs' structural `kev_turn` and verdict lines with the summary's own rates and percentiles.
+      - **The configured model's own checked answers:** Sonnet `medium` 17/21, Opus 19/20, Sonnet `low` 13/21, Haiku 9/21.
+      - **Everyday questions kept on fast:** 17/20, 13/20 and 10/20.
+      - **Every-turn latency, median / P95:** 10.8 / 32.2 s, 16.4 / 26.3 s, 15.1 / 33.6 s and 18.8 / 41.7 s.
+      - **Cost per usable answer:** US$0.0918, US$0.1359, US$0.1014 and US$0.0723. Haiku's figure is low because Opus answered 11 of its turns.
+      - **Provider timeouts:** one, on Haiku.
+      - **Human review:** NOT SCORED in all four.
+    - **Recommended to the owner (D2; not decided here):** keep fast on **Sonnet 5.5 at `medium`** and escalation on **Opus 5.5 at `medium`**, the initial mapping, so nothing in `config.ts` changes.
+      - **Sonnet `low`:** passes §5.3's 2-point rule only through Opus's answers, and costs more and is slower.
+      - **Haiku:** misses §12.3's targets (escalated P95; everyday questions staying on fast) and left one question unanswered.
+      - **The programme amendment** that would drop the full `low` and Haiku cells stays the owner's.
+    - **For Package 6 (identified, not built):**
+      - the full suite's release-gate samples;
+      - first-pass and within-one rates on the chosen default, below target at n = 1;
+      - Preview latency and gates G3, G4, G16 and G17;
+      - the owner's 30 transcripts per tier;
+      - the open answer-quality items;
+      - the no-answer timeout's experience;
+      - the provisional rows #7 and #8, and the unreconciled bill;
+      - recording D2 and O4;
+      - contract §16's documents;
+      - the real-data items.
 
 ## Consequences
 
