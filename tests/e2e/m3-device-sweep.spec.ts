@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectAccessible, expectNoHorizontalScroll } from './a11y';
+import { expectAccessibleBarInFlow, expectNoHorizontalScroll } from './a11y';
 import { fixtureAdultContext, signInAsFixtureAdult, VIEWPORTS } from './fixture-adults';
 import { seedCalendar, seedSyncedEvent } from './calendar-feeds';
 import { withDb } from './helpers';
@@ -156,7 +156,11 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
         document.querySelectorAll('main details').forEach((d) => d.setAttribute('open', '')),
       );
       await expectNoHorizontalScroll(page, `${name} ${path}`);
-      await expectAccessible(page, `${name} ${path}`);
+      // With the capture bar in flow: on a long page (which day it is, and what
+      // earlier specs left, decide its length) the sticky bar can sit over a
+      // control, and axe reads that as too small (`target-size`, "partially
+      // obscured"). Every axe rule still runs (a11y.ts).
+      await expectAccessibleBarInFlow(page, `${name} ${path}`);
       small.push(...(await smallTargets(page)).map((s) => `${path}: ${s}`));
     }
     // Every event row on Today and Forward, the one-line synced row among

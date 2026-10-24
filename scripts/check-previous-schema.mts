@@ -261,11 +261,15 @@ function selfTest(head: MigrationSet): number {
   return ok ? 0 : 1;
 }
 
+// The exit code is set; the process is never ended at once: stdout to a pipe
+// (CI) is written asynchronously, and exiting at once dropped everything
+// after its first 64 KiB, the suites' summary and this script's FAILED line
+// included (the nightly run of 2026-10-23).
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
-    process.exit(main(process.argv.slice(2)));
+    process.exitCode = main(process.argv.slice(2));
   } catch (e) {
     say(`FAILED: ${(e as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
