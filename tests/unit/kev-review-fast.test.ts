@@ -34,7 +34,7 @@ const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('Stage 1’s design', () => {
   it('the review set, in its order, once each, on fast as configured (ran as live verification #8; the session plan is now the deep review, ADR 0012 §68)', () => {
-    expect(SESSION_PLAN).toBe('review-sonnet-low');
+    expect(SESSION_PLAN).toBe('campaign-01');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('review-fast');
     expect(plan.name).toBe('review-fast');

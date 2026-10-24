@@ -6,7 +6,11 @@ name: Kev live verification
 #
 #   plan  holds no key and no database: the plan's hash must equal the
 #         approved one, the budget must hold the plan's computed maximum and
-#         be at most US$10, and the campaign ledger must hold the budget.
+#         be at most the plan kind's ceiling (US$10 for verification, US$175
+#         for an evaluation run), and the campaign ledger must hold the
+#         budget. A final-campaign batch (ADR 0012 §76) is held to the
+#         ledger's remainder less the declared spend of earlier batches the
+#         ledger does not record yet.
 #   run   waits for the owner's approval (the `kev-evals` environment's
 #         required reviewer), then runs the approved probes against the
 #         job's own throwaway Postgres, seeded with the fixture family only.
@@ -26,8 +30,12 @@ on:
         required: true
         type: string
       budget_usd:
-        description: The approved budget in US dollars, at most 10 (owner decision 4)
+        description: The approved budget in US dollars (at most 10 for verification, 175 for an evaluation run)
         required: true
+        type: string
+      campaign_spent_usd:
+        description: Campaign batches only - HOME's recorded spend of earlier batches not yet in the ledger, in US dollars (0 for the first)
+        required: false
         type: string
 
 permissions:
@@ -55,6 +63,7 @@ jobs:
         env:
           KEV_LIVE_APPROVED_PLAN_HASH: ${{ inputs.plan_hash }}
           KEV_LIVE_BUDGET_USD: ${{ inputs.budget_usd }}
+          KEV_LIVE_CAMPAIGN_SPENT_USD: ${{ inputs.campaign_spent_usd }}
         run: node scripts/kev-live/run.mts --check-plan
 
   run:
@@ -117,6 +126,7 @@ jobs:
         env:
           KEV_LIVE_APPROVED_PLAN_HASH: ${{ inputs.plan_hash }}
           KEV_LIVE_BUDGET_USD: ${{ inputs.budget_usd }}
+          KEV_LIVE_CAMPAIGN_SPENT_USD: ${{ inputs.campaign_spent_usd }}
           KEV_EVAL_PROVIDER_KEY: ${{ secrets.KEV_EVAL_PROVIDER_KEY }}
         run: node scripts/kev-live/run.mts --live
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

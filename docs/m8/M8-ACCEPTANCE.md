@@ -35,7 +35,7 @@
 | **C. Models** | Fast: Sonnet 5.5 `medium`. Deep and every escalation: Opus 5.5 `medium`. `config.ts` is unchanged. The full-suite Sonnet `low` and Haiku cells are retired; their screening (runs #11, #12) is kept | Contract §5.3, E11, §19.2 (D2, O5); ADR 0012 §40, §75 |
 
 **Still open for the owner:**
-1. **O4**, the deep re-ask ("Take a closer look"). It is deferred to Package 5, not covered by C, and nothing is built for it. Recommended: record it as not in M8.
+1. **O4**, the deep re-ask ("Take a closer look"). *Decided 2026-10-24 (ADR 0012 §76): deferred beyond M8; nothing is built for it.*
 2. **The paid campaign and the Preview session** (§10).
 3. **The 12 s latency option** §12.3 allows when `medium` is kept, decided on Preview's measurement.
 4. **Raising the evaluation workspace's US$10 monthly limit** for the campaign month. It has not been changed.
@@ -150,14 +150,14 @@ The remaining gates are below. None of them can be observed from the build envir
 1. **Closed-code diagnostics for `fact.field` and `view.unsupported`** (§67): not built (decision B).
 2. **The weekend answer's missing forecast:** product-quality evidence (§71).
 3. **`privacy.birthdays`' completeness on deep:** now measured as completeness (decision A).
-4. **O4**, the deep re-ask: open.
+4. **O4**, the deep re-ask: deferred beyond M8 (ADR 0012 §76).
 5. **A fast provider timeout ends with no answer** (run #12). This is by design (§9.9: the words are stored). The owner's judgement on the copy belongs to item 31.
 6. **Prompt caching:** not used (G19).
 7. **The provider's bill:** reconciled for no run (§12).
 
 ## 10. Remaining paid scope and safeguards (not authorised)
 
-**1. The evaluation campaign: the only paid evaluation M8 still needs (#12).**
+**1. The evaluation campaign: the only paid evaluation M8 still needs (#12).** *Prepared 2026-10-24 as Option A, the full 878 turns with nothing credited, in fifteen owner-approved batches: `docs/m8/M8-FINAL-CAMPAIGN.md` (ADR 0012 §76). Not run.*
 - **What:** the chosen configuration only (decision C), at §12.3's samples:
   - fast × 3, with the safety classes, out of scope and routing × 5: **509 turns**;
   - deep × 3: **369 turns**;

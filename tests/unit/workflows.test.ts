@@ -112,6 +112,14 @@ describe('GitHub workflows', () => {
       expect(text()).not.toMatch(/run: .*\$\{\{/);
       expect(run).toMatch(/upload-artifact@[0-9a-f]{40}/);
     });
+
+    it('a campaign batch’s declared unrecorded spend (ADR 0012 §76) is an optional input, given to both checks through env only', () => {
+      expect(text()).toMatch(/\n {6}campaign_spent_usd:\n(?: {8}.*\n)*? {8}required: false\n/);
+      for (const j of ['plan', 'run'])
+        expect(job(j)).toMatch(
+          /KEV_LIVE_CAMPAIGN_SPENT_USD: \$\{\{ inputs\.campaign_spent_usd \}\}/,
+        );
+    });
   });
 
   it('ci.yml runs the previous-schema check and its self-test with full history (migration-first)', () => {

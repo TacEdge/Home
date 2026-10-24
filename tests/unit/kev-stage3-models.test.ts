@@ -45,13 +45,14 @@ const HAIKU_HASH = '1bc1126e20d1be818962d965b32eecce0f3eaaa1f8e3bb45e66ced415536
 const STAGE_1_HASH = '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d3930c5aa';
 const STAGE_2_HASH = '235207b5b7f1a7efcdb72e5b6e29b49fc4bf8d14580e8c0673a47c3dd71f140c';
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
+const STAGE_3 = ['review-sonnet-low', 'review-haiku'] as const;
 
 describe('the two comparison plans', () => {
-  it('are the session plans, Sonnet `low` first; each the review set in its order, once, started on fast', () => {
-    expect(SESSION_PLANS).toEqual(['review-sonnet-low', 'review-haiku']);
-    expect(SESSION_PLAN).toBe('review-sonnet-low');
+  it('ran as live verification #11 and #12 (no longer session plans: the final campaign’s batches are, ADR 0012 §76); each the review set in its order, once, started on fast', () => {
+    for (const name of STAGE_3) expect(SESSION_PLANS).not.toContain(name);
+    expect(SESSION_PLAN).toBe('campaign-01');
     const ids = REVIEW_SET.map((e) => e.scenario);
-    for (const name of SESSION_PLANS) {
+    for (const name of STAGE_3) {
       const plan = buildPlan(name);
       expect(plan.kind).toBe('evaluation');
       expect(plan.probes.map((p) => p.kind === 'scenario' && p.scenario)).toEqual(ids);
@@ -91,7 +92,6 @@ describe('the two comparison plans', () => {
     expect(buildPlan('review-sonnet-low').hash).toBe(LOW_HASH);
     expect(buildPlan('review-haiku').hash).toBe(HAIKU_HASH);
     expect(buildPlan('review-sonnet-low').hash).toBe(buildPlan('review-sonnet-low').hash);
-    expect(buildPlan().hash).toBe(LOW_HASH);
     expect(buildPlan('review-fast').hash).toBe(STAGE_1_HASH);
     expect(buildPlan('review-deep').hash).toBe(STAGE_2_HASH);
     // Production's request shape otherwise: no beta flag.
@@ -107,7 +107,7 @@ describe('their financial limits', () => {
     expect(perCallMax('fast')).toBe(133_056n);
     expect(attemptReservation('fast')).toBe(665_280n);
     expect(scenarioTurnMaxUsdMicros('fast')).toBe(LIMITS.turnCeilingUsdMicros);
-    for (const name of SESSION_PLANS) {
+    for (const name of STAGE_3) {
       const plan = buildPlan(name);
       expect(plan.totalMaxUsdMicros).toBe(31_500_000n);
       expect(plan.totalNoRetryUsdMicros).toBe(31_500_000n);
@@ -132,11 +132,12 @@ describe('their financial limits', () => {
   });
 });
 
-describe('the keyless preflight, the plan chosen by its approved hash', () => {
+describe('the keyless preflight, each plan given as it was run', () => {
   const check = async (
     budget: string,
     hash: string,
     mode: 'check-plan' | 'dry-run' = 'check-plan',
+    name: (typeof STAGE_3)[number] = hash === HAIKU_HASH ? 'review-haiku' : 'review-sonnet-low',
   ) => {
     const lines: string[] = [];
     let gateway = false;
@@ -147,6 +148,7 @@ describe('the keyless preflight, the plan chosen by its approved hash', () => {
         ledgerText: LEDGER,
         reportDir: '/nonexistent',
         log: (l) => lines.push(l),
+        plan: buildPlan(name),
         gatewayFor: () => {
           gateway = true;
           throw new Error('no gateway before a live run');
@@ -156,10 +158,12 @@ describe('the keyless preflight, the plan chosen by its approved hash', () => {
     return { ...out, lines, gateway };
   };
 
-  it('the dry run prints both plans, their configurations, maxima and hashes, and sends nothing', async () => {
-    const r = await check('31.67', LOW_HASH, 'dry-run');
-    expect(r).toMatchObject({ exitCode: EXIT.ok, code: 'dry_run', gateway: false });
-    const text = r.lines.join('\n');
+  it('the dry run prints each plan, its configuration, maximum and hash, and sends nothing', async () => {
+    const low = await check('31.67', LOW_HASH, 'dry-run');
+    const haiku = await check('31.67', HAIKU_HASH, 'dry-run');
+    for (const r of [low, haiku])
+      expect(r).toMatchObject({ exitCode: EXIT.ok, code: 'dry_run', gateway: false });
+    const text = [...low.lines, ...haiku.lines].join('\n');
     expect(text).toContain('Kev live evaluation plan v6: review-sonnet-low');
     expect(text).toContain('Kev live evaluation plan v6: review-haiku');
     expect(text).toContain(`plan hash: ${LOW_HASH}`);
@@ -174,12 +178,12 @@ describe('the keyless preflight, the plan chosen by its approved hash', () => {
     for (const s of SCENARIOS) for (const t of s.turns) expect(text).not.toContain(t.question);
   });
 
-  it('each hash selects its own plan, which passes at US$31.67 without a key or a gateway', async () => {
+  it('each passes at US$31.67 with its own hash, without a key or a gateway; neither hash selects a session plan now', async () => {
     for (const [hash, name] of [
       [LOW_HASH, 'review-sonnet-low'],
       [HAIKU_HASH, 'review-haiku'],
     ] as const) {
-      expect(sessionPlan(hash).name).toBe(name);
+      expect(sessionPlan(hash).name).toBe('campaign-01');
       const r = await check('31.67', hash);
       expect(r, name).toMatchObject({ exitCode: EXIT.ok, code: 'plan_checked', gateway: false });
       expect(r.lines[0]).toContain(`plan v6: ${name}`);
@@ -189,7 +193,7 @@ describe('the keyless preflight, the plan chosen by its approved hash', () => {
   it('refuses a wrong hash: the baselines’, a changed one, none', async () => {
     for (const hash of [STAGE_1_HASH, STAGE_2_HASH, LOW_HASH.replace(/^7/, '8'), ''])
       expect((await check('31.67', hash)).exitCode, hash || 'none').toBe(EXIT.plan_hash);
-    expect(sessionPlan('nope').name).toBe('review-sonnet-low');
+    expect(sessionPlan('nope').name).toBe('campaign-01');
   });
 
   it('refuses every budget but the plan’s own: above its cap or the run ceiling, below its maximum, or one its whole-NZ$ cap cannot hold', async () => {
