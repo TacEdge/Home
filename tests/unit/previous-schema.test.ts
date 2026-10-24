@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   before,
@@ -96,5 +97,17 @@ describe('resolveBase', () => {
   });
   it('defaults to the merge base with origin/main locally', () => {
     expect(resolveBase(undefined, {})).toBe('merge-base:origin/main');
+  });
+});
+
+describe('its output reaches the log', () => {
+  // process.exit() straight after writing the suites' output to a pipe (CI)
+  // drops everything after its first 64 KiB: the nightly run of 2026-10-23
+  // failed with no summary and no FAILED line. The script sets the exit code
+  // instead, so its output drains first.
+  it('never forces its exit; it sets the exit code', () => {
+    const source = readFileSync('scripts/check-previous-schema.mts', 'utf8');
+    expect(source).not.toMatch(/process\.exit\(/);
+    expect(source).toMatch(/process\.exitCode = main\(/);
   });
 });
