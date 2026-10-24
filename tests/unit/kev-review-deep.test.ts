@@ -31,8 +31,8 @@ const STAGE_1_HASH = '9854c0fe65b2fd4ec019f6df633e532f23ccd68d83b8fde58537a86d39
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep review run’s design', () => {
-  it('the review set, in its order, once each, on deep as configured, without the fast-only scenario (ran as live verification #10; the session plans are now Stage 3’s, ADR 0012 §72)', () => {
-    expect(SESSION_PLAN).toBe('review-sonnet-low');
+  it('the review set, in its order, once each, on deep as configured, without the fast-only scenario (ran as live verification #10; the session plans are now the final campaign’s batches, ADR 0012 §76)', () => {
+    expect(SESSION_PLAN).toBe('campaign-01');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('review-deep');
     expect(plan.name).toBe('review-deep');

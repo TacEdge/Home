@@ -1,7 +1,7 @@
 import { TIERS } from '@/kev/config';
 import { summarise, summaryMarkdown } from '@/kev/evals/summary';
 import { diagnosticLine } from '@/kev/providers/diagnostics';
-import { usd } from './guards.mts';
+import { usd, usdExact } from './guards.mts';
 import type { Plan } from './plan';
 import type { ProbeResult, RunOutcome } from './probes';
 import type { Reconciliation } from './reconcile';
@@ -167,6 +167,11 @@ export function buildReport(input: {
   finishedAt: Date;
   /** The run's identity for reproducibility: the workflow run and the commit, when known. */
   identity?: Readonly<{ workflowRun: string | null; commit: string | null }>;
+  /**
+   * A campaign batch's money at dispatch (ADR 0012 §76): the ledger's
+   * remainder and the declared spend of earlier batches not yet in it.
+   */
+  campaign?: Readonly<{ ledgerRemainderUsdMicros: bigint; declaredUnrecordedUsdMicros: bigint }>;
 }): Report {
   const { plan, run, reconciliation: rec } = input;
   const probes = run.results.map((r) => ({
@@ -222,6 +227,17 @@ export function buildReport(input: {
       totalMaxUsdMicros: plan.totalMaxUsdMicros,
       ...(configuration ? { configuration } : {}),
     },
+    // A campaign batch (ADR 0012 §76): its place, and the unrecorded spend
+    // its dispatch declared, for the campaign summary to check.
+    ...(plan.campaign
+      ? {
+          campaign: {
+            ...plan.campaign,
+            ledgerRemainderUsdMicros: input.campaign?.ledgerRemainderUsdMicros ?? null,
+            declaredUnrecordedUsdMicros: input.campaign?.declaredUnrecordedUsdMicros ?? null,
+          },
+        }
+      : {}),
     budgetUsdMicros: input.budgetMicros,
     homeCapNzd: input.capNzd,
     stopped: run.stopped,
@@ -245,6 +261,10 @@ export function buildReport(input: {
   md.push(
     `- Budget US$${usd(input.budgetMicros)}; HOME's reservation cap NZ$${input.capNzd}; plan maximum US$${usd(plan.totalMaxUsdMicros)}`,
   );
+  if (plan.campaign)
+    md.push(
+      `- Campaign ${plan.campaign.name}, batch ${plan.campaign.batch} of ${plan.campaign.of}; declared unrecorded spend of earlier batches US$${input.campaign ? usdExact(input.campaign.declaredUnrecordedUsdMicros) : '—'}`,
+    );
   md.push(`- ${input.startedAt.toISOString()} to ${input.finishedAt.toISOString()}`);
   md.push(
     `- Workflow run ${input.identity?.workflowRun ?? '—'}, commit ${input.identity?.commit ?? '—'}`,
