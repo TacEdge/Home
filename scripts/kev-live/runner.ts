@@ -10,21 +10,27 @@ import { assertFixtureDatabase, fixtureAdult } from './db-checks';
 import {
   assertBudgetCovers,
   assertBudgetWithinPlanCap,
+  assertCampaignBatchCovered,
   assertEnvironment,
   assertKeylessCap,
   assertLedgerCovers,
   assertLiveCap,
+  assertNoCampaignSpent,
   assertPlanHash,
   assertRunnerDatabase,
+  CAMPAIGN_SPENT_VARIABLE,
   capNzdFor,
   EVALUATION_RUN_CEILING_USD_MICROS,
   EXIT,
+  ledgerRemainder,
   LiveRefusal,
   parseBudgetUsd,
+  parseCampaignSpentUsd,
   parseLedger,
   readKey,
   SESSION_CEILING_USD_MICROS,
   usd,
+  usdExact,
   type Mode,
 } from './guards.mts';
 import { buildPlan, sessionPlan, SESSION_PLANS, type Plan } from './plan';
@@ -152,6 +158,34 @@ export function planLines(plan: Plan): string[] {
   return lines;
 }
 
+/**
+ * The campaign's batches in one table (ADR 0012 §76): each batch's plan,
+ * tier, turns, maximum, budget and hash, for the owner's approvals.
+ */
+export function campaignLines(plans: readonly Plan[]): string[] {
+  const batches = plans.filter((p) => p.campaign);
+  if (batches.length === 0) return [];
+  const turns = (p: Plan) =>
+    p.probes.reduce((n, x) => n + (x.kind === 'scenario' ? x.turns : 0), 0);
+  const tiers = (p: Plan) =>
+    [...new Set(p.probes.map((x) => ('tier' in x ? x.tier : '—')))].join('+');
+  const repeats = (p: Plan) =>
+    [...new Set(p.probes.flatMap((x) => (x.kind === 'scenario' ? [x.repeat] : [])))]
+      .sort((a, b) => a - b)
+      .map((r) => `#${r}`)
+      .join(' ');
+  const total = batches.reduce((n, p) => n + turns(p), 0);
+  const max = batches.reduce((n, p) => n + p.totalMaxUsdMicros, 0n);
+  return [
+    `campaign ${batches[0]!.campaign!.name}: ${batches.length} batches, ${total} turns, every batch at its maximum US$${usd(max)} (never all at once: each batch is held to the remainder when it is approved)`,
+    'batch  plan         tier  repeat   turns  max US$  budget US$  plan hash',
+    ...batches.map(
+      (p) =>
+        `${String(p.campaign!.batch).padStart(2)}/${p.campaign!.of}  ${p.name.padEnd(11)}  ${tiers(p).padEnd(4)}  ${repeats(p).padEnd(7)}  ${String(turns(p)).padStart(5)}  ${usd(p.totalMaxUsdMicros).padStart(7)}  ${usd(p.sessionCapUsdMicros).padStart(10)}  ${p.hash}`,
+    ),
+  ];
+}
+
 export async function runMode(
   mode: Mode,
   env: Record<string, string | undefined>,
@@ -165,6 +199,11 @@ export async function runMode(
       for (const [i, p] of shown.entries()) {
         if (i > 0) opts.log('');
         for (const l of planLines(p)) opts.log(l);
+      }
+      const campaign = campaignLines(shown);
+      if (campaign.length > 0) {
+        opts.log('');
+        for (const l of campaign) opts.log(l);
       }
       opts.log('');
       opts.log(
@@ -194,6 +233,25 @@ export async function runMode(
       throw new LiveRefusal('ledger', 'The campaign ledger is missing.');
     const ledger = parseLedger(opts.ledgerText);
     assertLedgerCovers(ledger, budget);
+    // A campaign batch (ADR 0012 §76): held to the remainder after the
+    // declared spend of earlier batches the ledger does not hold yet.
+    let campaign: { ledgerRemainderUsdMicros: bigint; declaredUnrecordedUsdMicros: bigint } | null =
+      null;
+    if (plan.campaign) {
+      campaign = {
+        ledgerRemainderUsdMicros: ledgerRemainder(ledger),
+        declaredUnrecordedUsdMicros: parseCampaignSpentUsd(env[CAMPAIGN_SPENT_VARIABLE]),
+      };
+      const left = assertCampaignBatchCovered(
+        ledger,
+        plan.hash,
+        budget,
+        campaign.declaredUnrecordedUsdMicros,
+      );
+      opts.log(
+        `campaign ${plan.campaign.name}, batch ${plan.campaign.batch} of ${plan.campaign.of}: ledger remainder US$${usdExact(campaign.ledgerRemainderUsdMicros)}, declared unrecorded spend US$${usdExact(campaign.declaredUnrecordedUsdMicros)}, left US$${usdExact(left)}`,
+      );
+    } else assertNoCampaignSpent(env);
     opts.log(
       `budget US$${usd(budget)} holds the plan; the hash matches; the campaign ledger holds the budget`,
     );
@@ -274,6 +332,7 @@ export async function runMode(
         startedAt,
         finishedAt: new Date(),
         identity: { workflowRun: env.GITHUB_RUN_ID ?? null, commit: env.GITHUB_SHA ?? null },
+        ...(campaign ? { campaign } : {}),
       });
       mkdirSync(opts.reportDir, { recursive: true });
       writeFileSync(join(opts.reportDir, 'report.json'), report.json);

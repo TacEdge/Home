@@ -829,7 +829,8 @@ describe('the scenario probe and evaluation plans (§12.4)', () => {
     ];
     for (const name of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
       const p = buildPlan(name);
-      const evaluation = EVALUATION_PLANS.includes(name);
+      // The final campaign's batches (ADR 0012 §76) are evaluation plans too.
+      const evaluation = EVALUATION_PLANS.includes(name) || name.startsWith('campaign-');
       expect(p.kind, name).toBe(evaluation ? 'evaluation' : 'verification');
       expect(p.ceilingUsdMicros, name).toBe(
         evaluation ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS,

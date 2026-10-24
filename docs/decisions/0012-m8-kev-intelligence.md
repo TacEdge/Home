@@ -119,7 +119,7 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     - **Deep:** `claude-opus-5-5`, effort `medium`, `max_tokens` 8,192.
     - **Fast:** `claude-sonnet-5-5`, effort `medium`, `max_tokens` 4,096, to start: the owner's quality-first preference on the approved initial mapping (ADR 0001 D4). Package 5 sweeps `low` (adopted only within 2 points of `medium` on correctness and first-pass rate) and evaluates `claude-haiku-5-5` before any substitution; Haiku 5.5 is adopted only if it meets every hard gate and measured target, privacy, injection and grounding included; cost alone is not a reason. Model ids and capabilities are verified against current documentation and the Models API in Package 1 (contract §5.7, G1).
     - **Model ids are pinned snapshots,** dateless ones included (verified, models overview, 2026-10-13); `config.ts` records each model's retirement-not-before date (September–October 2027), and a model review is planned before then.
-    - **A deep re-ask the adult asks for** ("Take a closer look") is not built; it is decided with Package 5's escalation-recall evidence (O4).
+    - **A deep re-ask the adult asks for** ("Take a closer look") is not built; it is decided with Package 5's escalation-recall evidence (O4). *Deferred beyond M8 (owner decision, 2026-10-24; §76).*
     - **Not `claude-fable-5-1`:** it requires 30-day retention and is not available under zero data retention without express authorisation; it costs 2.5 times Opus 5.5.
     - Tool use with `strict: true` and `tool_choice: auto`; the answer as structured output (or a strict answer tool if structured output does not compose with tools on a tier, checked in Package 1); no personal data in any JSON schema, because schemas are cached by the provider for up to 24 hours without message content's protections.
     - Refusals end the attempt plainly; the server-side `fallbacks` parameter is not used, since it would switch models within a turn, would retry only some refusal categories, and does not exist for Haiku 5.5. Package 5 records the refusal rate per tier. Thinking is replayed verbatim within an attempt and never stored or replayed across turns. The cached prefix (tools and system prompt) holds no personal data.
@@ -272,7 +272,7 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
     | **O1** Provider privacy: request ZDR; only written confirmation counts; no automatic acceptance of standard retention for real data, but a separate, informed owner decision at DEPLOY.md §E item 24; US inference enforced in the workspace and checked per response | D3 | §15, §38; contract §5.5 |
     | **O2** Budget: NZ$100 a household month for the initial trial, subject to verified pricing; a validated setting, `HOME_KEV_MONTHLY_CAP_NZD` | D19 | §35; contract §13 |
     | **O3** Conversation: a rolling 12 hours, at most 10 exchanges and 6,000 context tokens; no model-written permanent summaries; limits configurable and evaluated in Package 5; earlier answers as validated text and citation ids | D13 | §23; contract §7.2 |
-    | **O4** A deep re-ask ("Take a closer look"): deferred to Package 5's evaluation | D2 | §13; contract §19.2 D2 |
+    | **O4** A deep re-ask ("Take a closer look"): deferred to Package 5's evaluation. *Decided 2026-10-24 (§76): deferred beyond M8* | D2 | §13; contract §19.2 D2 |
     | **O5** Fast model: Sonnet 5.5 at `medium` to start; Haiku 5.5 evaluated before any substitution; Opus 5.5 the deep tier; ids and capabilities verified in Package 1 (G1). *Decided 2026-10-24 (§75): Sonnet 5.5 `medium`, escalating to Opus 5.5 `medium`* | D2 | §13; contract §5.3 |
     | **O6** Retention: minimal scheduled deletion of expired conversation messages, daily; 90-day retention kept; no agent background monitoring; ROADMAP "Not yet" amended for this one job only; the scheduling mechanism subject to G18 | D13 | §23; contract §7.2; ROADMAP |
     | **O7** Evaluation allocation: a one-time US$200 for Package 5's live-model evaluations, at most US$175 a run, under §41's rules | D18 | §34, §41; contract §12.4 |
@@ -1198,6 +1198,61 @@ The ROADMAP M8 row commits M8 to: *"`kev.handle()` orchestrator emitting `KevEve
       - **Deep:** 30 transcripts exist now. Run #10's 19, and the 11 Opus-answered turns of run #12, or #11's 8 with #8's 3.
       - **Fast (Sonnet 5.5 `medium`):** run #8 holds about 17 answers. The rest must come from the campaign's output.
       - **The rubric** is unchanged, and no score is produced by anyone but the owner.
+76. **The final acceptance campaign prepared (Option A); O4 deferred beyond M8** (2026-10-24; the owner's brief "M8 Final Acceptance Campaign Preparation"; M8's scope frozen; no provider call, no dispatch, no spending-limit or provider-setting change, no real data). The paper is `docs/m8/M8-FINAL-CAMPAIGN.md`.
+    - **Owner decisions.**
+      - **Option A:** the original, contract-compliant campaign, §12.3's full suite as written.
+      - **No threshold amended or lowered.**
+      - **O4 deferred beyond M8:** not built, not part of M8's acceptance.
+      - **The ledger may be consolidated** into one evidence PR at the campaign's end, with owner approval and financial control kept for every paid run (contract §12.4 rule 7, as amended).
+    - **Baseline.** PR #119 (decisions A–C, the acceptance record) is **open, not merged**: head `19af096`, not an ancestor of `main` (`d0413fe`). This preparation is stacked on its branch, so nothing of it is duplicated or overwritten. #119 merges first.
+    - **Credit: none.**
+      - **The proposal.** 36 turns: 18 fast from run #8 and 18 deep from run #10.
+      - **What matches.** Their models and efforts are unchanged.
+      - **What does not, or cannot be shown.**
+        - **Tool behaviour.** `get_projects` by id and the renderer's `open_tasks` rule changed (§71). Which turns that touched is only in the transcripts, which cannot be downloaded here.
+        - **Expectations.** `why_overlap` changed (both runs), and `synced_title`'s live judging changed (run #8).
+        - **Plan identity.** Neither run's plan hash is the code's now: `review-fast` is `9854c0fe…`, not run #8's `29d57657…`; `review-deep` is `235207b5…`, not run #10's `f6d41061…`.
+      - **The rule applied.** Compatibility could not be proven, so the campaign is the full **878 turns**: fast 509, deep 369. The manifest, candidate by candidate, is in the paper (§3).
+    - **The plans** (`scripts/kev-live/plan.ts`).
+      - **Fifteen batches,** `campaign-01` to `campaign-15`, now the session plans. Each repeat's block of the catalogue is split in two by turns (a scenario is never split), fast and deep alternating by repeat; fast's fourth and fifth repeats of the five-run classes follow, in three.
+      - **Size:** 44–63 turns each, US$66.00–94.50 at most. Each budget is the smallest whose whole-NZ$ cap holds the maximum (`smallestPracticalCap`; Stage 1's US$31.67 by the same rule).
+      - **The hash** binds each batch's place in the campaign (`campaign: {name, batch, of}`), absent from every other plan. `PLAN_VERSION` stays 6, and every earlier plan's hash is unchanged.
+      - **Within every limit:** no adult has more than 60 turns in a batch, and every batch fits the US$175 run ceiling and the present remainder.
+      - **Supporting changes.** `scenarioProbes` takes a first repeat (`fromRepeat`). The dry run prints the campaign's table.
+    - **Consolidating the ledger, with the money held** (`guards.mts`, `runner.ts`, the workflow).
+      - **The declaration.** A batch's dispatch must declare `campaign_spent_usd`: HOME's recorded spend of the earlier batches not yet in the ledger, to the micro-dollar, `0` for the first.
+      - **What the keyless check and the live run refuse:**
+        - a batch without a declaration;
+        - a batch whose budget exceeds the ledger's remainder less the declaration;
+        - a batch the ledger already records;
+        - a declaration given to any other plan.
+
+        Each is refused with exit 16, before any key, database or call.
+      - **Kept in the report.** Each batch's report records its place, the ledger's remainder at dispatch and the declaration.
+      - **The backstop.** The evaluation workspace's spend limit is the provider-side backstop (rule 10). Raising it is the owner's step, at no more than the remainder.
+    - **The campaign summary** (`scripts/kev-live/campaign-summary.ts`; `node scripts/kev-live/campaign.mts <out> <reports…>`, run under Vitest for the path aliases, as the runner is).
+      - **What it reads:** every downloaded batch report, with the committed ledger.
+      - **What it refuses:**
+        - a report that is not a batch of this campaign as the code computes it;
+        - a batch counted twice;
+        - a record outside its batch, or counted twice;
+        - a scripted run.
+      - **What it reports, per run:** its id, commit, hash, plan maximum, approved budget, HOME's recorded cost, reconciliation, the declaration check (the runner never believed in more remainder than there was) and the ledger row's status. It also reports:
+        - batches not run, stopped runs and probes with no record;
+        - every failed run;
+        - §12.3's summary over every record on each tier, through the same `summarise` every report uses;
+        - the proposed ledger rows for the consolidated PR.
+      - **Its exit status** is 0 only when the campaign is complete and its money checks hold.
+    - **Financial plan.**
+      - **Cost.** Expected about **US$82.41** (±30%) of the **US$191.101177** remainder. The campaign's exposure is never above the remainder. At the planning rates, the tightest approval is batch 12, which still fits if earlier spend runs 54% over.
+      - **The workspace.** Its US$10 monthly limit cannot hold one batch. The owner raises it (recommended US$120, never above US$191), with automatic reload off and US-only inference.
+      - **The rest** of the procedure, the stop conditions and the owner's approvals are in the paper (§5–§7, §9).
+    - **Verification (no provider).**
+      - **Unit tests** (`tests/unit/kev-final-campaign.test.ts`) cover the campaign's exact composition, order, hashes, caps, limits and headroom; the declaration's parsing and checks; the keyless check and dry run; the report's campaign block; and the summary's complete, consolidated, understated, incomplete, failed and refused cases.
+      - **Thirteen mutations,** each caught.
+      - **The earlier stages' tests** now give their plans explicitly, their hashes unchanged.
+      - **The launcher,** exercised on synthetic reports.
+      - **The runner's integration suites** (runner, cap, harness, Stage 3, deep smoke) pass.
 
 ## Consequences
 

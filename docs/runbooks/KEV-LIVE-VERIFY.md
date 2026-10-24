@@ -12,6 +12,7 @@ Owner decisions this follows (2026-10-16): the runner uses HOME's own gateway, s
 | `scripts/kev-live/plan.ts` | The plans as code: one list of probes, the named plans that select from it, their synthetic prompts, run and stop rules, maxima and the hash (over the probes with each one's request digest, Kev's models, prices, tiers and limits, and digests of the system prompt, tools and answer schema). |
 | `.github/workflows/kev-live-verify.yml` | `workflow_dispatch` only, from `main`. Job `plan` (no key): `--check-plan`. Job `run` (environment `kev-evals`, the owner approves): the job's own Postgres, migrations, the fixture seed, `--live`, the report as an artifact. |
 | `docs/m8/M8-LIVE-LEDGER.json` | The campaign ledger: US$200, and one entry per live session with HOME's recorded cost. The runner refuses a budget above the remainder. |
+| `scripts/kev-live/campaign.mts` | The final acceptance campaign's summary (ADR 0012 §76): every batch's downloaded report, with the ledger, as one auditable result (step 12). Local files only. |
 | `scripts/kev-live/isolation-check.mts` | Read-only evidence for owner decision 6, against any database but Production. |
 | `scripts/kev-live/g16-pooled.mts` | G16 on home-dev's pooled connection: reservations only, no model, no key. |
 
@@ -100,7 +101,21 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    It prints the database and host, counts and latest `created_at` per table, how many person names are not the fixture family's (a count), accounts not on a `.test` address (the adults' own sign-in accounts appear here) and calendar connections. Record the date and the result. Also confirm in Neon that the Vercel integration is not creating Preview branches from Production, and in Vercel that no provider key is set anywhere (plan §6).
 3. **GitHub:** create the environment **`kev-evals`** (Settings › Environments) with **required reviewer: the owner**, deployment branches limited to `main`; add the secret **`KEV_EVAL_PROVIDER_KEY`** to that environment only (never a repository secret, never Vercel). The key is the evaluation workspace's own (plan §3 step 4).
 4. **Dry run, locally:** `node scripts/kev-live/run.mts`. Read the table; note the hash.
-5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plans are Stage 3's two, `review-sonnet-low` and `review-haiku`** (ADR 0012 §72): each its own run, approval, budget, report and ledger row. The dry run prints both; the approved hash selects which one runs.
+5. **Approve:** record the plan hash and the budget as approved. A hash approved for an earlier plan is refused. **The session plans are the final acceptance campaign's fifteen batches, `campaign-01` to `campaign-15`** (ADR 0012 §76; `docs/m8/M8-FINAL-CAMPAIGN.md`). Each batch is its own run, approval, budget and report. The dry run prints each batch and, at the end, the campaign's table (batch, tier, repeat, turns, maximum, budget, hash). The approved hash selects which batch runs.
+   - **What they run:** §12.3's full suite, 878 turns on the synthetic evaluation world, in order.
+     - Fast (Sonnet 5.5 `medium`, escalating to Opus 5.5 `medium`): the safety, out-of-scope and routing classes × 5; realistic and availability × 3.
+     - Deep (Opus 5.5 `medium`): × 3.
+   - **Budget, each:** the table's figure, the smallest whose whole-NZ$ cap holds the batch's maximum (44–63 turns at the US$1.50 turn ceiling).
+   - **Before batch 1:** raise the evaluation workspace's monthly limit (the owner's step; US$10 cannot hold a batch) to no more than the remainder, US$191; US$120 is recommended. Automatic reload stays off.
+   - **Each dispatch declares `campaign_spent_usd`:** HOME's recorded spend of the earlier batches not yet in the ledger, in US dollars to the micro-dollar.
+     - **Where it comes from:** the sum of each earlier run's `HOME recorded` figure, or its `report.json`'s `reconciliation.recordedUsdMicros` ÷ 1,000,000.
+     - **First batch:** `0`.
+     - **The check:** the `plan` job refuses a batch without it, one whose budget does not fit the remainder after it, and a batch the ledger already records (exit 16).
+     - **Read before approving:** the job log's line `campaign m8-final-acceptance, batch N of 15: ledger remainder …, declared unrecorded spend …, left …`.
+     - **Never under-declare;** over-declaring only holds a budget to less.
+   - **One run per batch, no retry.** A batch that stopped is not dispatched again: its missing probes need a new plan, through a reviewed PR. The stop conditions are in the paper (§7). Hold merges to `main` that touch `src/` or `scripts/kev-live/` until the campaign ends.
+
+   **Stage 3, `review-sonnet-low` and `review-haiku`** (ADR 0012 §72), ran as live verification #11 and #12. Each was its own run, approval, budget, report and ledger row. They are no longer session plans.
    - **What each runs:** the owner's review set (20 scenarios, 21 turns), once each, started on fast, on the synthetic evaluation world. Only the fast attempt's calls change: Sonnet 5.5 at `low` effort, or Haiku 5.5 at the fast tier's own settings (`medium`, 4,096 `max_tokens`). An escalation re-runs the turn on Opus 5.5 at `medium`, as configured. The report names the configuration; a run whose calls were not it fails (`not_configured_model`, `not_configured_effort`).
    - **Hashes:** `review-sonnet-low` `715085a9f8078a92fa59c2211ea4bfc76253f0d5d010f06ea6c3047eea2eee23`; `review-haiku` `1bc1126e20d1be818962d965b32eecce0f3eaaa1f8e3bb45e66ced4155364b3a`.
    - **Budget, each:** US$31.67, the smallest that works. The maximum is US$31.50 (21 turns at the US$1.50 turn ceiling; a Haiku call is reserved at Sonnet 5.5's per-call maximum and recorded at Haiku's prices). US$31.50 to US$31.66 is refused at the cap (exit 17), anything above US$31.67 at the plan's cap, anything below US$31.50 as not covering the maximum.
@@ -142,11 +157,13 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
    - **Maximum exposure:** US$1.50, one Opus turn held to the turn ceiling.
    - **Not counted against the household:** the run uses its own database and NZ$3 cap.
 
-   The workflow's `budget_usd` field still says "at most 10"; the runner holds an evaluation plan to its own cap.
-6. **Dispatch:** Actions › Kev live verification › Run workflow on `main`, with `plan_hash` and `budget_usd`. The `plan` job checks them without any key; the `run` job then waits for the owner's approval in `kev-evals`.
+   The workflow's `budget_usd` field accepts up to 10 for verification and 175 for an evaluation run; the runner holds every plan to its own cap.
+6. **Dispatch:** Actions › Kev live verification › Run workflow on `main`, with `plan_hash` and `budget_usd`, and for a campaign batch `campaign_spent_usd`. Leave it empty for any other plan, which refuses it. The `plan` job checks them without any key; the `run` job then waits for the owner's approval in `kev-evals`.
 7. **Reconcile (plan §9):** download the `kev-live-report` artifact. `report.md` gives each probe and call (tokens, HOME's cost, stop, `inference_geo`, `request-id`) and the reconciliation (no open or unreconciled reservation; each attempt settled at Σ its usage; conservative charges; tokens by model and UTC day). It keeps three figures apart: **reserved** (the session's maximum exposure, its reservations at the tier's prices), **recorded** (what HOME charged, each completed call at its own model's prices, Haiku at Haiku's, unknown or partial usage conservatively), and **at list prices** (every call's reported tokens at its model's prices × 1.1, the figure the provider's bill should match; recorded exceeds it only by the conservative charges). Compare the last table and the list-price figure with the evaluation workspace's Usage and Cost in the Console: HOME's recorded figure must be at least the provider's. Match calls by `request-id` where needed. **A refused call** (ADR 0012 §52) prints one line under its probe in the job log, so a failure can be read without the artifact: `  message <model>: status 400; type invalid_request_error; request-id req_…; paths tools.3.custom.input_schema…; signals schema_too_complex …; message N chars (not kept)`. `report.md`'s "Provider errors" table and each call's `error` field in `report.json` hold the same. Paths keep only API field names, JSON Schema keywords and HOME's own schema names (anything else is `*`); signals come from a fixed list; the provider's message itself is never kept. If that is not enough, the request id lets Anthropic support find the full message. A 200 from the preflight count does not prove the request will be accepted: the provider counts without compiling strict schemas. For `tool-diagnostic`, `report.md`'s **Diagnostic matrix** has one row per probe: its shape, model, `tool_choice`, strictness, answer format, outcome, whether G22's count passed, whether the Messages call was made, status, category, paths, signals, request id, usage and HOME's charge (marked conservative for a refused call), and the reason the session stopped (`dx-…_passed`, `_failed` or `_named`). Read the cause from where it stopped (ADR 0012 §53's table); the report suggests no gate result for `DX`, which is not a gate.
 8. **One run, no retry:** the deep smoke plan stops on its one probe's result, pass or fail. Never re-dispatch a failed or stopped session without a fresh approval of its hash and budget.
 9. **Ledger:** add the session to `docs/m8/M8-LIVE-LEDGER.json` (date, workflow run, plan hash, planned maximum, HOME's recorded µ$) in a reviewed PR before any further session.
+   - **The final campaign's batches are the exception** (contract §12.4 rule 7, as amended; ADR 0012 §76). They may be added in **one consolidated evidence PR**, from the campaign summary's proposed rows (step 12), while each dispatch declares the unrecorded spend (step 5).
+   - **Open that PR** when the campaign ends or pauses, before the first batch's artifact expires (30 days).
 10. **Record the gates** in the contract's register (§5.7) with their dates. The report suggests a result per gate; **no gate is PASS until the owner records it**. G8 and G19 are recorded, not passed or failed.
 11. **Review the answers (an evaluation plan only; Package 5C, ADR 0012 §58).** For `deep-smoke` the files are `review-deep.json` and `review-deep.html`. Beside the report, the artifact holds:
     - `transcripts.json`: every scenario run's readable synthetic transcript;
@@ -171,6 +188,28 @@ For `two-phase-acceptance`, choose a budget of **US$2.00**: HOME's cap is then N
     then `node scripts/kev-live/compare.mts comparison.json`. It prints one table, one column per configuration: pass rate, first-pass validation, factual correctness, grounding, safety, privacy and injection, latency (median, P95), escalation and regeneration, cost per turn and the owner's usefulness ratings. Each column comes from its own run's judge records, summarised exactly as its report did. It refuses scripted results and decides nothing. The baseline reports expire on 2026-11-19 (artifacts 12233668597 and 12246826725): download them before then. Each Stage 3 run's review page is named `review-fast.html` (its runs started on fast); its report says which configuration it holds.
 
     These files hold synthetic questions and answers. Keep them out of the repository, the ledger and any log; the artifact expires after 30 days. A transcript that would show the other adult's private record or a sensitive string is withheld, and its run fails (`transcript_withheld`).
+
+12. **The campaign summary (the final campaign only; ADR 0012 §76).** Download every batch's `kev-live-report` artifact, then:
+    ```
+    node scripts/kev-live/campaign.mts campaign-out batch-01/report.json … batch-15/report.json
+    ```
+    It reads them with the committed ledger and writes `campaign-out/campaign-summary.md` and `.json`. It runs under Vitest, as the runner does: local files only, no key, database or network.
+
+    **It refuses (exit 2):**
+    - a report that is not a batch of this campaign as the code computes it;
+    - a batch counted twice;
+    - a record outside its batch, or counted twice;
+    - a scripted run.
+
+    **Per run, it reports:**
+    - its id, commit, hash, plan maximum, approved budget and HOME's recorded cost;
+    - its reconciliation;
+    - whether its declaration held: the runner never believed in more remainder than there was;
+    - its ledger row: `recorded`, `differs` or `not_recorded`.
+
+    **Across the campaign, it reports:** what is missing, every failed run, and §12.3's summary over every run on each tier. It exits 0 only when the campaign is complete and its money checks hold, and 1 otherwise.
+
+    **For the consolidated ledger PR:** its JSON's `proposedLedgerRows` are the rows to add. Run the summary again after they are added: every row should then read `recorded`.
 
 ## G16 on home-dev's pooled connection (separate approval)
 
