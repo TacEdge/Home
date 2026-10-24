@@ -1,5 +1,7 @@
 # M8 Package 6 — acceptance matrix
 
+*Superseded for status by `M8-ACCEPTANCE.md` (2026-10-24, ADR 0012 §75), which records the owner's decisions A–C and the non-paid closure. This matrix stays as the evidence analysis behind it.*
+
 **Purpose:** to establish exactly what prevents M8's acceptance, and the smallest action that closes each gap. It is assembled from existing evidence only: no provider call, paid evaluation or code change was made to write it.
 
 **Checked against:**
