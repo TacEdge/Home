@@ -134,6 +134,18 @@
       "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
       "reservations": "21 scenario turns started on fast (Sonnet 5.5 at low effort), each held to the US$1.50 turn ceiling under the US$31.67 cap (NZ$57), which the runner's database started at zero; eight escalated to deep (Opus 5.5 medium) within their turn; all settled. The job's own report was written, so the runner reconciled it; the reconciliation figures are in report.json.",
       "outcome": "COMPLETED: Stage 3A, the review-sonnet-low plan (ADR 0012 §72), the owner's review set of 20 scenarios and 21 turns once each, started on fast with Sonnet 5.5 at low effort. 19 of 20 scenarios passed. realistic.weekend_look failed (limits#0: no forecast credit), the same omission Stage 2 recorded as product-quality evidence. No privacy, sensitive-context, never-shown or unchecked-lead check failed. Every turn ended in a checked answer: 12 first time on fast, 1 after its regeneration, 8 after the model escalated to deep (escalation: model). First-answer failure codes: fact.field 1, view.unsupported 1. Accepted by the owner as evaluation evidence (ADR 0012 §73); not chosen as the fast default."
+    },
+    {
+      "date": "2026-10-22",
+      "workflowRun": "Kev live verification #12 (run 39697753036, commit 19910a5)",
+      "planHash": "1bc1126e20d1be818962d965b32eecce0f3eaaa1f8e3bb45e66ced4155364b3a",
+      "plannedMaxUsdMicros": "31500000",
+      "recordedUsdMicros": "1446462",
+      "recordedBasis": "Owner-supplied: HOME's exact recorded figure from the run's report, US$1.446462, including one conservative charge for a call's partial provider usage (the turn that timed out). The job log rounds it to \"HOME recorded US$1.45\". Artifact 12392050466, kev-live-report, expires 2026-11-21.",
+      "providerListPrice": "Not read here (the report's at-list-prices figure is in report.json).",
+      "anthropicBilling": "NOT RECONCILED: no independent check of the provider's Usage and Cost figures yet.",
+      "reservations": "21 scenario turns started on fast (Haiku 5.5 at medium effort, reserved at the fast tier's per-call maximum and recorded at Haiku's prices), each held to the US$1.50 turn ceiling under the US$31.67 cap (NZ$57), which the runner's database started at zero. 11 escalated to deep (Opus 5.5 medium) within their turn; all settled. The job's own report was written, so the runner reconciled it; the reconciliation figures are in report.json.",
+      "outcome": "COMPLETED: Stage 3B, the review-haiku plan (ADR 0012 §72), the owner's review set of 20 scenarios and 21 turns once each, started on fast with Haiku 5.5 at medium effort. 19 of 20 scenarios passed. realistic.attention_week failed (outcome): the turn ended in a provider timeout on fast with no answer (kev_turn error timeout, no_answer, after 19.0 s), which is never an escalation trigger. No privacy, sensitive-context, never-shown or unchecked-lead check failed. 20 turns ended in a checked answer: 8 first time on fast, 1 after its regeneration, 11 after an escalation to deep (10 by the model, 1 after two failed answers). First-answer failure codes: cite.unknown 2, view.unsupported 1. Accepted as evaluation evidence (ADR 0012 §74); not chosen as the fast default."
     }
   ]
 }
