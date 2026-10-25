@@ -152,6 +152,7 @@ export async function runScenario(
     topics: topicsOf(s),
     pass: verdict.pass,
     failed: verdict.failed,
+    ...(verdict.diagnostic?.length ? { diagnostic: verdict.diagnostic } : {}),
     relevance: relevanceOf(s, last.stored?.cites ?? [], ctx.ids),
     turns: Object.freeze(turns.map((t) => t.record)),
   });

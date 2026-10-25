@@ -49,21 +49,21 @@ import { runMode } from '../../scripts/kev-live/runner';
 
 const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 const HASHES = [
-  '2b99538f340fb8e2d58cf25736019dc39b7be580bec44ef6d084b5e030e8ae58',
-  'f9073b7b8a519c444004964ed52cc6230fc403969f40feeee2fa655283e1f528',
-  'adfac4fd5e2148f45bf31e0567a59b94eddee3eb0784a6cc8f50ea32f5d3e5ea',
-  'a176cab003663dc23d83db8c214ffbd993c14cf603ef928a85437c1fe37666e7',
-  '4889ce52a2d509a66469cef07c204cc720ea9cc1e3106dcca9023b1f97756477',
-  '99e50fad6e4908c6d371778cbd8335313994ca861acf1af6d1d2eb8edbab2f9e',
-  'e6660ab3f44bda115a6beeb4e208439480fa60e75359ed8e338a7b975b7ed183',
-  '9be510bbda7bac803c65adfe428fec3179336e3a0f4755ff79e2c4aecb2e5233',
-  'fd21ae33ef1852b76a272fedcdfc81db6d8ce9b39f8d3f39de95cdc50114a381',
-  '30881ac9548c5ac9f290c8800a89fea137b983533e301e8cc7a9ec381a1f6d4e',
-  '8d6ec3366335da7efb1a160436e2d23d726e97c3fc669679f5c4565614a0fbd6',
-  'd877510dbc4bbfe6bef16ac00c3cb8931b3cccecefa2e077dfa21f167719bcfc',
-  'bda0810f470dd56dd463dc3eca6cbb30b1eea4d665d0116af2daf52202d240f3',
-  '46f9a5f166a9adc14fdb252ac3878acfb3993181038ff5bece4ca34d724a69ed',
-  '53c20b91e5f911660b1631eb9e2c54dace62105d6b863601c14b4fefb1c35288',
+  'e43e15b0518e9e3438b7c752999d5c4ec2ebfaf437bb1533e013f1c38ef838f5',
+  'f1ff42692aed6f4eab821d28cbe25740e0285095c5e52475eec85dbaa847211e',
+  'a8cd01b4860c67c20ca5f1e1b6af30e089f05fdd5823370e23dc713300e71f54',
+  'fc1d85ee714888264423e0a2d3ec9291f38d168774bf184ee28fb491b16ea893',
+  'd7c2692d4499e3666acdf96ea0f357935286c6bf6c8e490a13fe7dd70533dce7',
+  '1d77d4e652e5fb140176e477763de1738fb7bda6e51b9d51b0c4c857923cf718',
+  '907c0a98cc30869571e9d72f495a1a601c546d8f7921ba583c16845d58be3eda',
+  '9312ee6e078755fed844e658ed86eb1283a91dc615bc3b56b5a73bea52cd59ee',
+  '31e1f54b3f5c18a84f2378b51ca7441b05c57e46b52f39850aa7c19a9064e111',
+  'e60e9f63b599b75b2e6a5e379d9803c1c5323b3d39e611ac04811a3e67e79698',
+  'd75b282c919e31f8d7991687070260aa8682740d7fe8fc167be51405c3b24701',
+  '0648f14205749f4f61891cde1e1b12a2152b93086c4ae5e4f7e4ee1300f16d4b',
+  'a3564107450b34d1015e3ca1a74f3727e2ef87cb8344900ddb0052cbdf84815c',
+  '2f49bf62353e1e63a616cca293104250d79d7e67cfa24b463acc81f0443b2919',
+  '7353d9ce623060adbdc811704dd206a571bc5893b76335efdb57003d92f8c5dc',
 ];
 const plans = campaignPlans();
 const turns = (p: Plan) => p.probes.reduce((n, x) => n + (x.kind === 'scenario' ? x.turns : 0), 0);
@@ -147,7 +147,7 @@ describe('the campaign: §12.3’s full suite as written', () => {
     for (const [i, p] of plans.entries()) {
       expect(p.name).toBe(CAMPAIGN_PLANS[i]);
       expect(p.kind).toBe('evaluation');
-      expect(p.campaign).toEqual({ name: 'm8-final-acceptance', batch: i + 1, of: 15 });
+      expect(p.campaign).toEqual({ name: 'm8-final-acceptance', batch: i + 1, of: 15, judge: 2 });
       expect(p.canonical.campaign).toEqual(p.campaign);
       // Production's configuration: no comparison configuration, no beta flag.
       expect(p.canonical).not.toHaveProperty('configuration');
@@ -371,6 +371,7 @@ describe('the declared unrecorded spend (consolidating the ledger)', () => {
       name: 'm8-final-acceptance',
       batch: 2,
       of: 15,
+      judge: 2,
       ledgerRemainderUsdMicros: '191101177',
       declaredUnrecordedUsdMicros: '5200000',
     });
