@@ -11,7 +11,12 @@ import type { Scenario, ScenarioClass } from '@/kev/evals/types';
 import { toolDefinitions } from '@/kev/tools/registry';
 import { TURNS_PER_DAY } from '@/domain/kev-bookkeeping/constants';
 import type { KevTier } from '@/domain/kev-bookkeeping/schema';
-import { EVALUATION_RUN_CEILING_USD_MICROS, SESSION_CEILING_USD_MICROS } from './guards.mts';
+import {
+  capNzdFor,
+  capUsdMicros,
+  EVALUATION_RUN_CEILING_USD_MICROS,
+  SESSION_CEILING_USD_MICROS,
+} from './guards.mts';
 
 // The live verification plan, as code (M8 live-verification plan §7, §11;
 // owner decisions 2 and 4, 2026-10-16): a fixed, versioned list of probes,
@@ -180,9 +185,12 @@ export function scenarioProbes(opts: {
   scenarios: readonly string[];
   tiers: readonly KevTier[];
   repeats: number;
+  /** The first repeat's number (1 unless given): the campaign's later repeats. */
+  fromRepeat?: number;
   /** The fast attempt's configuration (Stage 3's comparison plans); fast tier only. */
   fast?: FastConfiguration;
 }): ProbeSpec[] {
+  const from = opts.fromRepeat ?? 1;
   if (opts.fast && opts.tiers.some((t) => t !== 'fast'))
     throw new Error('a fast configuration is for scenarios started on fast only');
   return opts.scenarios.flatMap((id) => {
@@ -192,12 +200,12 @@ export function scenarioProbes(opts: {
       .filter((t) => (s.tiers ?? ['fast', 'deep']).includes(t))
       .flatMap((tier) =>
         Array.from({ length: opts.repeats }, (_, i) => ({
-          id: `${s.id}@${tier}#${i + 1}`,
+          id: `${s.id}@${tier}#${from + i}`,
           gates: [...CLASS_ROWS[s.class], 'E9'],
           kind: 'scenario' as const,
           scenario: s.id,
           tier,
-          repeat: i + 1,
+          repeat: from + i,
           turns: s.turns.length,
           ...(opts.fast ? { fast: Object.freeze({ ...opts.fast }) } : {}),
           expect: 'every expectation of the scenario holds (the scripted evals’ checker)',
@@ -680,6 +688,119 @@ export const REVIEW_HAIKU_PROBES: readonly ProbeSpec[] = Object.freeze(
 );
 
 /**
+ * The final acceptance campaign (Option A, owner decision 2026-10-24; ADR
+ * 0012 §76; docs/m8/M8-FINAL-CAMPAIGN.md): §12.3's full suite as written,
+ * with nothing credited from earlier runs. Fast: the safety classes
+ * (privacy, sensitive, injection, fabrication), out-of-scope and routing
+ * × 5, the realistic and availability scenarios × 3. Deep: × 3, the
+ * fast-only scenarios excepted. 878 turns in fifteen batches, each its own
+ * plan, hash, budget, approval, run and report. Each repeat's block of the
+ * catalogue, in the catalogue's order, is split by turns into two (never
+ * inside a scenario), fast and deep alternating by repeat; then fast's
+ * fourth and fifth repeats of the five-run classes, in three. The smallest
+ * batches come last, when the campaign's remainder is smallest.
+ */
+export const CAMPAIGN_NAME = 'm8-final-acceptance';
+export const CAMPAIGN_FIVE_RUN_CLASSES: readonly ScenarioClass[] = Object.freeze([
+  'privacy',
+  'sensitive',
+  'injection',
+  'fabrication',
+  'out_of_scope',
+  'routing',
+]);
+
+/** The catalogue's scenarios that run on a tier, in its order. */
+const scenariosOn = (tier: KevTier) =>
+  SCENARIOS.filter((s) => (s.tiers ?? ['fast', 'deep']).includes(tier)).map((s) => s.id);
+
+/** Probes, in order, in `parts` runs of about equal turns: a probe (one scenario run) is never split. */
+export function splitByTurns(probes: readonly ProbeSpec[], parts: number): ProbeSpec[][] {
+  const turnsOf = (p: ProbeSpec) => (p.kind === 'scenario' ? p.turns : 0);
+  const total = probes.reduce((a, p) => a + turnsOf(p), 0);
+  const out: ProbeSpec[][] = Array.from({ length: parts }, () => []);
+  let before = 0;
+  for (const p of probes) {
+    out[Math.min(parts - 1, Math.floor((before * parts) / total))]!.push(p);
+    before += turnsOf(p);
+  }
+  return out;
+}
+
+const campaignRepeat = (tier: KevTier, repeat: number) =>
+  splitByTurns(
+    scenarioProbes({ scenarios: scenariosOn(tier), tiers: [tier], repeats: 1, fromRepeat: repeat }),
+    2,
+  );
+
+/** The campaign's batches, in their order: each a plan's probes. */
+export const CAMPAIGN_BATCHES: readonly (readonly ProbeSpec[])[] = Object.freeze(
+  [
+    ...[1, 2, 3].flatMap((r) => [...campaignRepeat('fast', r), ...campaignRepeat('deep', r)]),
+    ...splitByTurns(
+      scenarioProbes({
+        scenarios: scenariosOn('fast').filter((id) =>
+          CAMPAIGN_FIVE_RUN_CLASSES.includes(SCENARIOS.find((s) => s.id === id)!.class),
+        ),
+        tiers: ['fast'],
+        repeats: 2,
+        fromRepeat: 4,
+      }),
+      3,
+    ),
+  ].map((b) => Object.freeze(b)),
+);
+
+export const CAMPAIGN_PLANS = Object.freeze([
+  'campaign-01',
+  'campaign-02',
+  'campaign-03',
+  'campaign-04',
+  'campaign-05',
+  'campaign-06',
+  'campaign-07',
+  'campaign-08',
+  'campaign-09',
+  'campaign-10',
+  'campaign-11',
+  'campaign-12',
+  'campaign-13',
+  'campaign-14',
+  'campaign-15',
+] as const);
+export type CampaignPlanName = (typeof CAMPAIGN_PLANS)[number];
+if (CAMPAIGN_BATCHES.length !== CAMPAIGN_PLANS.length)
+  throw new Error('the campaign names one plan per batch');
+
+/**
+ * The smallest budget, in whole cents and at least `maxMicros`, whose
+ * whole-NZ$ reservation cap holds `maxMicros` (Stage 1's US$31.67 for its
+ * US$31.50): a batch's session cap, and the budget the owner approves.
+ */
+export function smallestPracticalCap(maxMicros: bigint): bigint {
+  let cap = ((maxMicros + 9_999n) / 10_000n) * 10_000n;
+  while (capUsdMicros(capNzdFor(cap)) < maxMicros) cap += 10_000n;
+  return cap;
+}
+
+const CAMPAIGN_DEFS = Object.fromEntries(
+  CAMPAIGN_PLANS.map((name, i) => {
+    const specs = CAMPAIGN_BATCHES[i]!;
+    const max = specs.reduce((a, p) => a + probeMaxUsdMicros(p), 0n);
+    return [
+      name,
+      Object.freeze({
+        kind: 'evaluation' as const,
+        probes: Object.freeze(specs.map((p) => p.id)),
+        specs,
+        sessionCapUsdMicros: smallestPracticalCap(max),
+        campaign: Object.freeze({ batch: i + 1, of: CAMPAIGN_PLANS.length }),
+      }),
+    ];
+  }),
+) as Record<CampaignPlanName, PlanDef>;
+
+/**
  * The named plans (live verification #2, 2026-10-17; ADR 0012 §51): which
  * probes from the list above a session runs, and its own session cap,
  * never above the US$10 ceiling (owner decision 4). `full` is run #1's
@@ -792,6 +913,8 @@ export const PLANS = Object.freeze({
     specs: G9_BINDING_PROBES,
     sessionCapUsdMicros: 1_670_000n,
   }),
+  // The final acceptance campaign's fifteen batches (above; ADR 0012 §76).
+  ...CAMPAIGN_DEFS,
 } satisfies Record<string, PlanDef>);
 
 /**
@@ -805,21 +928,21 @@ export type PlanDef = Readonly<{
   /** An evaluation plan's own probes (scenario probes are not in the list above). */
   specs?: readonly ProbeSpec[];
   sessionCapUsdMicros: bigint;
+  /** A campaign batch's place in the final acceptance campaign (ADR 0012 §76), bound into its hash. */
+  campaign?: Readonly<{ batch: number; of: number }>;
 }>;
 
 export type PlanName = keyof typeof PLANS;
 
 /**
- * The plans the runner may run now: Stage 3's two (ADR 0012 §72), each a
- * separate run with its own approval, budget and report. The owner's
- * approved hash selects which (`sessionPlan`). Stage 1 (`review-fast`, run
- * #8) and Stage 2 (`review-deep`, run #10) stay, with their hashes, for
+ * The plans the runner may run now: the final acceptance campaign's fifteen
+ * batches (ADR 0012 §76), each a separate run with its own approval, budget
+ * and report. The owner's approved hash selects which (`sessionPlan`).
+ * Stages 1–3 (`review-fast`, `review-deep`, `review-sonnet-low`,
+ * `review-haiku`: runs #8, #10, #11 and #12) stay, with their hashes, for
  * their tests and record.
  */
-export const SESSION_PLANS: readonly PlanName[] = Object.freeze([
-  'review-sonnet-low',
-  'review-haiku',
-]);
+export const SESSION_PLANS: readonly PlanName[] = CAMPAIGN_PLANS;
 
 /** The first of them: what a dry run and `buildPlan()` show by default. */
 export const SESSION_PLAN: PlanName = SESSION_PLANS[0]!;
@@ -982,6 +1105,8 @@ export type Plan = Readonly<{
   sessionCapUsdMicros: bigint;
   /** The ceiling for its kind: US$10 for verification, US$175 for an evaluation run. */
   ceilingUsdMicros: bigint;
+  /** A campaign batch's place in its campaign (ADR 0012 §76); null for every other plan. */
+  campaign: Readonly<{ name: string; batch: number; of: number }> | null;
 }>;
 
 /** The plan: its probes with their maxima, the total, and the hash the owner approves. */
@@ -992,6 +1117,10 @@ export function buildPlan(
 ): Plan {
   const { sessionCapUsdMicros } = def;
   const kind = def.kind ?? 'verification';
+  const campaign = def.campaign
+    ? Object.freeze({ name: CAMPAIGN_NAME, batch: def.campaign.batch, of: def.campaign.of })
+    : null;
+  if (campaign && kind !== 'evaluation') throw new Error('a campaign batch is an evaluation plan');
   const ceilingUsdMicros =
     kind === 'evaluation' ? EVALUATION_RUN_CEILING_USD_MICROS : SESSION_CEILING_USD_MICROS;
   if (kind === 'verification' && sessionCapUsdMicros > SESSION_CEILING_USD_MICROS)
@@ -1110,6 +1239,9 @@ export function buildPlan(
     ...(probes.some((p) => p.kind === 'turn' && p.probe?.prefixCheck)
       ? { betas: [THINKING_BINDING_BETA] }
       : {}),
+    // A campaign batch's place in its campaign (ADR 0012 §76), bound into its
+    // hash; absent from every other plan, whose hashes it leaves as they were.
+    ...(campaign ? { campaign } : {}),
   };
   return Object.freeze({
     canonical,
@@ -1123,6 +1255,7 @@ export function buildPlan(
     peakHoldUsdMicros,
     sessionCapUsdMicros,
     ceilingUsdMicros,
+    campaign,
   });
 }
 

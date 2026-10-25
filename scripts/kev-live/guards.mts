@@ -284,6 +284,75 @@ export function assertLedgerCovers(ledger: Ledger, budgetMicros: bigint): void {
 }
 
 // ---------------------------------------------------------------------------
+// The final acceptance campaign (ADR 0012 §76): its batches' ledger rows may
+// be consolidated into one evidence PR at the end, so the committed ledger
+// can lag the campaign. Each batch's dispatch therefore declares what the
+// campaign's earlier batches recorded that the ledger does not hold yet
+// (each run's report and job log give HOME's recorded figure), and the
+// budget is held to the remainder after it. The declaration is in the job's
+// log and the batch's report; the campaign summary (campaign-summary.ts) checks
+// every declaration against the reports afterwards, and the evaluation
+// workspace's own spend limit is the provider-side backstop (rule 10).
+
+/** The dispatch input's variable: the campaign's recorded spend not yet in the ledger. */
+export const CAMPAIGN_SPENT_VARIABLE = 'KEV_LIVE_CAMPAIGN_SPENT_USD';
+
+/**
+ * A campaign batch's declared unrecorded spend, in US dollars to the
+ * micro-dollar ("0", "5.746233"): required for a batch (0 for the first, or
+ * when the ledger holds every earlier batch), and never above the campaign.
+ */
+export function parseCampaignSpentUsd(raw: string | undefined): bigint {
+  if (raw === undefined || !/^(0|[1-9][0-9]{0,2})(\.[0-9]{1,6})?$/.test(raw))
+    throw new LiveRefusal(
+      'ledger',
+      `${CAMPAIGN_SPENT_VARIABLE} must be the campaign's recorded spend not yet in the ledger, in US dollars (0 for the first batch), like 0 or 5.746233.`,
+    );
+  const [whole, frac = ''] = raw.split('.');
+  const micros = BigInt(whole!) * 1_000_000n + BigInt(frac.padEnd(6, '0'));
+  if (micros > CAMPAIGN_USD_MICROS)
+    throw new LiveRefusal(
+      'ledger',
+      `${CAMPAIGN_SPENT_VARIABLE} is above the campaign's US$${usd(CAMPAIGN_USD_MICROS)}.`,
+    );
+  return micros;
+}
+
+/** Only a campaign batch takes a declared spend: anywhere else it is refused, never ignored. */
+export function assertNoCampaignSpent(env: Env): void {
+  if (set(env[CAMPAIGN_SPENT_VARIABLE]))
+    throw new LiveRefusal(
+      'ledger',
+      `${CAMPAIGN_SPENT_VARIABLE} is set, but this plan is not a campaign batch.`,
+    );
+}
+
+/**
+ * A campaign batch runs once (a batch the ledger already records is
+ * refused), and its budget fits what is left after the ledger's recorded
+ * spend and the declared spend not yet in it.
+ */
+export function assertCampaignBatchCovered(
+  ledger: Ledger,
+  planHash: string,
+  budgetMicros: bigint,
+  unrecordedMicros: bigint,
+): bigint {
+  if (ledger.sessions.some((s) => s.planHash === planHash))
+    throw new LiveRefusal(
+      'ledger',
+      'The campaign ledger already records this batch: a batch runs once, and a further run needs a new plan.',
+    );
+  const left = ledgerRemainder(ledger) - unrecordedMicros;
+  if (budgetMicros > left)
+    throw new LiveRefusal(
+      'ledger',
+      `The budget, US$${usd(budgetMicros)}, is above the campaign's remainder after its declared unrecorded spend: US$${usdExact(left < 0n ? 0n : left)}.`,
+    );
+  return left;
+}
+
+// ---------------------------------------------------------------------------
 // HOME's own reservation cap for the run (contract §13.6): the budget as whole
 // NZ dollars (rounded down), so reserveAttempt hard-caps the run in its own
 // ledger, never the household's.

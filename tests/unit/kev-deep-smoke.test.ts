@@ -37,7 +37,7 @@ const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
 
 describe('the deep smoke plan’s design', () => {
   it('one catalogue scenario, on deep, in the owner’s review set (no longer the session plan: the deep review is, ADR 0012 §68)', () => {
-    expect(SESSION_PLAN).toBe('review-sonnet-low');
+    expect(SESSION_PLAN).toBe('campaign-01');
     expect(PLAN_VERSION).toBe(6);
     const plan = buildPlan('deep-smoke');
     expect(plan.kind).toBe('evaluation');
