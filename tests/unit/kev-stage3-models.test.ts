@@ -126,9 +126,10 @@ describe('their financial limits', () => {
       0n,
     );
     const remainder = CAMPAIGN_USD_MICROS - spent;
-    expect(remainder).toBe(191_101_177n);
+    // Runs #13 and #14 recorded since (ADR 0012 §79).
+    expect(remainder).toBe(183_864_203n);
     // Both ran (runs #11 and #12, ADR 0012 §73, §74); either budget, were it approved again, still fits.
-    expect(remainder - 31_670_000n).toBe(159_431_177n);
+    expect(remainder - 31_670_000n).toBe(152_194_203n);
   });
 });
 

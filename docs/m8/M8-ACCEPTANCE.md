@@ -2,6 +2,8 @@
 
 **Status: NOT ACCEPTED.** This record prepares the owner's acceptance decision. It does not make it.
 
+**Goal B (2026-10-26; ADR 0012 §79).** The final campaign is stopped after the Batch 1 retest (run #14). The proposed amended criteria, the disposition of every threshold, the human review and the recommendation (**B, CONDITIONAL ACCEPT**) are in `M8-GOAL-B-CLOSEOUT.md`; §14 below summarises them. Until the owner signs it off, every table here stands as written.
+
 **Checked against:**
 - the contract (`M8-BUILD-CONTRACT.md`): §2.2's per-package acceptance, §5.7's gates, §12.3's gates and targets, §17's acceptance criteria, and §14's and DEPLOY.md §E's operational items;
 - ADR 0012, through §75.
@@ -226,6 +228,8 @@ The scores are the owner's alone: none is generated here.
 | #10 | 39383870066 | 12246826725 | **2026-11-19** | `6c2a060c714a23838e2ffcb96d1f84879a66e63b055a7a4a54142f96fd8b3479` | **19 deep transcripts**; the comparison |
 | #11 | 39569280698 | 12331476222 | 2026-11-20 | `0e2f41a96b73522c6aa4900a47a8db437f19d4c1d6c30fe63b5de4f248376078` | The comparison; 8 deep answers |
 | #12 | 39697753036 | 12392050466 | 2026-11-21 | `5160fb268342e273d611ca7c96825f294ce321333ece1e04b4d64d9132916e32` | The comparison; 11 deep answers |
+| #13 | 40170029169 | 12590074598 | 2026-11-24 | Not read here | Batch 1's first run (withdrawn hash; ADR 0012 §77, §78) |
+| #14 | 40263734225 | 12625991519 | **2026-11-25** | `c783e15bf84638a3f815d98ef9fdf2a1568066ec92987f5618a2fb4e4377dbf4` (from the job log) | **The Batch 1 retest; 19 of the human review's 21 items** (`M8-GOAL-B-CLOSEOUT.md` §6.4) |
 
 Run #9 was refused before any call and has no artifact. The digests are GitHub's own, read from the artifacts API on 2026-10-24.
 
@@ -254,3 +258,28 @@ Run #9 was refused before any call and has no artifact. The digests are GitHub's
 | 29 | Kev in Production on real records | NOT TESTED; after the gate and items 23–28 |
 | 30 | Logs review (Preview after 27, Production after 29) | NOT TESTED |
 | 31 | The trust check on the owner's own phone | NOT TESTED |
+
+## 14. Goal B closeout (proposed; ADR 0012 §79)
+
+**In force:** the owner's decision to adopt Goal B and stop the final campaign after the Batch 1 retest. Batches 2–15 are not dispatched.
+
+**Run #14** (the retest):
+- 49/60 scenarios passed;
+- 0 hard safety breaches observed in 24 safety-class runs;
+- first pass 96.8%, within one regeneration 100%;
+- realistic correctness 20/27 (74.1%, **missed** against ≥ 95%);
+- HOME recorded US$3.602124.
+
+The ledger holds runs #13 and #14; the remainder is US$183.864203.
+
+**Proposed, for the owner's sign-off** (`M8-GOAL-B-CLOSEOUT.md`):
+- **The amendment:** categories A (non-negotiable), B (initial-release quality) and C (carry-forward), with a disposition for every threshold in §3–§5 above.
+- **The recommendation: B, CONDITIONAL ACCEPT,** once five free checks are recorded:
+  1. G16 on Neon;
+  2. the Production boot line;
+  3. G3;
+  4. G18's availability;
+  5. the owner's bounded human review (21 items).
+- **No new live campaign.** One small Preview check (about 50 turns, maximum US$10) is proposed for before real-family activation. It is not authorised.
+
+**Until the sign-off,** the status above stays **NOT ACCEPTED** and every table stands as written.

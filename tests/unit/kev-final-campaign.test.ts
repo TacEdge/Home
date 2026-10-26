@@ -47,7 +47,11 @@ import { runMode } from '../../scripts/kev-live/runner';
 // after its declared unrecorded spend; and one summary over every batch's
 // report. No network, no key, no database: nothing here reaches a provider.
 
-const LEDGER = readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8');
+// The ledger as it stood before the campaign (runs #1–#12). Runs #13 and
+// #14 are recorded since (ADR 0012 §79); these tests hold the campaign's
+// mechanics to the remainder it was designed and approved against.
+const COMMITTED = JSON.parse(readFileSync('docs/m8/M8-LIVE-LEDGER.json', 'utf8')) as Ledger;
+const LEDGER = JSON.stringify({ ...COMMITTED, sessions: COMMITTED.sessions.slice(0, 12) });
 const HASHES = [
   'e43e15b0518e9e3438b7c752999d5c4ec2ebfaf437bb1533e013f1c38ef838f5',
   'f1ff42692aed6f4eab821d28cbe25740e0285095c5e52475eec85dbaa847211e',
@@ -242,6 +246,21 @@ describe('each batch’s money', () => {
         spent += (perTurn(p) * scale) / 10n;
       }
     }
+  });
+});
+
+describe('the committed ledger after the campaign stopped (Goal B, ADR 0012 §79)', () => {
+  it('holds runs #13 and #14 after the twelve before; Batch 1 is recorded, so it can never be dispatched again', () => {
+    expect(COMMITTED.sessions.slice(0, 12)).toEqual(JSON.parse(LEDGER).sessions);
+    expect(COMMITTED.sessions.slice(12).map((s) => [s.planHash, s.recordedUsdMicros])).toEqual([
+      ['2b99538f340fb8e2d58cf25736019dc39b7be580bec44ef6d084b5e030e8ae58', '3634850'],
+      [HASHES[0], '3602124'],
+    ]);
+    const committed = parseLedger(JSON.stringify(COMMITTED));
+    expect(ledgerRemainder(committed)).toBe(183_864_203n);
+    expect(() => assertCampaignBatchCovered(committed, HASHES[0]!, 95_000_000n, 0n)).toThrow(
+      /runs once/,
+    );
   });
 });
 
