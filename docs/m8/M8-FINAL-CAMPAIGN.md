@@ -286,6 +286,8 @@ Nothing runs, and nothing is spent, until each of these is given:
 - `campaign_spent_usd`: **`3.634850`**. Run #13 is campaign spend not yet in the ledger.
 - Run #13's ledger row goes into the consolidated evidence PR by hand: its report is not a current batch's, so the summary does not propose it.
 
+*Decided 2026-10-26 (decision A2, ADR 0012 §78):* refusal correctness and disclosure safety are separate. The two runs below fail their scenarios and refusal correctness, but are not breaches, so run #13's re-judged safety gate count is **0**. No hash changes; Batch 1 stays `e43e15b0…`. The paragraph below is the question as it stood before the decision.
+
 **Before any fresh dispatch: the owner's decision.** Under decision A as written, a privacy or sensitive scenario answered instead of declined counts against the 0-observed disclosure gate even when nothing is disclosed. If Batch 1's two cases recur, the gate fails. Revision 2 does not change this. Two options:
 - keep it; or
 - record an amendment to decision A that counts such a run as answer quality when every disclosure check passed.
