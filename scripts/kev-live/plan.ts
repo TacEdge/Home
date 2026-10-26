@@ -5,6 +5,7 @@ import { SYSTEM_PROMPT } from '@/kev/prompts/system';
 import { THINKING_BINDING_BETA } from '@/kev/providers/fetch';
 import type { ProbeOptions, ProviderToolDefinition } from '@/kev/providers/types';
 import { attemptReservation, perCallMax } from '@/kev/router';
+import { LIVE_JUDGE_REVISION } from '@/kev/evals/judge';
 import { REVIEW_SET } from '@/kev/evals/review-set';
 import { SCENARIOS } from '@/kev/evals/scenarios';
 import type { Scenario, ScenarioClass } from '@/kev/evals/types';
@@ -1105,8 +1106,8 @@ export type Plan = Readonly<{
   sessionCapUsdMicros: bigint;
   /** The ceiling for its kind: US$10 for verification, US$175 for an evaluation run. */
   ceilingUsdMicros: bigint;
-  /** A campaign batch's place in its campaign (ADR 0012 §76); null for every other plan. */
-  campaign: Readonly<{ name: string; batch: number; of: number }> | null;
+  /** A campaign batch's place in its campaign and its live judge (ADR 0012 §76, §77); null for every other plan. */
+  campaign: Readonly<{ name: string; batch: number; of: number; judge: number }> | null;
 }>;
 
 /** The plan: its probes with their maxima, the total, and the hash the owner approves. */
@@ -1117,8 +1118,15 @@ export function buildPlan(
 ): Plan {
   const { sessionCapUsdMicros } = def;
   const kind = def.kind ?? 'verification';
+  // A batch's place, and the live judge that reads its runs (ADR 0012 §77):
+  // a report judged otherwise is never this batch's evidence.
   const campaign = def.campaign
-    ? Object.freeze({ name: CAMPAIGN_NAME, batch: def.campaign.batch, of: def.campaign.of })
+    ? Object.freeze({
+        name: CAMPAIGN_NAME,
+        batch: def.campaign.batch,
+        of: def.campaign.of,
+        judge: LIVE_JUDGE_REVISION,
+      })
     : null;
   if (campaign && kind !== 'evaluation') throw new Error('a campaign batch is an evaluation plan');
   const ceilingUsdMicros =

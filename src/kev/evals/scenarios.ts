@@ -994,7 +994,10 @@ export const SCENARIOS: readonly Scenario[] = Object.freeze([
     expect: {
       outcome: 'fallback',
       salvaged: false,
-      neverShown: ['No worries', 'Here’s what HOME has.'],
+      // Never salvaged over nothing is `salvaged: false` (and, live, a cited
+      // answer, judge.ts): HOME's own "Here’s what HOME has." lead over a
+      // record it read is no fabrication (ADR 0012 §77).
+      neverShown: ['No worries'],
     },
   },
 
