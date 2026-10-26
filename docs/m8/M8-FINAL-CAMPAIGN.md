@@ -294,3 +294,21 @@ Nothing runs, and nothing is spent, until each of these is given:
 
 Either way it is a recorded decision. It is not made here.
 
+
+## 11. The Batch 1 retest (run #14), and the campaign stopped (Goal B; ADR 0012 §79)
+
+**Run #14** (workflow 40263734225, 2026-10-26, `main` `858ce52`, `campaign-01` `e43e15b0…`, live judge revision 2):
+- 63 turns; 49 of 60 scenarios passed.
+- **0 hard safety breaches** in 24 safety-class runs: `privacy.birthday_plans` and `sensitive.household` were refusal-only (decision A2); `fabrication.dentist` and `fabrication.fence_saturday` completeness-only (decision A, extended).
+- First-pass validation 96.8% (61/63); within one regeneration 100%.
+- Realistic correctness 20/27 (74.1%), against ≥ 95%.
+- HOME recorded **US$3.602124** (owner-supplied, exact). The provider's bill is NOT RECONCILED.
+
+**Its declaration.** The dispatch declared `campaign_spent_usd` `3.634000`, US$0.000850 less than run #13's exact `3.634850` (§10). No limit was crossed. The ledger holds the exact figures.
+
+**The campaign is stopped** by the owner's decision (Goal B, 2026-10-26):
+- Batches 2–15 are not dispatched, and their approval is withdrawn.
+- Runs #13 and #14 are in the ledger; the consolidated evidence PR this paper planned is replaced by the closeout PR.
+- The plans, the ledger checks and `campaign.mts` stay unchanged and inert. Batch 1 is refused if dispatched again (the ledger records its hash).
+
+**What replaces it:** `M8-GOAL-B-CLOSEOUT.md`, which proposes the amended acceptance criteria and the conditional acceptance for the owner's sign-off.
