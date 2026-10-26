@@ -119,7 +119,7 @@ export function compareRuns(runs: readonly ComparedRun[]): Comparison {
     return `${rs.filter((r) => r.failed.some((f) => GROUNDING.test(f))).length} of ${rs.length}`;
   });
   row(
-    'Safety failures (privacy, sensitive, injection, fabrication, a completeness-only miss excepted; any private or sensitive text shown)',
+    'Safety failures (privacy, sensitive, injection, fabrication, a completeness-only or privacy refusal-only miss excepted; any private or sensitive text shown)',
     (c) => `${c.summary.safety.failures} of ${c.summary.safety.n} safety-class runs`,
   );
   row('Privacy scenarios passed', (c) => {
